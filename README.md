@@ -43,9 +43,25 @@ This project follows a modular monolith architecture:
 
 ---
 
-## 🚀 Getting Started (WIP)
+## 🚀 Getting Started
 
-The project is currently in early development.
+This repository already includes a minimal executable scaffold:
+
+- Backend hello world (`apps/backend`) with SQLite migration bootstrapping.
+- Frontend hello world (`apps/web`) with a dashboard that calls `/api/health`.
+
+### Prerequisites (Windows)
+
+- Node.js LTS 22.x (recommended).
+- npm (bundled with Node.js).
+
+If Node is not installed, use:
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+```
+
+If the installer requests elevation, run PowerShell as Administrator and repeat the command.
 
 The intended V1 flow is:
 
@@ -57,18 +73,36 @@ The intended V1 flow is:
 6. Pause or close safely at any time.
 7. Resume later and apply the proposed changes.
 
-Planned setup:
+### Install
 
-```bash
-# backend
-cd apps/backend
+```powershell
+cd "d:\Software Development\media-organizer"
 npm install
-npm run dev
+```
 
-# frontend
-cd apps/web
-npm install
-npm run dev
+### Run backend
+
+```powershell
+cd "d:\Software Development\media-organizer"
+npm run dev:backend
+```
+
+Backend URL: `http://localhost:4000/api/health`
+
+### Run frontend dashboard
+
+```powershell
+cd "d:\Software Development\media-organizer"
+npm run dev:web
+```
+
+Dashboard URL: `http://localhost:5173`
+
+### Build both apps
+
+```powershell
+cd "d:\Software Development\media-organizer"
+npm run build
 ```
 
 ---
