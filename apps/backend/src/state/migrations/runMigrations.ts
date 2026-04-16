@@ -6,7 +6,7 @@ import { getDb } from '../db.js';
 const currentFile = fileURLToPath(import.meta.url);
 const currentDir = path.dirname(currentFile);
 
-const migrationsDir = currentDir;
+const migrationsDir = process.env.MEDIA_ORGANIZER_MIGRATIONS_DIR ?? currentDir;
 
 const ensureMigrationsTable = () => {
   const db = getDb();

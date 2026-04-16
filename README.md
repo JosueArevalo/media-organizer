@@ -134,6 +134,22 @@ cd <project-root>
 npm run build
 ```
 
+### Run tests
+
+Current automated tests cover the backend state contract and migration bootstrap.
+
+```powershell
+cd <project-root>
+npm test
+```
+
+If you want to run the backend workspace test command directly:
+
+```powershell
+cd <project-root>
+npm run test --workspace apps/backend
+```
+
 ### Verify hello world (non-interactive)
 
 With backend and frontend running, validate end-to-end in one command:
