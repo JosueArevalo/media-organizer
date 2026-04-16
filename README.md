@@ -102,6 +102,10 @@ The long-term goal is to build a system that can:
 - `docs/STATE_CONTRACT.md` → V1 persistence contract (SQLite schema, states, resume rules)
 - `AGENTS.md` → Instructions for AI agents
 
+## 🧩 Agent Skills
+
+- `.github/skills/state-contract-implementation/SKILL.md` → Workflow for implementing state and resume logic aligned with the V1 contract
+
 ---
 
 ## ⚠️ Status
