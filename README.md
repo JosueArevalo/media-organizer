@@ -98,11 +98,29 @@ npm run dev:web
 
 Dashboard URL: `http://localhost:5173`
 
+### Run both with one command
+
+```powershell
+cd "d:\Software Development\media-organizer"
+npm run dev
+```
+
+This starts backend and frontend together using a cross-platform Node script.
+
 ### Build both apps
 
 ```powershell
 cd "d:\Software Development\media-organizer"
 npm run build
+```
+
+### Verify hello world (non-interactive)
+
+With backend and frontend running, validate end-to-end in one command:
+
+```powershell
+cd "d:\Software Development\media-organizer"
+npm run verify:hello
 ```
 
 ---
