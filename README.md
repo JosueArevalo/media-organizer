@@ -76,14 +76,14 @@ The intended V1 flow is:
 ### Install
 
 ```powershell
-cd "d:\Software Development\media-organizer"
+cd <project-root>
 npm install
 ```
 
 ### Run backend
 
 ```powershell
-cd "d:\Software Development\media-organizer"
+cd <project-root>
 npm run dev:backend
 ```
 
@@ -92,7 +92,7 @@ Backend URL: `http://localhost:4000/api/health`
 ### Run frontend dashboard
 
 ```powershell
-cd "d:\Software Development\media-organizer"
+cd <project-root>
 npm run dev:web
 ```
 
@@ -101,16 +101,27 @@ Dashboard URL: `http://localhost:5173`
 ### Run both with one command
 
 ```powershell
-cd "d:\Software Development\media-organizer"
+cd <project-root>
 npm run dev
 ```
 
 This starts backend and frontend together using a cross-platform Node script.
 
+### Stop development servers
+
+The development servers run in the terminal session while the command is active.
+
+To stop them:
+
+- Press `Ctrl+C` in the terminal where `npm run dev`, `npm run dev:backend`, or `npm run dev:web` is running.
+- Or close the terminal tab/session.
+
+No extra stop script is required for the current scaffold.
+
 ### Build both apps
 
 ```powershell
-cd "d:\Software Development\media-organizer"
+cd <project-root>
 npm run build
 ```
 
@@ -119,7 +130,7 @@ npm run build
 With backend and frontend running, validate end-to-end in one command:
 
 ```powershell
-cd "d:\Software Development\media-organizer"
+cd <project-root>
 npm run verify:hello
 ```
 
@@ -162,7 +173,7 @@ The long-term goal is to build a system that can:
 
 ## ⚠️ Status
 
-This is a personal project under active development.
+This repository is under active development.
 
 The focus is on learning, experimentation and building a solid architecture.
 The first usable version will be a local MVP with preview-driven workflows and resumable local state.
