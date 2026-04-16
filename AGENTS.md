@@ -25,7 +25,9 @@ This project follows a modular monolith architecture.
 
 Main flow:
 
-Frontend → Backend → Pipeline → Filesystem / Tools
+```text
+Frontend -> Backend -> Pipeline -> Filesystem / Tools
+```
 
 Do not break this flow.
 

@@ -4,9 +4,11 @@
 
 ### Structure
 
-- components/ → reusable UI components
-- pages/ → screens
-- services/ → API calls
+```text
+components/ -> reusable UI components
+pages/ -> screens
+services/ -> API calls
+```
 
 ---
 

@@ -21,11 +21,13 @@ It processes media step by step.
 
 ### Example Steps
 
-- ImportStep
-- CompressImagesStep
-- CompressVideosStep
-- GroupByDateStep
-- OrganizeStep
+```text
+ImportStep
+CompressImagesStep
+CompressVideosStep
+GroupByDateStep
+OrganizeStep
+```
 
 ---
 

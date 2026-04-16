@@ -21,7 +21,9 @@
 
 ### Example Flow
 
-Controller → Service → Pipeline → Filesystem
+```text
+Controller -> Service -> Pipeline -> Filesystem
+```
 
 ---
 

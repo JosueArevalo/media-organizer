@@ -10,13 +10,12 @@ The system is built as a modular monolith with a clear separation of concerns be
 
 ## 2. High-Level Architecture
 
+```text
 Frontend (React)
-    ↓
-Backend (Node.js + TypeScript)
-    ↓
-Pipeline Engine (Core logic)
-    ↓
-Filesystem + External Tools (mozjpeg, HandBrake)
+    -> Backend (Node.js + TypeScript)
+    -> Pipeline Engine (Core logic)
+    -> Filesystem + External Tools (mozjpeg, HandBrake)
+```
 
 ---
 
@@ -32,6 +31,7 @@ Filesystem + External Tools (mozjpeg, HandBrake)
 
 ## 4. Project Structure
 
+```text
 media-organizer/
 │
 ├─ README.md
@@ -82,6 +82,7 @@ media-organizer/
 │       └─ compress_videos.py
 │
 └─ .gitignore
+```
 
 ---
 
@@ -110,11 +111,13 @@ A pipeline is a sequence of steps that process media files.
 
 Example pipeline:
 
-- ImportStep
-- CompressImagesStep
-- CompressVideosStep
-- GroupByDateStep
-- OrganizeStep
+```text
+ImportStep
+CompressImagesStep
+CompressVideosStep
+GroupByDateStep
+OrganizeStep
+```
 
 Each step:
 
@@ -124,8 +127,10 @@ Each step:
 
 Conceptual interface:
 
+```text
 PipelineStep:
     execute(input) -> output
+```
 
 The pipeline engine executes steps sequentially.
 
