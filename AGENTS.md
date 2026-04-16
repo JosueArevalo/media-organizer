@@ -43,6 +43,7 @@ For details, read:
 - Use services for orchestration
 - Use the pipeline for media processing logic
 - Keep API layer thin
+- Build resumable processing jobs for long-running tasks
 
 More details:
 
@@ -69,6 +70,7 @@ More details:
 - Each step must have a single responsibility
 - Steps must be composable and independent
 - Avoid side effects when possible
+- Keep steps resume-safe and idempotent when possible
 
 More details:
 

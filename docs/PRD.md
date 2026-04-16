@@ -6,7 +6,7 @@ Media Organizer is a local tool designed to simplify the management of personal 
 
 Users often have large amounts of media stored on their phones. Organizing, compressing and backing up this media is a repetitive and time-consuming task.
 
-This project aims to automate most of this process.
+This project aims to automate most of this process while keeping the user in control through a local dashboard.
 
 ---
 
@@ -36,6 +36,9 @@ This process:
 - Create a consistent folder structure
 - Improve workflow efficiency
 - Provide a simple local interface
+- Let the user review a preview before applying changes
+- Keep V1 simple, local and testable
+- Support long-running workflows that can be paused and resumed safely
 
 ---
 
@@ -45,6 +48,8 @@ This process:
 - Integration with cloud providers (Google Photos API)
 - Multi-user support
 - Mobile app
+- Sync with Synology or other NAS platforms
+- Advanced analytics and reporting
 
 ---
 
@@ -60,8 +65,9 @@ This process:
 
 ### 6.1 Media Import
 
-- Load media from a local folder
+- Load media from a user-selected local folder, including nested subfolders
 - Support images and videos
+- Scan the source without mutating files during preview
 
 ---
 
@@ -69,13 +75,24 @@ This process:
 
 - Compress images using mozjpeg
 - Compress videos using HandBrake CLI
+- Allow the user to select items before running compression
+- Mark already processed items through persistent local state
+- Provide smart selectors for bulk actions (all, none, only large files, exclude WhatsApp/screenshots)
 
 ---
 
-### 6.3 Organization
+### 6.3 Media Classification
 
-- Group media by date (basic rule)
-- Create folders using a naming convention:
+- Classify files with simple heuristics: camera, WhatsApp, screenshot, unknown
+- Show classification badges in the dashboard to guide user decisions
+- Keep classification editable by the user when heuristics are wrong
+
+---
+
+### 6.4 Organization
+
+- Group media by date and filename patterns as a first pass
+- Create folder proposals using a naming convention:
 
 Example:
 ```
@@ -87,12 +104,23 @@ If no event is detected:
 YYYY - Misc
 ```
 
+- Allow the user to move media between proposed folders before applying
+
 ---
 
-### 6.4 Output
+### 6.5 Output
 
-- Generate organized folders
-- Prepare files for upload and backup
+- Generate organized folders in a user-selected output directory
+- Prepare files for backup or later export
+
+---
+
+### 6.6 State Tracking and Resume
+
+- Persist processing jobs locally so the user can stop and resume later
+- Store scans, selections, classification, grouping edits and processing status
+- Use a minimal local SQLite database for V1 state
+- Optionally export JSON manifests for debugging or auditing
 
 ---
 
@@ -111,6 +139,7 @@ YYYY - Misc
 - Must run locally (no cloud dependency)
 - Should work with large amounts of files
 - Must be simple to use
+- Must tolerate interruptions (app close, restart, or partial execution)
 
 ---
 
@@ -119,6 +148,9 @@ YYYY - Misc
 - Reduce time spent organizing media
 - Reduce manual steps
 - Provide consistent output structure
+- Let the user understand and control each step before it is applied
+- Keep the system easy to extend without adding unnecessary complexity
+- Allow the user to resume a large job without losing decisions or progress
 
 ---
 
@@ -126,4 +158,4 @@ YYYY - Misc
 
 - How to detect events automatically?
 - How to handle duplicate files?
-- How to manage processing state?
+- Which heuristics should be enabled by default for source classification?

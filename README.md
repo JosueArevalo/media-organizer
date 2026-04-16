@@ -4,6 +4,9 @@ Media Organizer is a local-first tool to help organize, compress and manage pers
 
 The goal of this project is to automate a manual and time-consuming process:
 - exporting media from a mobile phone
+- selecting source and destination folders locally
+- scanning mixed photo and video folders
+- reviewing a preview before applying changes
 - compressing images and videos
 - organizing files into structured folders
 - preparing content for backup (Google Photos, NAS, etc.)
@@ -12,9 +15,16 @@ The goal of this project is to automate a manual and time-consuming process:
 
 ## ✨ Features (Planned)
 
+- Select input and output folders from a local dashboard
+- Scan nested folders containing photos and videos
+- Preview media before applying changes
+- Resume work across sessions without losing progress
 - Compress images using mozjpeg
 - Compress videos using HandBrake
-- Organize media into folders by date
+- Propose folder grouping by date and filename patterns
+- Let the user adjust proposed groupings before applying them
+- Detect probable media origin (camera, WhatsApp, screenshot)
+- Support smart bulk actions (select all, select none, select large files, exclude WhatsApp/screenshots)
 - Generate consistent folder names
 - Local web interface to manage the process
 - Optional AI-based grouping (future)
@@ -25,8 +35,8 @@ The goal of this project is to automate a manual and time-consuming process:
 
 This project follows a modular monolith architecture:
 
-- `apps/backend` → Local API (Node.js + TypeScript)
-- `apps/web` → Web UI (React)
+- `apps/backend` → Local API and filesystem orchestration (Node.js + TypeScript)
+- `apps/web` → Local dashboard UI (React)
 - `packages/` → Core logic (pipeline, filesystem, metadata, etc.)
 - `scripts/` → Python scripts for media processing
 - `docs/` → Project documentation (PRD, architecture, etc.)
@@ -36,6 +46,16 @@ This project follows a modular monolith architecture:
 ## 🚀 Getting Started (WIP)
 
 The project is currently in early development.
+
+The intended V1 flow is:
+
+1. Open the local dashboard.
+2. Select input and output folders.
+3. Create or resume a processing job.
+4. Scan and preview the media.
+5. Run compression or grouping steps.
+6. Pause or close safely at any time.
+7. Resume later and apply the proposed changes.
 
 Planned setup:
 
@@ -88,3 +108,4 @@ The long-term goal is to build a system that can:
 This is a personal project under active development.
 
 The focus is on learning, experimentation and building a solid architecture.
+The first usable version will be a local MVP with preview-driven workflows and resumable local state.

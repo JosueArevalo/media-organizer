@@ -26,6 +26,10 @@ Frontend (React)
 - Separation of concerns
 - Pipeline-based processing (core concept)
 - Avoid over-engineering in V1
+- User-selected input and output folders
+- Preview-first workflows before file mutations
+- Resumable workflows for long-running sessions
+- Minimal SQLite persistence for V1 state
 
 ---
 
@@ -94,12 +98,22 @@ The backend is responsible for:
 - Orchestrating the pipeline
 - Executing scripts and external tools
 - Managing filesystem operations
+- Persisting resumable job state and manifests
 
 ### Layers
 
 - API Layer → HTTP endpoints
 - Service Layer → business logic and orchestration
 - Pipeline Layer → processing steps execution
+
+### V1 Workflow
+
+- Receive a source folder and a destination folder from the dashboard
+- Create a processing job that can be resumed later
+- Scan nested media files without modifying them
+- Build preview data for compression and grouping
+- Classify files with basic source heuristics (camera, WhatsApp, screenshot, unknown)
+- Apply user-approved actions through the pipeline
 
 ---
 
@@ -134,6 +148,9 @@ PipelineStep:
 
 The pipeline engine executes steps sequentially.
 
+For V1, the pipeline should support preview-only steps and apply steps separately so the UI can inspect results before writes happen.
+Pipeline steps should be idempotent where possible and record checkpoints per file to support resume behavior.
+
 ---
 
 ## 7. Core Modules
@@ -152,6 +169,12 @@ Groups media files by rules (date, event, etc.).
 ### filesystem
 Handles file system operations (read, write, move).
 
+### state
+Stores job state, checkpoints, selections and processed items using a minimal SQLite database.
+
+### classification
+Provides heuristics to detect probable source type (camera, WhatsApp, screenshot, unknown).
+
 ---
 
 ## 8. Frontend Architecture
@@ -160,15 +183,21 @@ The frontend is a React application.
 
 Responsibilities:
 
-- Select folders and files
+- Let the user select input and output folders
+- Display scan results, previews and processing state
+- Show source-type badges and status badges per file
 - Trigger backend operations
 - Display progress and results
 
 Structure:
 
 - components → reusable UI elements
-- pages → main screens
+- pages → dashboard sections such as import, photos, video and grouping
 - services → API communication with backend
+
+The dashboard should provide bulk actions such as select all, select none, select only large files and exclude likely WhatsApp/screenshot files.
+
+The UI should be a single local dashboard with sections, not multiple independent web apps.
 
 ---
 
@@ -189,6 +218,7 @@ These tools are invoked from the backend or scripts.
 - Face detection
 - Persistent state (database)
 - Background processing (queue system)
+- Cloud integrations such as Google Photos and Synology
 
 ---
 
