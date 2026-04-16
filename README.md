@@ -99,6 +99,7 @@ The long-term goal is to build a system that can:
 
 - `docs/PRD.md` → Product requirements
 - `docs/ARCHITECTURE.md` → System design
+- `docs/STATE_CONTRACT.md` → V1 persistence contract (SQLite schema, states, resume rules)
 - `AGENTS.md` → Instructions for AI agents
 
 ---

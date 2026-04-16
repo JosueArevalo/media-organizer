@@ -172,6 +172,10 @@ Handles file system operations (read, write, move).
 ### state
 Stores job state, checkpoints, selections and processed items using a minimal SQLite database.
 
+State contract reference:
+
+- `docs/STATE_CONTRACT.md`
+
 ### classification
 Provides heuristics to detect probable source type (camera, WhatsApp, screenshot, unknown).
 
@@ -227,3 +231,7 @@ These tools are invoked from the backend or scripts.
 The system is designed to be simple but extensible.
 
 The most important part of the architecture is the pipeline engine, which allows flexible and scalable media processing.
+
+For V1 state semantics and persistence rules, use:
+
+- `docs/STATE_CONTRACT.md`

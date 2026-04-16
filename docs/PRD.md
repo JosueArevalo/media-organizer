@@ -122,6 +122,10 @@ YYYY - Misc
 - Use a minimal local SQLite database for V1 state
 - Optionally export JSON manifests for debugging or auditing
 
+Detailed contract:
+
+- See `docs/STATE_CONTRACT.md` for schema, lifecycle, transitions and resume rules.
+
 ---
 
 ## 7. Future Features
