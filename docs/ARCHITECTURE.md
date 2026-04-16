@@ -51,6 +51,11 @@ media-organizer/
 │   │   │   ├─ api/
 │   │   │   ├─ services/
 │   │   │   ├─ pipeline/
+│   │   │   ├─ state/
+│   │   │   │   ├─ migrations/
+│   │   │   │   │   └─ 001_initial_state.sql
+│   │   │   │   └─ dto/
+│   │   │   │       └─ state.types.ts
 │   │   │   └─ index.ts
 │   │   ├─ tests/
 │   │   ├─ package.json

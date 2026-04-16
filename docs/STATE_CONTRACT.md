@@ -233,3 +233,14 @@ These operations must be supported by the backend service layer:
 - Complex migration tooling.
 
 Schema migrations may be simple versioned SQL scripts.
+
+---
+
+## 12. Reference Implementation (Current)
+
+Current V1 state artifacts in this repository:
+
+- `apps/backend/src/state/migrations/001_initial_state.sql`
+- `apps/backend/src/state/dto/state.types.ts`
+
+These files are the implementation baseline for this contract and should remain aligned with the schema and enums defined above.
