@@ -1,6 +1,17 @@
 # Media Organizer
 
-Media Organizer is a local-first tool to help organize, compress and manage personal photos and videos.
+Media Organizer is a local-first application for organizing, compressing and managing personal photos and videos.
+
+It is designed for large, periodic imports from mobile devices into a local workflow that stays under the user's control.
+
+## What It Is
+
+This repository contains:
+
+- a local backend for filesystem orchestration and resumable processing jobs
+- a local dashboard for scanning, previewing and applying actions
+- a state contract for V1 persistence and resume behavior
+- shared documentation for product, architecture and agent behavior
 
 The goal of this project is to automate a manual and time-consuming process:
 - exporting media from a mobile phone
@@ -13,7 +24,7 @@ The goal of this project is to automate a manual and time-consuming process:
 
 ---
 
-## ✨ Features (Planned)
+## Planned Capabilities
 
 - Select input and output folders from a local dashboard
 - Scan nested folders containing photos and videos
@@ -29,28 +40,26 @@ The goal of this project is to automate a manual and time-consuming process:
 - Local web interface to manage the process
 - Optional AI-based grouping (future)
 
----
+## Architecture Snapshot
 
-## 🏗️ Project Structure
+The project follows a modular monolith structure:
 
-This project follows a modular monolith architecture:
-
-- `apps/backend` → Local API and filesystem orchestration (Node.js + TypeScript)
-- `apps/web` → Local dashboard UI (React)
-- `packages/` → Core logic (pipeline, filesystem, metadata, etc.)
-- `scripts/` → Python scripts for media processing
-- `docs/` → Project documentation (PRD, architecture, etc.)
+- `apps/backend` → local API and filesystem orchestration
+- `apps/web` → local dashboard UI
+- `packages/` → core logic and pipeline building blocks
+- `scripts/` → helper scripts for media processing and verification
+- `docs/` → product, architecture and state contract documentation
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 This repository already includes a minimal executable scaffold:
 
 - Backend hello world (`apps/backend`) with SQLite migration bootstrapping.
 - Frontend hello world (`apps/web`) with a dashboard that calls `/api/health`.
 
-### Prerequisites (Windows)
+### Prerequisites
 
 - Node.js LTS 22.x (recommended).
 - npm (bundled with Node.js).
@@ -134,9 +143,7 @@ cd <project-root>
 npm run verify:hello
 ```
 
----
-
-## 📦 Requirements
+## Requirements
 
 The project relies on external tools:
 
@@ -147,7 +154,7 @@ These tools must be installed on your system.
 
 ---
 
-## 🧠 Vision
+## Vision
 
 The long-term goal is to build a system that can:
 
@@ -158,20 +165,25 @@ The long-term goal is to build a system that can:
 
 ---
 
-## 📄 Documentation
+## Documentation
 
 - `docs/PRD.md` → Product requirements
 - `docs/ARCHITECTURE.md` → System design
 - `docs/STATE_CONTRACT.md` → V1 persistence contract (SQLite schema, states, resume rules)
 - `AGENTS.md` → Instructions for AI agents
+- `copilot-instructions.md` → PR review guidance for Copilot
 
-## 🧩 Agent Skills
+## Agent Skills
 
 - `.github/skills/state-contract-implementation/SKILL.md` → Workflow for implementing state and resume logic aligned with the V1 contract
 
 ---
 
-## ⚠️ Status
+## Contributing
+
+If you open a pull request, please keep changes aligned with the documentation and the V1 state contract.
+
+## Status
 
 This repository is under active development.
 
