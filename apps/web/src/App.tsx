@@ -1,59 +1,26 @@
-import { useEffect, useState } from 'react';
-
-type HealthResponse = {
-  status: string;
-  service: string;
-  time: string;
-  dbPath: string;
-  appliedMigrations: string[];
-};
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AppShell } from './components/AppShell';
+import { CompressionPage } from './pages/CompressionPage';
+import { DashboardPage } from './pages/DashboardPage';
+import { GroupingPage } from './pages/GroupingPage';
+import { ImportPage } from './pages/ImportPage';
+import { JobsPage } from './pages/JobsPage';
+import { PreviewPage } from './pages/PreviewPage';
 
 export const App = () => {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error(`Backend responded with ${res.status}`);
-        }
-        return (await res.json()) as HealthResponse;
-      })
-      .then((data) => setHealth(data))
-      .catch((err: Error) => setError(err.message));
-  }, []);
-
   return (
-    <main className="page">
-      <section className="panel">
-        <h1>Media Organizer - Hello World</h1>
-        <p>This dashboard is running and connected to the local backend.</p>
-
-        {error && <p className="error">Backend error: {error}</p>}
-
-        {!error && !health && <p>Checking backend health...</p>}
-
-        {health && (
-          <div className="status">
-            <p>
-              <strong>Service:</strong> {health.service}
-            </p>
-            <p>
-              <strong>Status:</strong> {health.status}
-            </p>
-            <p>
-              <strong>Time:</strong> {health.time}
-            </p>
-            <p>
-              <strong>DB Path:</strong> {health.dbPath}
-            </p>
-            <p>
-              <strong>Applied migrations:</strong> {health.appliedMigrations.length > 0 ? health.appliedMigrations.join(', ') : 'none in this run'}
-            </p>
-          </div>
-        )}
-      </section>
-    </main>
+    <BrowserRouter>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/import" element={<ImportPage />} />
+          <Route path="/preview" element={<PreviewPage />} />
+          <Route path="/compression" element={<CompressionPage />} />
+          <Route path="/grouping" element={<GroupingPage />} />
+          <Route path="/jobs" element={<JobsPage />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   );
 };
