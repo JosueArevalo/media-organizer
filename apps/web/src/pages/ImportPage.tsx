@@ -1,7 +1,9 @@
 import { FolderPickerCard } from '../components/FolderPickerCard';
 import { useFolderSelections } from '../hooks/useFolderSelections';
+import { useNavigate } from 'react-router-dom';
 
 export const ImportPage = () => {
+  const navigate = useNavigate();
   const {
     sourceSelection,
     destinationSelection,
@@ -12,6 +14,16 @@ export const ImportPage = () => {
     clearSourceFolder,
     clearDestinationFolder
   } = useFolderSelections();
+
+  const canContinue = Boolean(sourceSelection && destinationSelection);
+
+  const handleContinue = () => {
+    if (!canContinue) {
+      return;
+    }
+
+    navigate('/preview');
+  };
 
   return (
     <div className="page-stack">
@@ -65,10 +77,7 @@ export const ImportPage = () => {
       </div>
 
       <div className="page-footer-actions">
-        <button className="btn btn-secondary" type="button">
-          ← Back
-        </button>
-        <button className="btn btn-primary" type="button">
+        <button className="btn btn-primary" type="button" onClick={handleContinue} disabled={!canContinue}>
           Continue to Preview →
         </button>
       </div>

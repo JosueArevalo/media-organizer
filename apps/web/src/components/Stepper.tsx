@@ -20,22 +20,31 @@ export const Stepper = ({ steps }: StepperProps) => {
     <nav className="stepper" aria-label="Workflow steps">
       {steps.map((step, index) => {
         const isActive = location.pathname === step.path;
+        const className = `step step-${step.state} ${isActive ? 'step-active-page' : ''}`;
+
+        const content = (
+          <>
+            <div className="step-circle">
+              <span className="step-number">{step.number}</span>
+            </div>
+            <div className="step-text">
+              <p className="step-label">{step.label}</p>
+              <p className="step-description">{step.description}</p>
+            </div>
+          </>
+        );
 
         return (
           <div key={step.id}>
-            <Link
-              to={step.path}
-              className={`step step-${step.state} ${isActive ? 'step-active-page' : ''}`}
-              aria-current={isActive ? 'page' : undefined}
-            >
-              <div className="step-circle">
-                <span className="step-number">{step.number}</span>
+            {step.state === 'locked' ? (
+              <div className={className} aria-disabled="true" title="Complete previous steps to unlock">
+                {content}
               </div>
-              <div className="step-text">
-                <p className="step-label">{step.label}</p>
-                <p className="step-description">{step.description}</p>
-              </div>
-            </Link>
+            ) : (
+              <Link to={step.path} className={className} aria-current={isActive ? 'page' : undefined}>
+                {content}
+              </Link>
+            )}
 
             {index < steps.length - 1 && <div className="step-connector" />}
           </div>

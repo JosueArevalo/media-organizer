@@ -419,6 +419,13 @@ body {
   transform: translateY(0);
 }
 
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .btn-primary {
   background: var(--accent);
   color: #ffffff;

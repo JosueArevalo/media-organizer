@@ -1,45 +1,48 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Stepper, type StepConfig } from './Stepper';
 import { useTheme } from '../hooks/useTheme';
+import { useImportStepCompletion } from '../hooks/useImportStepCompletion';
 
-const workflowSteps: StepConfig[] = [
+const workflowStepBlueprint = [
   {
     id: 'import',
     number: 1,
     label: 'Import',
     description: 'Select folders',
-    path: '/import',
-    state: 'active'
+    path: '/import'
   },
   {
     id: 'preview',
     number: 2,
     label: 'Preview',
     description: 'Review items',
-    path: '/preview',
-    state: 'pending'
+    path: '/preview'
   },
   {
     id: 'compression',
     number: 3,
     label: 'Compression',
     description: 'Optimize media',
-    path: '/compression',
-    state: 'pending'
+    path: '/compression'
   },
   {
     id: 'grouping',
     number: 4,
     label: 'Grouping',
     description: 'Structure output',
-    path: '/grouping',
-    state: 'pending'
+    path: '/grouping'
   }
-];
+] as const;
 
 export const AppShell = () => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const isImportStepComplete = useImportStepCompletion();
+
+  const workflowSteps: StepConfig[] = workflowStepBlueprint.map((step, index) => ({
+    ...step,
+    state: index === 0 || isImportStepComplete ? 'pending' : 'locked'
+  }));
 
   const currentStep = workflowSteps.find((s) => s.path === location.pathname);
   const isDashboard = location.pathname === '/dashboard';

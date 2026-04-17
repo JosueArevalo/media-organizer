@@ -24,6 +24,7 @@ type SelectionRecord = SelectionMetadata & {
 type SelectionState = Record<FolderSlot, FolderSelectionSnapshot | null>;
 
 const STORAGE_KEY = 'media-organizer-folder-selections';
+const STORAGE_EVENT_NAME = 'media-organizer-folder-selections-updated';
 const DATABASE_NAME = 'media-organizer-state';
 const DATABASE_VERSION = 1;
 const STORE_NAME = 'folder-selections';
@@ -58,6 +59,20 @@ const writeMetadata = (metadata: Partial<Record<FolderSlot, SelectionMetadata | 
     // Ignore storage failures and keep the in-memory state.
   }
 };
+
+const notifySelectionChange = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent(STORAGE_EVENT_NAME));
+};
+
+const hasSelectionName = (selection: SelectionMetadata | null | undefined) =>
+  typeof selection?.name === 'string' && selection.name.trim().length > 0;
+
+const isImportStepCompleteFromMetadata = (metadata: Partial<Record<FolderSlot, SelectionMetadata | null>>) =>
+  hasSelectionName(metadata.source) && hasSelectionName(metadata.destination);
 
 const openDatabase = (): Promise<IDBDatabase | null> => {
   if (typeof window === 'undefined' || !window.indexedDB) {
@@ -187,6 +202,8 @@ export const saveFolderSelection = async (
   } else {
     await deleteRecord(slot);
   }
+
+  notifySelectionChange();
 };
 
 export const clearFolderSelection = async (slot: FolderSlot) => {
@@ -196,6 +213,32 @@ export const clearFolderSelection = async (slot: FolderSlot) => {
 
   writeMetadata(nextMetadata);
   await deleteRecord(slot);
+  notifySelectionChange();
+};
+
+export const isImportStepComplete = () => isImportStepCompleteFromMetadata(readMetadata());
+
+export const subscribeFolderSelectionChanges = (callback: () => void) => {
+  if (typeof window === 'undefined') {
+    return () => {
+      // No-op on non-browser environments.
+    };
+  }
+
+  const handleCustomUpdate = () => callback();
+  const handleStorageUpdate = (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY) {
+      callback();
+    }
+  };
+
+  window.addEventListener(STORAGE_EVENT_NAME, handleCustomUpdate);
+  window.addEventListener('storage', handleStorageUpdate);
+
+  return () => {
+    window.removeEventListener(STORAGE_EVENT_NAME, handleCustomUpdate);
+    window.removeEventListener('storage', handleStorageUpdate);
+  };
 };
 
 export const getDefaultFolderSelections = createEmptyState;
