@@ -31,20 +31,17 @@ export const DashboardPage = () => {
   return (
     <div className="dashboard-grid">
       <section className="panel panel-highlight">
-        <p className="panel-kicker">Current flow</p>
-        <h2 className="panel-title">Mocked dashboard ready for iterative integration</h2>
+        <p className="panel-kicker">Status</p>
+        <h2 className="panel-title">Welcome back</h2>
         <p className="panel-description">
-          You can shape UX and product flow first, while preserving compatibility with future backend work.
+          Here's an overview of your media organization system. You can start a new workflow, resume a previous job, or check the status of running processes.
         </p>
         <div className="action-row">
           <Link to="/import" className="btn btn-primary">
-            Start import flow
+            🚀 Start new workflow
           </Link>
-          <Link to="/preview" className="btn btn-secondary">
-            Open preview workspace
-          </Link>
-          <Link to="/jobs" className="btn btn-ghost">
-            Check resumable jobs
+          <Link to="/jobs" className="btn btn-secondary">
+            📋 View all jobs
           </Link>
         </div>
       </section>
