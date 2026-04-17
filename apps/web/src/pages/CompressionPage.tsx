@@ -345,7 +345,7 @@ export const CompressionPage = () => {
       <div className="page-header">
         <h2 className="page-title">Optimize your media</h2>
         <p className="page-subtitle">
-          Choose compression profiles for images and videos to reduce file size while maintaining quality.
+          Choose compression settings for images and videos. Processing runs in the next step after you confirm grouping.
         </p>
       </div>
 
@@ -451,7 +451,7 @@ export const CompressionPage = () => {
           ← Back
         </button>
         <button className="btn btn-primary" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })}>
-          Continue to Grouping →
+          Save Compression Settings and Continue →
         </button>
       </div>
     </div>
