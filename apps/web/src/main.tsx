@@ -129,6 +129,18 @@ const renderBootstrapError = (error: unknown) => {
   `;
 };
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (event) => {
+    console.error('Global runtime error:', event.error ?? event.message);
+    renderBootstrapError(event.error ?? event.message);
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    console.error('Unhandled promise rejection:', event.reason);
+    renderBootstrapError(event.reason);
+  });
+}
+
 const bootstrap = async () => {
   const rootElement = document.getElementById('root');
 
@@ -137,16 +149,11 @@ const bootstrap = async () => {
   }
 
   try {
-    const appModule = await import('./App');
-    const typedAppModule = appModule as {
-      App?: React.ComponentType;
-      default?: React.ComponentType;
-    };
-
-    const AppComponent = typedAppModule.App ?? typedAppModule.default;
+    const appEntryModule = await import('./app-entry');
+    const AppComponent = appEntryModule.default;
 
     if (typeof AppComponent !== 'function') {
-      throw new Error('App component export was not found. Expected a named export `App` or a default export.');
+      throw new Error('App entry default export is not a valid React component.');
     }
 
     createRoot(rootElement).render(

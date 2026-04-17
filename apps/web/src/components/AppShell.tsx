@@ -34,7 +34,7 @@ const workflowStepBlueprint = [
   }
 ] as const;
 
-export const AppShell = () => {
+const AppShell = () => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const isImportStepComplete = useImportStepCompletion();
@@ -121,3 +121,6 @@ export const AppShell = () => {
     </div>
   );
 };
+
+export { AppShell };
+export default AppShell;

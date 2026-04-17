@@ -56,3 +56,5 @@ export const GroupingPage = () => {
     </div>
   );
 };
+
+export default GroupingPage;

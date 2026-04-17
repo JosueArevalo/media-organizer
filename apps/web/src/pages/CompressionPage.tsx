@@ -85,3 +85,5 @@ export const CompressionPage = () => {
     </div>
   );
 };
+
+export default CompressionPage;

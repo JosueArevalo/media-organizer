@@ -66,3 +66,5 @@ export const ImportPage = () => {
     </div>
   );
 };
+
+export default ImportPage;

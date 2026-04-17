@@ -708,3 +708,5 @@ export const SelectionPage = () => {
     </div>
   );
 };
+
+export default SelectionPage;

@@ -1,12 +1,12 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { AppShell } from './components/AppShell';
+import AppShell from './components/AppShell';
 import { useImportStepCompletion } from './hooks/useImportStepCompletion';
-import { CompressionPage } from './pages/CompressionPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { GroupingPage } from './pages/GroupingPage';
-import { ImportPage } from './pages/ImportPage';
-import { JobsPage } from './pages/JobsPage';
-import { SelectionPage } from './pages/SelectionPage';
+import CompressionPage from './pages/CompressionPage';
+import DashboardPage from './pages/DashboardPage';
+import GroupingPage from './pages/GroupingPage';
+import ImportPage from './pages/ImportPage';
+import JobsPage from './pages/JobsPage';
+import SelectionPage from './pages/SelectionPage';
 
 const GuardedWorkflowStep = ({ children }: { children: JSX.Element }) => {
   const isImportStepComplete = useImportStepCompletion();
@@ -18,7 +18,7 @@ const GuardedWorkflowStep = ({ children }: { children: JSX.Element }) => {
   return children;
 };
 
-export const App = () => {
+const App = () => {
   return (
     <BrowserRouter>
       <Routes>
@@ -57,3 +57,5 @@ export const App = () => {
     </BrowserRouter>
   );
 };
+
+export default App;
