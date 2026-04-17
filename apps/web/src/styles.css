@@ -729,6 +729,28 @@ body {
   color: var(--text);
 }
 
+.compression-custom-quality {
+  margin-left: 28px;
+  margin-top: 4px;
+  display: grid;
+  gap: 8px;
+  max-width: 260px;
+}
+
+.compression-quality-input {
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.compression-quality-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .page-list {
   list-style: none;
   margin: 0;
