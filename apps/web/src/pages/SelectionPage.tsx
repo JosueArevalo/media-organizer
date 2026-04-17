@@ -228,17 +228,26 @@ const isUnderExcludedDirectory = (path: string, excludedDirectories: Set<string>
   return false;
 };
 
-const isDirectoryExcluded = (path: string, excludedDirectories: Set<string>, ancestorExcluded: boolean) =>
-  ancestorExcluded || excludedDirectories.has(path);
+const isDirectoryExcluded = (
+  path: string,
+  excludedDirectories: Set<string>,
+  includedDirectories: Set<string>,
+  ancestorExcluded: boolean
+) => excludedDirectories.has(path) || (ancestorExcluded && !includedDirectories.has(path));
+
+const isFileExcluded = (path: string, excludedFiles: Set<string>, includedFiles: Set<string>, ancestorExcluded: boolean) =>
+  excludedFiles.has(path) || (ancestorExcluded && !includedFiles.has(path));
 
 const summarizeTree = (
   entry: SourceEntry,
   excludedDirectories: Set<string>,
   excludedFiles: Set<string>,
+  includedDirectories: Set<string>,
+  includedFiles: Set<string>,
   ancestorExcluded = false
 ): TreeSummary => {
   if (entry.kind === 'file') {
-    const isExcluded = ancestorExcluded || excludedFiles.has(entry.path);
+    const isExcluded = isFileExcluded(entry.path, excludedFiles, includedFiles, ancestorExcluded);
 
     return {
       includedDirectories: 0,
@@ -250,7 +259,7 @@ const summarizeTree = (
     };
   }
 
-  const directoryExcluded = isDirectoryExcluded(entry.path, excludedDirectories, ancestorExcluded);
+  const directoryExcluded = isDirectoryExcluded(entry.path, excludedDirectories, includedDirectories, ancestorExcluded);
   const summary: TreeSummary = {
     includedDirectories: directoryExcluded ? 0 : 1,
     excludedDirectories: directoryExcluded ? 1 : 0,
@@ -261,7 +270,14 @@ const summarizeTree = (
   };
 
   for (const child of entry.children) {
-    const childSummary = summarizeTree(child, excludedDirectories, excludedFiles, directoryExcluded);
+    const childSummary = summarizeTree(
+      child,
+      excludedDirectories,
+      excludedFiles,
+      includedDirectories,
+      includedFiles,
+      directoryExcluded
+    );
     summary.includedDirectories += childSummary.includedDirectories;
     summary.excludedDirectories += childSummary.excludedDirectories;
     summary.includedFiles += childSummary.includedFiles;
@@ -277,13 +293,15 @@ const flattenTree = (
   entry: SourceEntry,
   excludedDirectories: Set<string>,
   excludedFiles: Set<string>,
+  includedDirectories: Set<string>,
+  includedFiles: Set<string>,
   expandedDirectories: Set<string>,
   includeFiles: boolean,
   rows: TreeRow[] = [],
   ancestorExcluded = false
 ) => {
   if (entry.kind === 'directory') {
-    const directoryExcluded = isDirectoryExcluded(entry.path, excludedDirectories, ancestorExcluded);
+    const directoryExcluded = isDirectoryExcluded(entry.path, excludedDirectories, includedDirectories, ancestorExcluded);
     const hasChildren = entry.children.length > 0;
     const isExpanded = expandedDirectories.has(entry.path);
     rows.push({
@@ -301,14 +319,24 @@ const flattenTree = (
           continue;
         }
 
-        flattenTree(child, excludedDirectories, excludedFiles, expandedDirectories, includeFiles, rows, directoryExcluded);
+        flattenTree(
+          child,
+          excludedDirectories,
+          excludedFiles,
+          includedDirectories,
+          includedFiles,
+          expandedDirectories,
+          includeFiles,
+          rows,
+          directoryExcluded
+        );
       }
     }
 
     return rows;
   }
 
-  const fileExcluded = ancestorExcluded || excludedFiles.has(entry.path);
+  const fileExcluded = isFileExcluded(entry.path, excludedFiles, includedFiles, ancestorExcluded);
   rows.push({ entry, level: entry.depth, parentExcluded: ancestorExcluded, isExcluded: fileExcluded });
   return rows;
 };
@@ -316,9 +344,11 @@ const flattenTree = (
 const applyPreset = (root: ScannedDirectory, preset: ScopePreset) => {
   const excludedDirectories = new Set<string>();
   const excludedFiles = new Set<string>();
+  const includedDirectories = new Set<string>();
+  const includedFiles = new Set<string>();
 
   if (preset === 'all') {
-    return { excludedDirectories, excludedFiles };
+    return { excludedDirectories, excludedFiles, includedDirectories, includedFiles };
   }
 
   const normalizedRoot = formatPath(root.path).toLowerCase();
@@ -365,7 +395,7 @@ const applyPreset = (root: ScannedDirectory, preset: ScopePreset) => {
   };
 
   visit(root);
-  return { excludedDirectories, excludedFiles };
+  return { excludedDirectories, excludedFiles, includedDirectories, includedFiles };
 };
 
 export const SelectionPage = () => {
@@ -376,6 +406,8 @@ export const SelectionPage = () => {
   const [activePreset, setActivePreset] = useState<ScopePreset>('all');
   const [excludedDirectories, setExcludedDirectories] = useState<Set<string>>(new Set());
   const [excludedFiles, setExcludedFiles] = useState<Set<string>>(new Set());
+  const [includedDirectories, setIncludedDirectories] = useState<Set<string>>(new Set());
+  const [includedFiles, setIncludedFiles] = useState<Set<string>>(new Set());
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -412,6 +444,8 @@ export const SelectionPage = () => {
         setScanState({ status: 'ready', root: tree, error: null });
         setExcludedDirectories(new Set());
         setExcludedFiles(new Set());
+        setIncludedDirectories(new Set());
+        setIncludedFiles(new Set());
         setExpandedDirectories(new Set([tree.path]));
         setActivePreset('all');
         setMode('files');
@@ -437,18 +471,26 @@ export const SelectionPage = () => {
       return null;
     }
 
-    const rootSummary = summarizeTree(scanState.root, excludedDirectories, excludedFiles);
+    const rootSummary = summarizeTree(scanState.root, excludedDirectories, excludedFiles, includedDirectories, includedFiles);
 
     return rootSummary;
-  }, [scanState, excludedDirectories, excludedFiles]);
+  }, [scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles]);
 
   const rows = useMemo(() => {
     if (scanState.status !== 'ready' || !scanState.root) {
       return [] as TreeRow[];
     }
 
-    return flattenTree(scanState.root, excludedDirectories, excludedFiles, expandedDirectories, mode === 'files');
-  }, [scanState, excludedDirectories, excludedFiles, expandedDirectories, mode]);
+    return flattenTree(
+      scanState.root,
+      excludedDirectories,
+      excludedFiles,
+      includedDirectories,
+      includedFiles,
+      expandedDirectories,
+      mode === 'files'
+    );
+  }, [scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles, expandedDirectories, mode]);
 
   const totalBytes = summary ? summary.includedBytes + summary.excludedBytes : 0;
   const totalFiles = summary ? summary.includedFiles + summary.excludedFiles : 0;
@@ -467,18 +509,32 @@ export const SelectionPage = () => {
     const nextSelection = applyPreset(scanState.root, preset);
     setExcludedDirectories(nextSelection.excludedDirectories);
     setExcludedFiles(nextSelection.excludedFiles);
+    setIncludedDirectories(nextSelection.includedDirectories);
+    setIncludedFiles(nextSelection.includedFiles);
   };
 
-  const toggleDirectory = (path: string) => {
+  const toggleDirectory = (path: string, isExcluded: boolean, parentExcluded: boolean) => {
     setActivePreset('custom');
 
     setExcludedDirectories((current) => {
       const next = new Set(current);
 
-      if (next.has(path)) {
+      if (isExcluded) {
         next.delete(path);
       } else {
         next.add(path);
+      }
+
+      return next;
+    });
+
+    setIncludedDirectories((current) => {
+      const next = new Set(current);
+
+      if (isExcluded && parentExcluded) {
+        next.add(path);
+      } else {
+        next.delete(path);
       }
 
       return next;
@@ -499,20 +555,28 @@ export const SelectionPage = () => {
     });
   };
 
-  const toggleFile = (path: string, ancestorExcluded: boolean) => {
-    if (ancestorExcluded) {
-      return;
-    }
-
+  const toggleFile = (path: string, isExcluded: boolean, parentExcluded: boolean) => {
     setActivePreset('custom');
 
     setExcludedFiles((current) => {
       const next = new Set(current);
 
-      if (next.has(path)) {
+      if (isExcluded) {
         next.delete(path);
       } else {
         next.add(path);
+      }
+
+      return next;
+    });
+
+    setIncludedFiles((current) => {
+      const next = new Set(current);
+
+      if (isExcluded && parentExcluded) {
+        next.add(path);
+      } else {
+        next.delete(path);
       }
 
       return next;
@@ -634,7 +698,6 @@ export const SelectionPage = () => {
               <ul className="selection-tree-list">
                 {rows.map((row) => {
                   if (row.entry.kind === 'directory') {
-                    const disabled = row.parentExcluded;
                     const isExpanded = row.isExpanded ?? false;
                     const isExpandable = row.hasChildren ?? false;
 
@@ -662,8 +725,7 @@ export const SelectionPage = () => {
                             <input
                               type="checkbox"
                               checked={!row.isExcluded}
-                              disabled={disabled}
-                              onChange={() => toggleDirectory(row.entry.path)}
+                              onChange={() => toggleDirectory(row.entry.path, row.isExcluded, row.parentExcluded)}
                             />
                             <div className="selection-tree-copy">
                               <div className="selection-row-head">
@@ -693,8 +755,7 @@ export const SelectionPage = () => {
                         <input
                           type="checkbox"
                           checked={!row.isExcluded}
-                          disabled={row.parentExcluded}
-                          onChange={() => toggleFile(row.entry.path, row.parentExcluded)}
+                          onChange={() => toggleFile(row.entry.path, row.isExcluded, row.parentExcluded)}
                         />
                         <div className="selection-tree-copy">
                           <div className="selection-row-head">
