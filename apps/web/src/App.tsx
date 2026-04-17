@@ -1,59 +1,61 @@
-import { useEffect, useState } from 'react';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import AppShell from './components/AppShell';
+import { useImportStepCompletion } from './hooks/useImportStepCompletion';
+import CompressionPage from './pages/CompressionPage';
+import DashboardPage from './pages/DashboardPage';
+import GroupingPage from './pages/GroupingPage';
+import ImportPage from './pages/ImportPage';
+import JobsPage from './pages/JobsPage';
+import SelectionPage from './pages/SelectionPage';
 
-type HealthResponse = {
-  status: string;
-  service: string;
-  time: string;
-  dbPath: string;
-  appliedMigrations: string[];
+const GuardedWorkflowStep = ({ children }: { children: JSX.Element }) => {
+  const isImportStepComplete = useImportStepCompletion();
+
+  if (!isImportStepComplete) {
+    return <Navigate to="/import" replace />;
+  }
+
+  return children;
 };
 
-export const App = () => {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error(`Backend responded with ${res.status}`);
-        }
-        return (await res.json()) as HealthResponse;
-      })
-      .then((data) => setHealth(data))
-      .catch((err: Error) => setError(err.message));
-  }, []);
-
+const App = () => {
   return (
-    <main className="page">
-      <section className="panel">
-        <h1>Media Organizer - Hello World</h1>
-        <p>This dashboard is running and connected to the local backend.</p>
-
-        {error && <p className="error">Backend error: {error}</p>}
-
-        {!error && !health && <p>Checking backend health...</p>}
-
-        {health && (
-          <div className="status">
-            <p>
-              <strong>Service:</strong> {health.service}
-            </p>
-            <p>
-              <strong>Status:</strong> {health.status}
-            </p>
-            <p>
-              <strong>Time:</strong> {health.time}
-            </p>
-            <p>
-              <strong>DB Path:</strong> {health.dbPath}
-            </p>
-            <p>
-              <strong>Applied migrations:</strong> {health.appliedMigrations.length > 0 ? health.appliedMigrations.join(', ') : 'none in this run'}
-            </p>
-          </div>
-        )}
-      </section>
-    </main>
+    <BrowserRouter>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/import" element={<ImportPage />} />
+          <Route
+            path="/selection"
+            element={
+              <GuardedWorkflowStep>
+                <SelectionPage />
+              </GuardedWorkflowStep>
+            }
+          />
+          <Route path="/preview" element={<Navigate to="/selection" replace />} />
+          <Route
+            path="/compression"
+            element={
+              <GuardedWorkflowStep>
+                <CompressionPage />
+              </GuardedWorkflowStep>
+            }
+          />
+          <Route
+            path="/grouping"
+            element={
+              <GuardedWorkflowStep>
+                <GroupingPage />
+              </GuardedWorkflowStep>
+            }
+          />
+          <Route path="/jobs" element={<JobsPage />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   );
 };
+
+export default App;
