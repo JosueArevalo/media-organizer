@@ -2,6 +2,85 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
+type ErrorBoundaryProps = {
+  children: React.ReactNode;
+};
+
+type ErrorBoundaryState = {
+  hasError: boolean;
+  message: string;
+};
+
+class AppRuntimeErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = {
+    hasError: false,
+    message: ''
+  };
+
+  static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
+    return {
+      hasError: true,
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('Runtime render error:', error);
+  }
+
+  render() {
+    if (!this.state.hasError) {
+      return this.props.children;
+    }
+
+    return (
+      <section
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '24px',
+          background: '#0f1319',
+          color: '#edf2f7',
+          fontFamily: "'Segoe UI', sans-serif"
+        }}
+      >
+        <div
+          style={{
+            maxWidth: '720px',
+            width: '100%',
+            border: '1px solid #2b3442',
+            borderRadius: '12px',
+            background: '#171d26',
+            padding: '20px'
+          }}
+        >
+          <h1 style={{ margin: '0 0 8px', fontSize: '20px' }}>UI runtime failed</h1>
+          <p style={{ margin: '0 0 14px', color: '#94a3b8', lineHeight: 1.5 }}>
+            The application crashed while rendering. Check the browser console for the full stack trace.
+          </p>
+          <pre
+            style={{
+              margin: 0,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              border: '1px solid #2b3442',
+              borderRadius: '8px',
+              background: '#0f1319',
+              padding: '12px',
+              color: '#fca5a5',
+              fontSize: '12px'
+            }}
+          >
+            {this.state.message}
+          </pre>
+        </div>
+      </section>
+    );
+  }
+}
+
 const renderBootstrapError = (error: unknown) => {
   const rootElement = document.getElementById('root');
 
@@ -58,12 +137,24 @@ const bootstrap = async () => {
   }
 
   try {
-    const { App } = await import('./App');
+    const appModule = await import('./App');
+    const typedAppModule = appModule as {
+      App?: React.ComponentType;
+      default?: React.ComponentType;
+    };
+
+    const AppComponent = typedAppModule.App ?? typedAppModule.default;
+
+    if (typeof AppComponent !== 'function') {
+      throw new Error('App component export was not found. Expected a named export `App` or a default export.');
+    }
 
     createRoot(rootElement).render(
-      <React.StrictMode>
-        <App />
-      </React.StrictMode>
+      <AppRuntimeErrorBoundary>
+        <React.StrictMode>
+          <AppComponent />
+        </React.StrictMode>
+      </AppRuntimeErrorBoundary>
     );
   } catch (error) {
     console.error('Application bootstrap error:', error);

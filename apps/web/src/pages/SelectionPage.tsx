@@ -431,6 +431,13 @@ export const SelectionPage = () => {
     return mode === 'files' ? allRows : allRows.filter((row) => row.entry.kind === 'directory');
   }, [scanState, excludedDirectories, excludedFiles, mode]);
 
+  const totalBytes = summary ? summary.includedBytes + summary.excludedBytes : 0;
+  const totalFiles = summary ? summary.includedFiles + summary.excludedFiles : 0;
+  const selectedBytes = summary?.includedBytes ?? 0;
+  const selectedFiles = summary?.includedFiles ?? 0;
+  const sizeRatio = totalBytes > 0 ? (selectedBytes / totalBytes) * 100 : 0;
+  const fileRatio = totalFiles > 0 ? (selectedFiles / totalFiles) * 100 : 0;
+
   const handlePreset = (preset: ScopePreset) => {
     setActivePreset(preset);
 
@@ -539,28 +546,6 @@ export const SelectionPage = () => {
           <p className="page-summary-note">
             Presets are only a starting point. The user can still toggle specific folders or files afterwards.
           </p>
-        </article>
-
-        <article className="page-card elevated selection-hero-card">
-          <p className="page-section-title">Current impact</p>
-          {summary ? (
-            <div className="selection-stats-inline">
-              <div>
-                <p className="selection-hero-label">Included files</p>
-                <p className="selection-hero-value">{summary.includedFiles}</p>
-              </div>
-              <div>
-                <p className="selection-hero-label">Included size</p>
-                <p className="selection-hero-value">{formatBytes(summary.includedBytes)}</p>
-              </div>
-              <div>
-                <p className="selection-hero-label">Excluded files</p>
-                <p className="selection-hero-value">{summary.excludedFiles}</p>
-              </div>
-            </div>
-          ) : (
-            <p className="page-summary-note">Scan the source tree to see the current impact.</p>
-          )}
         </article>
       </div>
 
@@ -683,48 +668,31 @@ export const SelectionPage = () => {
         </section>
 
         <aside className="selection-side-column">
-          <article className="page-card elevated selection-summary-card">
-            <p className="page-section-title">Selection summary</p>
-            {summary ? (
-              <div className="selection-summary-grid">
-                <div>
-                  <p className="selection-hero-label">Included folders</p>
-                  <p className="selection-hero-value">{summary.includedDirectories}</p>
-                </div>
-                <div>
-                  <p className="selection-hero-label">Excluded folders</p>
-                  <p className="selection-hero-value">{summary.excludedDirectories}</p>
-                </div>
-                <div>
-                  <p className="selection-hero-label">Included files</p>
-                  <p className="selection-hero-value">{summary.includedFiles}</p>
-                </div>
-                <div>
-                  <p className="selection-hero-label">Selected size</p>
-                  <p className="selection-hero-value">{formatBytes(summary.includedBytes)}</p>
-                </div>
-              </div>
-            ) : (
-              <p className="page-summary-note">The summary will appear once the source tree is scanned.</p>
-            )}
+          <article className="page-card elevated selection-summary-card selection-status-card">
+            <p className="page-section-title">Selection status</p>
+            <p className="page-summary-note">Minimal status view focused on the two key ratios.</p>
 
-            <div className="selection-summary-block">
-              <p className="page-summary-label">Why this layout works</p>
-              <p className="page-summary-note">
-                The file list stays readable because it shows the real source tree, not thumbnails. That is usually faster to scan and
-                it leaves enough room for directory exclusions and file-level fine tuning.
+            <div className="selection-ratio-card">
+              <p className="selection-hero-label">Size selected / total</p>
+              <p className="selection-ratio-value">
+                {formatBytes(selectedBytes)} / {formatBytes(totalBytes)}
               </p>
+              <div className="selection-ratio-track" role="presentation">
+                <span className="selection-ratio-fill" style={{ width: `${Math.min(sizeRatio, 100)}%` }} />
+              </div>
             </div>
-          </article>
 
-          <article className="page-card elevated selection-summary-card">
-            <p className="page-section-title">Current scope</p>
-            <ul className="selection-scope-list">
-              <li>Source: {sourceSelection?.name ?? 'not available yet'}</li>
-              <li>Destination: {destinationSelection?.name ?? 'not available yet'}</li>
-              <li>Mode: {mode === 'files' ? 'Files + folders' : 'Folders only'}</li>
-              <li>Preset: {activePreset}</li>
-            </ul>
+            <div className="selection-ratio-card">
+              <p className="selection-hero-label">Files selected / total</p>
+              <p className="selection-ratio-value">
+                {selectedFiles} / {totalFiles}
+              </p>
+              <div className="selection-ratio-track" role="presentation">
+                <span className="selection-ratio-fill" style={{ width: `${Math.min(fileRatio, 100)}%` }} />
+              </div>
+            </div>
+
+            {!summary && <p className="page-summary-note">Scan the source tree to populate the status ratios.</p>}
           </article>
         </aside>
       </div>
