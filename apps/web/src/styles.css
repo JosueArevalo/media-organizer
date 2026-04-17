@@ -1058,9 +1058,43 @@ body {
   flex: 1;
 }
 
+.selection-tree-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
 .selection-tree-main input {
   margin-top: 3px;
   accent-color: var(--accent);
+}
+
+.selection-tree-toggle,
+.selection-tree-toggle-spacer {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.selection-tree-toggle {
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+}
+
+.selection-tree-toggle:hover {
+  background: var(--control-hover);
+  color: var(--text);
 }
 
 .selection-tree-copy {

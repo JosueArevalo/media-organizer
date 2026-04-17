@@ -47,6 +47,8 @@ type TreeRow = {
   level: number;
   parentExcluded: boolean;
   isExcluded: boolean;
+  isExpanded?: boolean;
+  hasChildren?: boolean;
 };
 
 type ScanState =
@@ -275,15 +277,32 @@ const flattenTree = (
   entry: SourceEntry,
   excludedDirectories: Set<string>,
   excludedFiles: Set<string>,
+  expandedDirectories: Set<string>,
+  includeFiles: boolean,
   rows: TreeRow[] = [],
   ancestorExcluded = false
 ) => {
   if (entry.kind === 'directory') {
     const directoryExcluded = isDirectoryExcluded(entry.path, excludedDirectories, ancestorExcluded);
-    rows.push({ entry, level: entry.depth, parentExcluded: ancestorExcluded, isExcluded: directoryExcluded });
+    const hasChildren = entry.children.length > 0;
+    const isExpanded = expandedDirectories.has(entry.path);
+    rows.push({
+      entry,
+      level: entry.depth,
+      parentExcluded: ancestorExcluded,
+      isExcluded: directoryExcluded,
+      isExpanded,
+      hasChildren
+    });
 
-    for (const child of entry.children) {
-      flattenTree(child, excludedDirectories, excludedFiles, rows, directoryExcluded);
+    if (isExpanded) {
+      for (const child of entry.children) {
+        if (child.kind === 'file' && !includeFiles) {
+          continue;
+        }
+
+        flattenTree(child, excludedDirectories, excludedFiles, expandedDirectories, includeFiles, rows, directoryExcluded);
+      }
     }
 
     return rows;
@@ -357,6 +376,7 @@ export const SelectionPage = () => {
   const [activePreset, setActivePreset] = useState<ScopePreset>('all');
   const [excludedDirectories, setExcludedDirectories] = useState<Set<string>>(new Set());
   const [excludedFiles, setExcludedFiles] = useState<Set<string>>(new Set());
+  const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let isActive = true;
@@ -392,6 +412,7 @@ export const SelectionPage = () => {
         setScanState({ status: 'ready', root: tree, error: null });
         setExcludedDirectories(new Set());
         setExcludedFiles(new Set());
+        setExpandedDirectories(new Set([tree.path]));
         setActivePreset('all');
         setMode('files');
       } catch (error) {
@@ -426,10 +447,8 @@ export const SelectionPage = () => {
       return [] as TreeRow[];
     }
 
-    const allRows = flattenTree(scanState.root, excludedDirectories, excludedFiles);
-
-    return mode === 'files' ? allRows : allRows.filter((row) => row.entry.kind === 'directory');
-  }, [scanState, excludedDirectories, excludedFiles, mode]);
+    return flattenTree(scanState.root, excludedDirectories, excludedFiles, expandedDirectories, mode === 'files');
+  }, [scanState, excludedDirectories, excludedFiles, expandedDirectories, mode]);
 
   const totalBytes = summary ? summary.includedBytes + summary.excludedBytes : 0;
   const totalFiles = summary ? summary.includedFiles + summary.excludedFiles : 0;
@@ -454,6 +473,20 @@ export const SelectionPage = () => {
     setActivePreset('custom');
 
     setExcludedDirectories((current) => {
+      const next = new Set(current);
+
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+
+      return next;
+    });
+  };
+
+  const toggleDirectoryExpansion = (path: string) => {
+    setExpandedDirectories((current) => {
       const next = new Set(current);
 
       if (next.has(path)) {
@@ -602,6 +635,8 @@ export const SelectionPage = () => {
                 {rows.map((row) => {
                   if (row.entry.kind === 'directory') {
                     const disabled = row.parentExcluded;
+                    const isExpanded = row.isExpanded ?? false;
+                    const isExpandable = row.hasChildren ?? false;
 
                     return (
                       <li
@@ -609,22 +644,37 @@ export const SelectionPage = () => {
                         className={`selection-tree-row selection-tree-directory ${row.isExcluded ? 'is-excluded' : ''}`}
                         style={{ paddingLeft: `${12 + row.level * 18}px` }}
                       >
-                        <label className="selection-tree-main">
-                          <input
-                            type="checkbox"
-                            checked={!row.isExcluded}
-                            disabled={disabled}
-                            onChange={() => toggleDirectory(row.entry.path)}
-                          />
-                          <div className="selection-tree-copy">
-                            <div className="selection-row-head">
-                              <strong>{row.entry.name}</strong>
-                              <span className="page-chip">Folder</span>
-                              {row.isExcluded && <span className="page-chip selection-state-chip">Excluded</span>}
+                        <div className="selection-tree-main">
+                          {isExpandable ? (
+                            <button
+                              className="selection-tree-toggle"
+                              type="button"
+                              aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${row.entry.name}`}
+                              onClick={() => toggleDirectoryExpansion(row.entry.path)}
+                            >
+                              {isExpanded ? '-' : '+'}
+                            </button>
+                          ) : (
+                            <span className="selection-tree-toggle-spacer" aria-hidden="true" />
+                          )}
+
+                          <label className="selection-tree-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={!row.isExcluded}
+                              disabled={disabled}
+                              onChange={() => toggleDirectory(row.entry.path)}
+                            />
+                            <div className="selection-tree-copy">
+                              <div className="selection-row-head">
+                                <strong>{row.entry.name}</strong>
+                                <span className="page-chip">Folder</span>
+                                {row.isExcluded && <span className="page-chip selection-state-chip">Excluded</span>}
+                              </div>
+                              <p className="selection-row-note">{formatPath(row.entry.path)}</p>
                             </div>
-                            <p className="selection-row-note">{formatPath(row.entry.path)}</p>
-                          </div>
-                        </label>
+                          </label>
+                        </div>
                         <div className="selection-tree-meta">
                           <span>{row.entry.fileCount} files</span>
                           <span>{formatBytes(row.entry.sizeBytes)}</span>
