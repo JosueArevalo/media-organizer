@@ -100,20 +100,20 @@ body {
   margin-bottom: 32px;
 }
 
-.brand-monogram {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text);
-  letter-spacing: 0.05em;
-}
-
 .brand-name {
-  margin: 4px 0 0;
+  margin: 0;
   font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.brand-name-primary {
+  font-size: 16px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--text);
 }
 
 /* Stepper */

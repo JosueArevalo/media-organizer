@@ -51,8 +51,7 @@ export const AppShell = () => {
       <aside className="sidebar-zen">
         {/* Logo */}
         <div className="sidebar-header">
-          <p className="brand-monogram">MO</p>
-          <p className="brand-name">Media Organizer</p>
+          <p className="brand-name brand-name-primary">Media Organizer</p>
         </div>
 
         {/* Workflow stepper */}
