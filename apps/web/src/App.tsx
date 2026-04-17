@@ -6,7 +6,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { GroupingPage } from './pages/GroupingPage';
 import { ImportPage } from './pages/ImportPage';
 import { JobsPage } from './pages/JobsPage';
-import { PreviewPage } from './pages/PreviewPage';
+import { SelectionPage } from './pages/SelectionPage';
 
 const GuardedWorkflowStep = ({ children }: { children: JSX.Element }) => {
   const isImportStepComplete = useImportStepCompletion();
@@ -27,13 +27,14 @@ export const App = () => {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/import" element={<ImportPage />} />
           <Route
-            path="/preview"
+            path="/selection"
             element={
               <GuardedWorkflowStep>
-                <PreviewPage />
+                <SelectionPage />
               </GuardedWorkflowStep>
             }
           />
+          <Route path="/preview" element={<Navigate to="/selection" replace />} />
           <Route
             path="/compression"
             element={

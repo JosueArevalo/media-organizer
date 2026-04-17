@@ -22,15 +22,15 @@ export const ImportPage = () => {
       return;
     }
 
-    navigate('/preview');
+    navigate('/selection');
   };
 
   return (
     <div className="page-stack">
       <div className="page-header">
-        <h2 className="page-title">Select your folders</h2>
+        <h2 className="page-title">Set up the source and destination</h2>
         <p className="page-subtitle">
-          Choose where your media files are stored and where you'd like the organized output to go.
+          Pick the folder that contains your media and the destination that will receive the organized output.
         </p>
       </div>
 
@@ -58,27 +58,9 @@ export const ImportPage = () => {
         />
       </div>
 
-      {!supportsNativeDirectoryPicker && (
-        <div className="folder-picker-hint panel">
-          <p className="page-section-title">Firefox fallback active</p>
-          <p className="page-subtitle">
-            Firefox does not expose the native directory picker, so the app uses the browser fallback here. If a directory is empty,
-            you can paste its absolute path when prompted so we still persist the selection locally.
-          </p>
-        </div>
-      )}
-
-      <div className="folder-picker-hint panel">
-        <p className="page-section-title">Persistence strategy</p>
-        <p className="page-subtitle">
-          Folder names are stored locally for fast rehydration, and native directory handles are kept in the browser when supported.
-          That lets us restore the setup on the next session without forcing the user to pick everything again.
-        </p>
-      </div>
-
       <div className="page-footer-actions">
         <button className="btn btn-primary" type="button" onClick={handleContinue} disabled={!canContinue}>
-          Continue to Preview →
+          Continue to Selection →
         </button>
       </div>
     </div>

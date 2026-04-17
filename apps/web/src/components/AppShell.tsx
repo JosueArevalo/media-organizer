@@ -8,28 +8,28 @@ const workflowStepBlueprint = [
     id: 'import',
     number: 1,
     label: 'Import',
-    description: 'Select folders',
+    description: 'Choose source & destination',
     path: '/import'
   },
   {
-    id: 'preview',
+    id: 'selection',
     number: 2,
-    label: 'Preview',
-    description: 'Review items',
-    path: '/preview'
+    label: 'Selection',
+    description: 'Include and exclude scope',
+    path: '/selection'
   },
   {
     id: 'compression',
     number: 3,
     label: 'Compression',
-    description: 'Optimize media',
+    description: 'Set quality and size',
     path: '/compression'
   },
   {
     id: 'grouping',
     number: 4,
     label: 'Grouping',
-    description: 'Structure output',
+    description: 'Organize the output',
     path: '/grouping'
   }
 ] as const;
@@ -47,6 +47,12 @@ export const AppShell = () => {
   const currentStep = workflowSteps.find((s) => s.path === location.pathname);
   const isDashboard = location.pathname === '/dashboard';
   const isJobs = location.pathname === '/jobs';
+  const headerTitles: Record<string, string> = {
+    import: 'Prepare your source folders',
+    selection: 'Select what gets compressed',
+    compression: 'Tune compression settings',
+    grouping: 'Define the final structure'
+  };
 
   return (
     <div className="app-shell-zen">
@@ -99,7 +105,7 @@ export const AppShell = () => {
           <div>
             {currentStep && (
               <>
-                <p className="header-title">{currentStep.label} your media</p>
+                <p className="header-title">{headerTitles[currentStep.id] ?? `${currentStep.label} your media`}</p>
               </>
             )}
             {isDashboard && <p className="header-title">Control panel</p>}

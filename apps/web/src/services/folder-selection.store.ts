@@ -2,6 +2,26 @@ export type FolderSlot = 'source' | 'destination';
 
 export type FolderSelectionSource = 'native' | 'fallback';
 
+export type SourceTreeFileNode = {
+  kind: 'file';
+  name: string;
+  path: string;
+  sizeBytes: number;
+  fileType: string;
+};
+
+export type SourceTreeDirectoryNode = {
+  kind: 'directory';
+  name: string;
+  path: string;
+  sizeBytes: number;
+  fileCount: number;
+  directoryCount: number;
+  children: SourceTreeNode[];
+};
+
+export type SourceTreeNode = SourceTreeDirectoryNode | SourceTreeFileNode;
+
 export type FolderSelectionSnapshot = {
   slot: FolderSlot;
   name: string;
@@ -24,10 +44,12 @@ type SelectionRecord = SelectionMetadata & {
 type SelectionState = Record<FolderSlot, FolderSelectionSnapshot | null>;
 
 const STORAGE_KEY = 'media-organizer-folder-selections';
+const TREE_STORAGE_KEY = 'media-organizer-source-tree';
 const STORAGE_EVENT_NAME = 'media-organizer-folder-selections-updated';
 const DATABASE_NAME = 'media-organizer-state';
 const DATABASE_VERSION = 1;
 const STORE_NAME = 'folder-selections';
+const handleCache = new Map<FolderSlot, FileSystemDirectoryHandle>();
 
 const createEmptyState = (): SelectionState => ({
   source: null,
@@ -49,6 +71,32 @@ const readMetadata = (): Partial<Record<FolderSlot, SelectionMetadata | null>> =
     return JSON.parse(raw) as Partial<Record<FolderSlot, SelectionMetadata | null>>;
   } catch {
     return {};
+  }
+};
+
+const readTreeSnapshot = (): Partial<Record<FolderSlot, SourceTreeDirectoryNode | null>> => {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(TREE_STORAGE_KEY);
+
+    if (!raw) {
+      return {};
+    }
+
+    return JSON.parse(raw) as Partial<Record<FolderSlot, SourceTreeDirectoryNode | null>>;
+  } catch {
+    return {};
+  }
+};
+
+const writeTreeSnapshot = (snapshot: Partial<Record<FolderSlot, SourceTreeDirectoryNode | null>>) => {
+  try {
+    window.localStorage.setItem(TREE_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Ignore storage failures and keep the in-memory state.
   }
 };
 
@@ -192,6 +240,12 @@ export const saveFolderSelection = async (
   writeMetadata(nextMetadata);
 
   if (selection.handle) {
+    handleCache.set(slot, selection.handle);
+  } else {
+    handleCache.delete(slot);
+  }
+
+  if (selection.handle) {
     await writeRecord({
       slot,
       name: selection.name,
@@ -212,6 +266,10 @@ export const clearFolderSelection = async (slot: FolderSlot) => {
   delete nextMetadata[slot];
 
   writeMetadata(nextMetadata);
+  handleCache.delete(slot);
+  const nextTreeSnapshot = { ...readTreeSnapshot() };
+  delete nextTreeSnapshot[slot];
+  writeTreeSnapshot(nextTreeSnapshot);
   await deleteRecord(slot);
   notifySelectionChange();
 };
@@ -242,3 +300,34 @@ export const subscribeFolderSelectionChanges = (callback: () => void) => {
 };
 
 export const getDefaultFolderSelections = createEmptyState;
+
+export const saveSourceTreeSnapshot = (slot: FolderSlot, root: SourceTreeDirectoryNode) => {
+  const snapshot = readTreeSnapshot();
+  snapshot[slot] = root;
+  writeTreeSnapshot(snapshot);
+  notifySelectionChange();
+};
+
+export const loadSourceTreeSnapshot = (slot: FolderSlot): SourceTreeDirectoryNode | null => {
+  const snapshot = readTreeSnapshot();
+
+  return snapshot[slot] ?? null;
+};
+
+export const clearSourceTreeSnapshot = (slot: FolderSlot) => {
+  const snapshot = readTreeSnapshot();
+  delete snapshot[slot];
+  writeTreeSnapshot(snapshot);
+};
+
+export const loadFolderSelectionHandle = async (slot: FolderSlot): Promise<FileSystemDirectoryHandle | null> => {
+  const cachedHandle = handleCache.get(slot);
+
+  if (cachedHandle) {
+    return cachedHandle;
+  }
+
+  const record = await readRecord(slot);
+
+  return record?.handle ?? null;
+};

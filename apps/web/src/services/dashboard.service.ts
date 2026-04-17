@@ -43,7 +43,7 @@ export const getRecentJobs = async (): Promise<RecentJob[]> => {
     {
       id: 'job-2026-04-11',
       label: 'Spring cleanup from Pixel backup',
-      stage: 'Preview generated',
+      stage: 'Selection reviewed',
       progress: 64,
       updatedAt: '2026-04-11 21:15'
     },
