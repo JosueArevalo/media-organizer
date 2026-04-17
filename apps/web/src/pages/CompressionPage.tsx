@@ -230,23 +230,10 @@ const summarizeNativeDirectory = async (
 };
 
 const estimateImageSavingsRatio = (quality: number) => {
-  if (quality >= 92) {
-    return 0.08;
-  }
+  const normalizedQuality = clampQuality(quality);
+  const linearRatio = 1.24 - 0.012 * normalizedQuality;
 
-  if (quality >= 85) {
-    return 0.16;
-  }
-
-  if (quality >= 75) {
-    return 0.28;
-  }
-
-  if (quality >= 65) {
-    return 0.4;
-  }
-
-  return 0.52;
+  return Math.min(0.56, Math.max(0.04, linearRatio));
 };
 
 const estimateVideoSavingsRatio = (preset: VideoPresetId) => {
