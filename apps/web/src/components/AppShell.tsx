@@ -1,5 +1,6 @@
-import { Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Stepper, type StepConfig } from './Stepper';
+import { useTheme } from '../hooks/useTheme';
 
 const workflowSteps: StepConfig[] = [
   {
@@ -38,8 +39,8 @@ const workflowSteps: StepConfig[] = [
 
 export const AppShell = () => {
   const location = useLocation();
+  const { theme, toggleTheme } = useTheme();
 
-  // Determine current step context
   const currentStep = workflowSteps.find((s) => s.path === location.pathname);
   const isDashboard = location.pathname === '/dashboard';
   const isJobs = location.pathname === '/jobs';
@@ -63,21 +64,28 @@ export const AppShell = () => {
         {/* Quick access */}
         <section className="sidebar-section sidebar-quick-access">
           <p className="sidebar-label">Quick Access</p>
-          <a href="/dashboard" className={`quick-link ${isDashboard ? 'active' : ''}`}>
+          <Link to="/dashboard" className={`quick-link ${isDashboard ? 'active' : ''}`}>
             📊 Dashboard
-          </a>
-          <a href="/jobs" className={`quick-link ${isJobs ? 'active' : ''}`}>
+          </Link>
+          <Link to="/jobs" className={`quick-link ${isJobs ? 'active' : ''}`}>
             ⚙️ Jobs
-          </a>
+          </Link>
         </section>
 
         {/* Settings footer */}
         <div className="sidebar-footer">
-          <button className="settings-btn language-btn" title="Toggle language (EN/ES)">
+          <button className="settings-btn language-btn" type="button" title="Toggle language (EN/ES)">
             EN
           </button>
-          <button className="settings-btn theme-btn" title="Toggle dark mode">
-            🌙
+          <button
+            className="settings-btn theme-btn"
+            type="button"
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-pressed={theme === 'dark'}
+            onClick={toggleTheme}
+          >
+            {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
           </button>
         </div>
       </aside>
