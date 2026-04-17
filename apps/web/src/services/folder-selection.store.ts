@@ -30,6 +30,14 @@ export type FolderSelectionSnapshot = {
   persisted: boolean;
 };
 
+export type SourceSelectionScopeSnapshot = {
+  excludedDirectories: string[];
+  excludedFiles: string[];
+  includedDirectories: string[];
+  includedFiles: string[];
+  updatedAt: number;
+};
+
 type SelectionMetadata = {
   name: string;
   updatedAt: number;
@@ -49,6 +57,7 @@ const STORAGE_EVENT_NAME = 'media-organizer-folder-selections-updated';
 const DATABASE_NAME = 'media-organizer-state';
 const DATABASE_VERSION = 1;
 const STORE_NAME = 'folder-selections';
+const SCOPE_STORAGE_KEY = 'media-organizer-source-scope';
 const handleCache = new Map<FolderSlot, FileSystemDirectoryHandle>();
 
 const createEmptyState = (): SelectionState => ({
@@ -92,9 +101,40 @@ const readTreeSnapshot = (): Partial<Record<FolderSlot, SourceTreeDirectoryNode 
   }
 };
 
+const readScopeSnapshot = (): SourceSelectionScopeSnapshot | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SCOPE_STORAGE_KEY);
+
+    if (!raw) {
+      return null;
+    }
+
+    return JSON.parse(raw) as SourceSelectionScopeSnapshot;
+  } catch {
+    return null;
+  }
+};
+
 const writeTreeSnapshot = (snapshot: Partial<Record<FolderSlot, SourceTreeDirectoryNode | null>>) => {
   try {
     window.localStorage.setItem(TREE_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Ignore storage failures and keep the in-memory state.
+  }
+};
+
+const writeScopeSnapshot = (snapshot: SourceSelectionScopeSnapshot | null) => {
+  try {
+    if (!snapshot) {
+      window.localStorage.removeItem(SCOPE_STORAGE_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(SCOPE_STORAGE_KEY, JSON.stringify(snapshot));
   } catch {
     // Ignore storage failures and keep the in-memory state.
   }
@@ -270,6 +310,11 @@ export const clearFolderSelection = async (slot: FolderSlot) => {
   const nextTreeSnapshot = { ...readTreeSnapshot() };
   delete nextTreeSnapshot[slot];
   writeTreeSnapshot(nextTreeSnapshot);
+
+  if (slot === 'source') {
+    writeScopeSnapshot(null);
+  }
+
   await deleteRecord(slot);
   notifySelectionChange();
 };
@@ -318,6 +363,21 @@ export const clearSourceTreeSnapshot = (slot: FolderSlot) => {
   const snapshot = readTreeSnapshot();
   delete snapshot[slot];
   writeTreeSnapshot(snapshot);
+};
+
+export const saveSourceSelectionScope = (scope: Omit<SourceSelectionScopeSnapshot, 'updatedAt'>) => {
+  writeScopeSnapshot({
+    ...scope,
+    updatedAt: Date.now()
+  });
+  notifySelectionChange();
+};
+
+export const loadSourceSelectionScope = (): SourceSelectionScopeSnapshot | null => readScopeSnapshot();
+
+export const clearSourceSelectionScope = () => {
+  writeScopeSnapshot(null);
+  notifySelectionChange();
 };
 
 export const loadFolderSelectionHandle = async (slot: FolderSlot): Promise<FileSystemDirectoryHandle | null> => {

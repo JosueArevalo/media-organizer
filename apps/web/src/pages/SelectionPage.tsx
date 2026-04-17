@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import {
   loadFolderSelectionHandle,
+  saveSourceSelectionScope,
   loadSourceTreeSnapshot,
   type SourceTreeDirectoryNode,
   type SourceTreeNode
@@ -491,6 +492,21 @@ export const SelectionPage = () => {
       mode === 'files'
     );
   }, [scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles, expandedDirectories, mode]);
+
+  useEffect(() => {
+    if (scanState.status !== 'ready' || !scanState.root) {
+      return;
+    }
+
+    const sortPaths = (paths: Set<string>) => Array.from(paths).sort((left, right) => left.localeCompare(right));
+
+    saveSourceSelectionScope({
+      excludedDirectories: sortPaths(excludedDirectories),
+      excludedFiles: sortPaths(excludedFiles),
+      includedDirectories: sortPaths(includedDirectories),
+      includedFiles: sortPaths(includedFiles)
+    });
+  }, [scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles]);
 
   const totalBytes = summary ? summary.includedBytes + summary.excludedBytes : 0;
   const totalFiles = summary ? summary.includedFiles + summary.excludedFiles : 0;

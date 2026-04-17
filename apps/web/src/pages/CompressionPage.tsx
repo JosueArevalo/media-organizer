@@ -3,8 +3,10 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import {
+  loadSourceSelectionScope,
   loadFolderSelectionHandle,
   loadSourceTreeSnapshot,
+  type SourceSelectionScopeSnapshot,
   type SourceTreeDirectoryNode,
   type SourceTreeNode
 } from '../services/folder-selection.store';
@@ -17,6 +19,13 @@ type MediaStats = {
   imageBytes: number;
   videoCount: number;
   videoBytes: number;
+};
+
+type ScopeSets = {
+  excludedDirectories: Set<string>;
+  excludedFiles: Set<string>;
+  includedDirectories: Set<string>;
+  includedFiles: Set<string>;
 };
 
 type MediaStatsState =
@@ -95,6 +104,60 @@ const createEmptyMediaStats = (): MediaStats => ({
   videoBytes: 0
 });
 
+const createDefaultScopeSets = (): ScopeSets => ({
+  excludedDirectories: new Set(),
+  excludedFiles: new Set(),
+  includedDirectories: new Set(),
+  includedFiles: new Set()
+});
+
+const toScopeSets = (scope: SourceSelectionScopeSnapshot | null): ScopeSets => {
+  if (!scope) {
+    return createDefaultScopeSets();
+  }
+
+  return {
+    excludedDirectories: new Set(scope.excludedDirectories),
+    excludedFiles: new Set(scope.excludedFiles),
+    includedDirectories: new Set(scope.includedDirectories),
+    includedFiles: new Set(scope.includedFiles)
+  };
+};
+
+const isUnderExcludedAncestor = (path: string, scope: ScopeSets) => {
+  const segments = path.split('/').filter(Boolean);
+  let currentPath = '';
+  let ancestorExcluded = false;
+
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    currentPath = currentPath ? `${currentPath}/${segments[index]}` : segments[index];
+
+    if (scope.excludedDirectories.has(currentPath)) {
+      ancestorExcluded = true;
+    }
+
+    if (ancestorExcluded && scope.includedDirectories.has(currentPath)) {
+      ancestorExcluded = false;
+    }
+  }
+
+  return ancestorExcluded;
+};
+
+const isFileIncludedByScope = (path: string, scope: ScopeSets) => {
+  const ancestorExcluded = isUnderExcludedAncestor(path, scope);
+
+  if (scope.excludedFiles.has(path)) {
+    return false;
+  }
+
+  if (!ancestorExcluded) {
+    return true;
+  }
+
+  return scope.includedFiles.has(path);
+};
+
 const mergeMediaStats = (base: MediaStats, extra: MediaStats): MediaStats => ({
   imageCount: base.imageCount + extra.imageCount,
   imageBytes: base.imageBytes + extra.imageBytes,
@@ -102,8 +165,12 @@ const mergeMediaStats = (base: MediaStats, extra: MediaStats): MediaStats => ({
   videoBytes: base.videoBytes + extra.videoBytes
 });
 
-const summarizeSnapshotNode = (node: SourceTreeNode): MediaStats => {
+const summarizeSnapshotNode = (node: SourceTreeNode, scope: ScopeSets): MediaStats => {
   if (node.kind === 'file') {
+    if (!isFileIncludedByScope(node.path, scope)) {
+      return createEmptyMediaStats();
+    }
+
     const kind = getMediaKind(node.name, '', node.fileType);
 
     if (kind === 'image') {
@@ -117,18 +184,31 @@ const summarizeSnapshotNode = (node: SourceTreeNode): MediaStats => {
     return createEmptyMediaStats();
   }
 
-  return node.children.reduce((accumulator, child) => mergeMediaStats(accumulator, summarizeSnapshotNode(child)), createEmptyMediaStats());
+  return node.children.reduce(
+    (accumulator, child) => mergeMediaStats(accumulator, summarizeSnapshotNode(child, scope)),
+    createEmptyMediaStats()
+  );
 };
 
-const summarizeSnapshot = (root: SourceTreeDirectoryNode): MediaStats => summarizeSnapshotNode(root);
+const summarizeSnapshot = (root: SourceTreeDirectoryNode, scope: ScopeSets): MediaStats => summarizeSnapshotNode(root, scope);
 
-const summarizeNativeDirectory = async (handle: FileSystemDirectoryHandle): Promise<MediaStats> => {
+const summarizeNativeDirectory = async (
+  handle: FileSystemDirectoryHandle,
+  scope: ScopeSets,
+  currentPath = handle.name
+): Promise<MediaStats> => {
   let stats = createEmptyMediaStats();
 
-  for await (const [, entry] of handle.entries()) {
+  for await (const [entryName, entry] of handle.entries()) {
+    const entryPath = `${currentPath}/${entryName}`;
+
     if (entry.kind === 'directory') {
-      const childStats = await summarizeNativeDirectory(entry as FileSystemDirectoryHandle);
+      const childStats = await summarizeNativeDirectory(entry as FileSystemDirectoryHandle, scope, entryPath);
       stats = mergeMediaStats(stats, childStats);
+      continue;
+    }
+
+    if (!isFileIncludedByScope(entryPath, scope)) {
       continue;
     }
 
@@ -194,17 +274,6 @@ export const CompressionPage = () => {
   const effectiveImageQuality = imagePreset === 'custom' ? customQuality : (activePreset?.quality ?? 80);
   const selectedImageProfileLabel = imagePreset === 'custom' ? 'Custom' : (activePreset?.label ?? 'Balanced');
   const selectedVideoProfileLabel = videoPreset === 'quality' ? 'Quality' : videoPreset === 'fast' ? 'Fast' : 'Balanced';
-  const imageSavingsHint = useMemo(() => {
-    if (effectiveImageQuality >= 90) {
-      return 'est. 1,100 MB saved';
-    }
-
-    if (effectiveImageQuality >= 80) {
-      return 'est. 1,800 MB saved';
-    }
-
-    return 'est. 2,400 MB saved';
-  }, [effectiveImageQuality]);
 
   useEffect(() => {
     let isActive = true;
@@ -220,13 +289,15 @@ export const CompressionPage = () => {
       try {
         const handle = await loadFolderSelectionHandle('source');
         const snapshot = loadSourceTreeSnapshot('source');
+        const persistedScope = loadSourceSelectionScope();
+        const scopeSets = toScopeSets(persistedScope);
 
         let nextStats: MediaStats | null = null;
 
         if (handle) {
-          nextStats = await summarizeNativeDirectory(handle);
+          nextStats = await summarizeNativeDirectory(handle, scopeSets);
         } else if (snapshot) {
-          nextStats = summarizeSnapshot(snapshot);
+          nextStats = summarizeSnapshot(snapshot, scopeSets);
         }
 
         if (!nextStats) {
