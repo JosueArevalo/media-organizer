@@ -1,4 +1,20 @@
+import { useLocation, useNavigate } from 'react-router-dom';
+
 export const CompressionPage = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleBack = () => {
+    const from = (location.state as { from?: string } | null)?.from;
+
+    if (from && from !== location.pathname) {
+      navigate(from);
+      return;
+    }
+
+    navigate('/selection');
+  };
+
   return (
     <div className="page-stack">
       <div className="page-header">
@@ -75,10 +91,10 @@ export const CompressionPage = () => {
       </div>
 
       <div className="page-footer-actions">
-        <button className="btn btn-secondary" type="button">
+        <button className="btn btn-secondary" type="button" onClick={handleBack}>
           ← Back
         </button>
-        <button className="btn btn-primary" type="button">
+        <button className="btn btn-primary" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })}>
           Continue to Grouping →
         </button>
       </div>

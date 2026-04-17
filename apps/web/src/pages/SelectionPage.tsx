@@ -812,7 +812,11 @@ export const SelectionPage = () => {
         <button className="btn btn-secondary" type="button" onClick={() => navigate('/import')}>
           ← Back
         </button>
-        <button className="btn btn-primary" type="button" onClick={() => navigate('/compression')}>
+        <button
+          className="btn btn-primary"
+          type="button"
+          onClick={() => navigate('/compression', { state: { from: '/selection' } })}
+        >
           Continue to Compression →
         </button>
       </div>

@@ -41,7 +41,7 @@ export const Stepper = ({ steps }: StepperProps) => {
                 {content}
               </div>
             ) : (
-              <Link to={step.path} className={className} aria-current={isActive ? 'page' : undefined}>
+              <Link to={step.path} state={{ from: location.pathname }} className={className} aria-current={isActive ? 'page' : undefined}>
                 {content}
               </Link>
             )}
