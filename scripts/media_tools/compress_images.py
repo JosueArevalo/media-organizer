@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import json
 import os
 import subprocess
@@ -48,15 +49,33 @@ def main() -> int:
             str(args.quality),
             '-progressive',
             '-optimize',
+            '-outfile',
+            str(output_file),
             str(source_file),
         ]
 
-        subprocess.run(command, check=True)
+        status = 'completed'
+        error_message = None
+
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except FileNotFoundError:
+            status = 'failed'
+            error_message = f"Image encoder command not found: {args.encoder_command}"
+        except subprocess.CalledProcessError as error:
+            status = 'failed'
+            stderr = (error.stderr or '').strip()
+            error_message = stderr or f"Image compression failed for {source_file}"
+
+        if status == 'failed':
+            shutil.copy2(source_file, output_file)
 
         manifest.append({
             'source': str(source_file),
             'output': str(output_file),
             'command': command,
+            'status': status,
+            'error': error_message,
         })
 
     print(json.dumps({'items': manifest}, indent=2))

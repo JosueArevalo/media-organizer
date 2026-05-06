@@ -8,8 +8,10 @@ const repoRootDir = path.resolve(currentDir, '../../../../..');
 
 export const getCompressionScriptsDir = () => path.join(repoRootDir, 'scripts', 'media_tools');
 
+export const getPythonCommand = () => process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python';
+
 export const buildImageCompressionCommand = (manifest: CompressionJobManifest) => ({
-  command: manifest.imageToolCommand,
+  command: getPythonCommand(),
   args: [
     path.join(getCompressionScriptsDir(), 'compress_images.py'),
     '--source-dir',
@@ -17,17 +19,23 @@ export const buildImageCompressionCommand = (manifest: CompressionJobManifest) =
     '--output-dir',
     manifest.imageOutputDir,
     '--quality',
-    String(manifest.imageQuality)
+    String(manifest.imageQuality),
+    '--encoder-command',
+    manifest.imageToolCommand
   ]
 });
 
 export const buildVideoCompressionCommand = (manifest: CompressionJobManifest) => ({
-  command: manifest.videoToolCommand,
+  command: getPythonCommand(),
   args: [
     path.join(getCompressionScriptsDir(), 'compress_videos.py'),
     '--source-dir',
     manifest.sourceDir,
     '--output-dir',
-    manifest.videoOutputDir
+    manifest.videoOutputDir,
+    '--preset',
+    manifest.videoPresetLabel.toLowerCase(),
+    '--encoder-command',
+    manifest.videoToolCommand
   ]
 });

@@ -10,7 +10,8 @@ import {
   type SourceTreeDirectoryNode,
   type SourceTreeNode
 } from '../services/folder-selection.store';
-import { completeCompressionJob, startCompressionJob } from '../services/compression-job.store';
+import { completeCompressionJob, failCompressionJob, startCompressionJob } from '../services/compression-job.store';
+import { getCompressionJobRequest, startCompressionJobRequest } from '../services/compression.service';
 
 type ImagePresetId = 'balanced' | 'high' | 'aggressive' | 'custom';
 type VideoPresetId = 'fast' | 'balanced' | 'quality';
@@ -249,6 +250,14 @@ const estimateVideoSavingsRatio = (preset: VideoPresetId) => {
   return 0.32;
 };
 
+const isLikelyAbsolutePath = (value: string) => {
+  if (!value) {
+    return false;
+  }
+
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\') || value.startsWith('/');
+};
+
 export const CompressionPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -258,6 +267,7 @@ export const CompressionPage = () => {
   const [customQuality, setCustomQuality] = useState<number>(72);
   const [videoPreset, setVideoPreset] = useState<VideoPresetId>('balanced');
   const [mediaStatsState, setMediaStatsState] = useState<MediaStatsState>({ status: 'idle', data: null, error: null });
+  const [backendError, setBackendError] = useState<string | null>(null);
   const [isStartingCompression, setIsStartingCompression] = useState(false);
   const completionTimerRef = useRef<number | null>(null);
 
@@ -344,29 +354,70 @@ export const CompressionPage = () => {
     navigate('/selection');
   };
 
-  const handleStartCompression = () => {
-    if (!destinationSelection || mediaStatsState.status === 'error') {
+  const sourcePath = sourceSelection?.name ?? '';
+  const destinationPath = destinationSelection?.name ?? '';
+  const canStartRealCompression = isLikelyAbsolutePath(sourcePath) && isLikelyAbsolutePath(destinationPath);
+
+  const handleStartCompression = async () => {
+    if (!destinationSelection || !sourceSelection || mediaStatsState.status === 'error') {
       return;
     }
 
-    startCompressionJob({
-      imageProfileLabel: selectedImageProfileLabel,
-      imageQuality: effectiveImageQuality,
-      videoPresetLabel: selectedVideoProfileLabel,
-      outputRootLabel: destinationSelection.name
-    });
-
-    setIsStartingCompression(true);
-
-    if (completionTimerRef.current) {
-      window.clearTimeout(completionTimerRef.current);
+    if (!canStartRealCompression) {
+      setBackendError('Real compression requires absolute source and destination paths. Use fallback path mode in Import for now.');
+      return;
     }
 
-    completionTimerRef.current = window.setTimeout(() => {
-      completeCompressionJob();
+    setBackendError(null);
+    setIsStartingCompression(true);
+
+    try {
+      const started = await startCompressionJobRequest({
+        sourceDir: sourcePath,
+        outputDir: destinationPath,
+        imageQuality: effectiveImageQuality,
+        imageProfileLabel: selectedImageProfileLabel,
+        videoPresetLabel: selectedVideoProfileLabel
+      });
+
+      startCompressionJob({
+        backendJobId: started.job.id,
+        imageProfileLabel: selectedImageProfileLabel,
+        imageQuality: effectiveImageQuality,
+        videoPresetLabel: selectedVideoProfileLabel,
+        outputRootLabel: destinationSelection.name
+      });
+
+      const poll = async () => {
+        const job = await getCompressionJobRequest(started.job.id);
+        const status = job.job.status;
+
+        if (status === 'completed') {
+          completeCompressionJob();
+          setIsStartingCompression(false);
+          navigate('/grouping', { state: { from: '/compression' } });
+          return;
+        }
+
+        if (status === 'failed' || status === 'cancelled') {
+          failCompressionJob(`Compression job ended with status: ${status}`);
+          setBackendError(`Compression job ended with status: ${status}`);
+          setIsStartingCompression(false);
+          return;
+        }
+
+        completionTimerRef.current = window.setTimeout(() => {
+          void poll();
+        }, 1000);
+      };
+
+      await poll();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not start compression job.';
+      failCompressionJob(message);
+      setBackendError(message);
       setIsStartingCompression(false);
-      navigate('/grouping', { state: { from: '/compression' } });
-    }, 900);
+    }
   };
 
   useEffect(() => {
@@ -394,9 +445,18 @@ export const CompressionPage = () => {
         <p className="page-summary-note">
           Outputs will be written under the selected Destination folder{destinationSelection ? ` (${destinationSelection.name})` : ''}.
         </p>
+        {!canStartRealCompression && (
+          <p className="error">
+            Real backend compression needs absolute filesystem paths for Source and Destination.
+          </p>
+        )}
+        {backendError && <p className="error">{backendError}</p>}
         {compressionJobState.status === 'idle' && <p className="page-summary-note">No compression job has been started yet.</p>}
         {compressionJobState.status === 'running' && <p className="page-summary-note">Compression jobs are running. Grouping stays locked until they finish.</p>}
         {compressionJobState.status === 'completed' && <p className="page-summary-note">Compression is complete. You can continue to grouping.</p>}
+        {compressionJobState.status === 'failed' && (
+          <p className="error">Compression failed: {compressionJobState.errorMessage ?? 'Check backend logs and tool installation.'}</p>
+        )}
       </div>
 
       <div className="page-grid-2">
@@ -500,7 +560,7 @@ export const CompressionPage = () => {
         <button className="btn btn-secondary" type="button" onClick={handleBack}>
           ← Back
         </button>
-        <button className="btn btn-primary" type="button" onClick={handleStartCompression} disabled={isCompressionRunning}>
+        <button className="btn btn-primary" type="button" onClick={() => void handleStartCompression()} disabled={isCompressionRunning || !canStartRealCompression}>
           {isCompressionRunning ? 'Compression running...' : 'Start Compression Jobs'}
         </button>
         <button className="btn btn-ghost" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })} disabled={!isCompressionComplete}>

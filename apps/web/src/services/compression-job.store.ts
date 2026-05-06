@@ -1,6 +1,7 @@
 export type CompressionJobStatus = 'idle' | 'running' | 'completed' | 'failed';
 
 export type CompressionJobSnapshot = {
+  backendJobId: string | null;
   status: CompressionJobStatus;
   startedAt: number | null;
   completedAt: number | null;
@@ -8,10 +9,12 @@ export type CompressionJobSnapshot = {
   imageQuality: number | null;
   videoPresetLabel: string | null;
   outputRootLabel: string | null;
+  errorMessage: string | null;
   updatedAt: number;
 };
 
 export type CompressionJobStartPayload = {
+  backendJobId: string | null;
   imageProfileLabel: string;
   imageQuality: number;
   videoPresetLabel: string;
@@ -22,6 +25,7 @@ const STORAGE_KEY = 'media-organizer-compression-job';
 const STORAGE_EVENT_NAME = 'media-organizer-compression-job-updated';
 
 const createEmptySnapshot = (): CompressionJobSnapshot => ({
+  backendJobId: null,
   status: 'idle',
   startedAt: null,
   completedAt: null,
@@ -29,6 +33,7 @@ const createEmptySnapshot = (): CompressionJobSnapshot => ({
   imageQuality: null,
   videoPresetLabel: null,
   outputRootLabel: null,
+  errorMessage: null,
   updatedAt: 0
 });
 
@@ -75,6 +80,7 @@ export const isCompressionJobComplete = () => readSnapshot().status === 'complet
 
 export const startCompressionJob = (payload: CompressionJobStartPayload) => {
   const snapshot: CompressionJobSnapshot = {
+    backendJobId: payload.backendJobId,
     status: 'running',
     startedAt: Date.now(),
     completedAt: null,
@@ -82,6 +88,7 @@ export const startCompressionJob = (payload: CompressionJobStartPayload) => {
     imageQuality: payload.imageQuality,
     videoPresetLabel: payload.videoPresetLabel,
     outputRootLabel: payload.outputRootLabel,
+    errorMessage: null,
     updatedAt: Date.now()
   };
 
@@ -101,6 +108,7 @@ export const completeCompressionJob = () => {
     ...current,
     status: 'completed',
     completedAt: Date.now(),
+    errorMessage: null,
     updatedAt: Date.now()
   };
 
@@ -111,6 +119,21 @@ export const completeCompressionJob = () => {
 
 export const resetCompressionJob = () => {
   const snapshot = createEmptySnapshot();
+
+  writeSnapshot(snapshot);
+
+  return snapshot;
+};
+
+export const failCompressionJob = (errorMessage: string) => {
+  const current = readSnapshot();
+  const snapshot: CompressionJobSnapshot = {
+    ...current,
+    status: 'failed',
+    completedAt: Date.now(),
+    errorMessage,
+    updatedAt: Date.now()
+  };
 
   writeSnapshot(snapshot);
 

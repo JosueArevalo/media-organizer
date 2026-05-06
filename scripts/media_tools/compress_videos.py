@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -52,12 +53,28 @@ def main() -> int:
             args.preset,
         ]
 
-        subprocess.run(command, check=True)
+        status = 'completed'
+        error_message = None
+
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except FileNotFoundError:
+            status = 'failed'
+            error_message = f"Video encoder command not found: {args.encoder_command}"
+        except subprocess.CalledProcessError as error:
+            status = 'failed'
+            stderr = (error.stderr or '').strip()
+            error_message = stderr or f"Video compression failed for {source_file}"
+
+        if status == 'failed':
+            shutil.copy2(source_file, output_file)
 
         manifest.append({
             'source': str(source_file),
             'output': str(output_file),
             'command': command,
+            'status': status,
+            'error': error_message,
         })
 
     print(json.dumps({'items': manifest}, indent=2))

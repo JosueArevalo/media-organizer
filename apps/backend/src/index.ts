@@ -3,6 +3,7 @@ import { URL } from 'node:url';
 import { runMigrations } from './state/migrations/runMigrations.js';
 import { getDbPath } from './state/db.js';
 import { getCompressionJob, startCompressionJob } from './pipeline/compression/compressionJob.service.js';
+import { executeCompressionJob } from './pipeline/compression/compressionJob.runner.js';
 
 const port = Number(process.env.PORT ?? 4000);
 
@@ -84,6 +85,10 @@ const server = createServer((req, res) => {
           imageQuality: body.imageQuality,
           imageProfileLabel: body.imageProfileLabel,
           videoPresetLabel: body.videoPresetLabel
+        });
+
+        void executeCompressionJob(result.job.id).catch((error) => {
+          console.error(`[backend] compression job ${result.job.id} failed`, error);
         });
 
         sendJson(res, 201, result);

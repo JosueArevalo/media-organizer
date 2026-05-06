@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 test('startCompressionJob creates a resumable job and output scaffold', async () => {
-  const { startCompressionJob, getCompressionJob } = await import('../src/pipeline/compression/compressionJob.service.js?test=1');
+  const { startCompressionJob, getCompressionJob } = await import('../src/pipeline/compression/compressionJob.service.js');
 
   const result = startCompressionJob({
     name: 'Test compression job',
@@ -72,4 +72,57 @@ test('startCompressionJob creates a resumable job and output scaffold', async ()
   assert.equal(checkpointRows.length, 1);
   assert.equal(checkpointRows[0].stage, 'compress');
   assert.ok(checkpointRows[0].payload_json?.includes('outputRoot'));
+});
+
+test('executeCompressionJob persists per-item compression statuses', async () => {
+  const { startCompressionJob, getCompressionJob } = await import('../src/pipeline/compression/compressionJob.service.js');
+  const { executeCompressionJob } = await import('../src/pipeline/compression/compressionJob.runner.js');
+
+  fs.mkdirSync(path.join(sourceDir, 'album'), { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'album', 'photo.jpg'), 'fake-jpg-content', 'utf8');
+  fs.writeFileSync(path.join(sourceDir, 'album', 'clip.mp4'), 'fake-video-content', 'utf8');
+
+  const started = startCompressionJob({
+    name: 'Execution test job',
+    sourceDir,
+    outputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Balanced',
+    imageToolCommand: '__missing_image_encoder__',
+    videoToolCommand: '__missing_video_encoder__'
+  });
+
+  await executeCompressionJob(started.job.id);
+
+  const persisted = getCompressionJob(started.job.id);
+  assert.ok(persisted);
+  assert.equal(persisted?.job.status, 'failed');
+
+  const db = getDb();
+  const itemRows = db.prepare('SELECT source_path FROM media_items WHERE job_id = ? ORDER BY source_path').all(started.job.id) as Array<{
+    source_path: string;
+  }>;
+  assert.equal(itemRows.length, 2);
+
+  const statusRows = db
+    .prepare(
+      `
+        SELECT iss.status, mi.source_path
+        FROM item_stage_status iss
+        JOIN media_items mi ON mi.id = iss.item_id
+        WHERE iss.job_id = ? AND iss.stage = 'compress'
+        ORDER BY mi.source_path
+      `
+    )
+    .all(started.job.id) as Array<{ status: string; source_path: string }>;
+
+  assert.equal(statusRows.length, 2);
+  assert.deepEqual(statusRows.map((row) => row.status), ['failed', 'failed']);
+
+  const outputImage = path.join(started.outputRoot, 'compressed', 'images', 'album', 'photo.jpg');
+  const outputVideo = path.join(started.outputRoot, 'compressed', 'videos', 'album', 'clip.mp4');
+
+  assert.ok(fs.existsSync(outputImage));
+  assert.ok(fs.existsSync(outputVideo));
 });
