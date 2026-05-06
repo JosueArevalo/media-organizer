@@ -2,6 +2,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Stepper, type StepConfig } from './Stepper';
 import { useTheme } from '../hooks/useTheme';
 import { useImportStepCompletion } from '../hooks/useImportStepCompletion';
+import { useCompressionJobState } from '../hooks/useCompressionJobState';
 
 const workflowStepBlueprint = [
   {
@@ -38,10 +39,17 @@ const AppShell = () => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const isImportStepComplete = useImportStepCompletion();
+  const compressionJobState = useCompressionJobState();
+  const isCompressionComplete = compressionJobState.status === 'completed';
 
   const workflowSteps: StepConfig[] = workflowStepBlueprint.map((step, index) => ({
     ...step,
-    state: index === 0 || isImportStepComplete ? 'pending' : 'locked'
+    state:
+      index === 0 || isImportStepComplete
+        ? step.id === 'grouping' && !isCompressionComplete
+          ? 'locked'
+          : 'pending'
+        : 'locked'
   }));
 
   const currentStep = workflowSteps.find((s) => s.path === location.pathname);
@@ -50,8 +58,8 @@ const AppShell = () => {
   const headerTitles: Record<string, string> = {
     import: 'Prepare your source folders',
     selection: 'Select what gets compressed',
-    compression: 'Tune compression settings',
-    grouping: 'Define the final structure'
+    compression: 'Tune compression settings and launch jobs',
+    grouping: 'Review the final structure'
   };
 
   return (

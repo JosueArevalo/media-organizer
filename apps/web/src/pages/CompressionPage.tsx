@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
 import { useFolderSelections } from '../hooks/useFolderSelections';
+import { useCompressionJobState } from '../hooks/useCompressionJobState';
 import {
   loadSourceSelectionScope,
   loadFolderSelectionHandle,
@@ -10,6 +10,7 @@ import {
   type SourceTreeDirectoryNode,
   type SourceTreeNode
 } from '../services/folder-selection.store';
+import { completeCompressionJob, startCompressionJob } from '../services/compression-job.store';
 
 type ImagePresetId = 'balanced' | 'high' | 'aggressive' | 'custom';
 type VideoPresetId = 'fast' | 'balanced' | 'quality';
@@ -251,11 +252,14 @@ const estimateVideoSavingsRatio = (preset: VideoPresetId) => {
 export const CompressionPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sourceSelection } = useFolderSelections();
+  const { sourceSelection, destinationSelection } = useFolderSelections();
+  const compressionJobState = useCompressionJobState();
   const [imagePreset, setImagePreset] = useState<ImagePresetId>('balanced');
   const [customQuality, setCustomQuality] = useState<number>(72);
   const [videoPreset, setVideoPreset] = useState<VideoPresetId>('balanced');
   const [mediaStatsState, setMediaStatsState] = useState<MediaStatsState>({ status: 'idle', data: null, error: null });
+  const [isStartingCompression, setIsStartingCompression] = useState(false);
+  const completionTimerRef = useRef<number | null>(null);
 
   const activePreset = IMAGE_PRESETS.find((preset) => preset.id === imagePreset);
   const effectiveImageQuality = imagePreset === 'custom' ? customQuality : (activePreset?.quality ?? 80);
@@ -340,13 +344,59 @@ export const CompressionPage = () => {
     navigate('/selection');
   };
 
+  const handleStartCompression = () => {
+    if (!destinationSelection || mediaStatsState.status === 'error') {
+      return;
+    }
+
+    startCompressionJob({
+      imageProfileLabel: selectedImageProfileLabel,
+      imageQuality: effectiveImageQuality,
+      videoPresetLabel: selectedVideoProfileLabel,
+      outputRootLabel: destinationSelection.name
+    });
+
+    setIsStartingCompression(true);
+
+    if (completionTimerRef.current) {
+      window.clearTimeout(completionTimerRef.current);
+    }
+
+    completionTimerRef.current = window.setTimeout(() => {
+      completeCompressionJob();
+      setIsStartingCompression(false);
+      navigate('/grouping', { state: { from: '/compression' } });
+    }, 900);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (completionTimerRef.current) {
+        window.clearTimeout(completionTimerRef.current);
+      }
+    };
+  }, []);
+
+  const isCompressionRunning = compressionJobState.status === 'running' || isStartingCompression;
+  const isCompressionComplete = compressionJobState.status === 'completed';
+
   return (
     <div className="page-stack">
       <div className="page-header">
         <h2 className="page-title">Optimize your media</h2>
         <p className="page-subtitle">
-          Choose compression settings for images and videos. Processing runs in the next step after you confirm grouping.
+          Choose compression settings for images and videos, then launch the compression jobs from here. Grouping unlocks after processing completes.
         </p>
+      </div>
+
+      <div className="page-card">
+        <p className="page-section-title">Compression job</p>
+        <p className="page-summary-note">
+          Outputs will be written under the selected Destination folder{destinationSelection ? ` (${destinationSelection.name})` : ''}.
+        </p>
+        {compressionJobState.status === 'idle' && <p className="page-summary-note">No compression job has been started yet.</p>}
+        {compressionJobState.status === 'running' && <p className="page-summary-note">Compression jobs are running. Grouping stays locked until they finish.</p>}
+        {compressionJobState.status === 'completed' && <p className="page-summary-note">Compression is complete. You can continue to grouping.</p>}
       </div>
 
       <div className="page-grid-2">
@@ -450,8 +500,11 @@ export const CompressionPage = () => {
         <button className="btn btn-secondary" type="button" onClick={handleBack}>
           ← Back
         </button>
-        <button className="btn btn-primary" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })}>
-          Save Compression Settings and Continue →
+        <button className="btn btn-primary" type="button" onClick={handleStartCompression} disabled={isCompressionRunning}>
+          {isCompressionRunning ? 'Compression running...' : 'Start Compression Jobs'}
+        </button>
+        <button className="btn btn-ghost" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })} disabled={!isCompressionComplete}>
+          Continue to Grouping →
         </button>
       </div>
     </div>
