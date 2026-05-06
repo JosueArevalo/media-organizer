@@ -16,6 +16,7 @@ type SelectionState = Record<FolderSlot, FolderSelectionSnapshot | null>;
 
 type PickedDirectory = {
   name: string;
+  path: string | null;
   source: FolderSelectionSource;
   handle?: FileSystemDirectoryHandle;
   treeSnapshot?: SourceTreeDirectoryNode;
@@ -32,11 +33,18 @@ const getDirectoryPicker = () => {
 const askForFolderPath = (slot: FolderSlot) => {
   const label = slot === 'source' ? 'source' : 'destination';
   const enteredPath = window.prompt(
-    `This browser cannot read empty ${label} folders directly. Paste the full folder path to keep it saved locally:`,
+    `Paste the full absolute path for the selected ${label} folder:`,
     ''
   );
 
   return enteredPath?.trim() || null;
+};
+
+const getFolderNameFromPath = (folderPath: string) => {
+  const normalized = folderPath.replace(/\\/g, '/').replace(/\/+$/, '');
+  const segments = normalized.split('/').filter(Boolean);
+
+  return segments[segments.length - 1] || folderPath;
 };
 
 const getFileType = (fileName: string, mimeType = '') => {
@@ -180,10 +188,18 @@ const pickDirectoryWithFallback = async (slot: FolderSlot): Promise<PickedDirect
       if (files.length > 0) {
         const topLevelFolder = files[0].webkitRelativePath.split('/')[0] || files[0].name;
         const treeSnapshot = buildFallbackTreeSnapshot(files);
+        const absolutePath = askForFolderPath(slot);
+
+        if (!absolutePath) {
+          cleanup();
+          resolve(null);
+          return;
+        }
 
         cleanup();
         resolve({
           name: topLevelFolder,
+          path: absolutePath,
           source: 'fallback',
           treeSnapshot: treeSnapshot ?? undefined
         });
@@ -200,7 +216,8 @@ const pickDirectoryWithFallback = async (slot: FolderSlot): Promise<PickedDirect
       }
 
       resolve({
-        name: manualPath,
+        name: getFolderNameFromPath(manualPath),
+        path: manualPath,
         source: 'fallback'
       });
     });
@@ -216,9 +233,15 @@ const pickDirectory = async (slot: FolderSlot): Promise<PickedDirectory | null> 
   if (nativePicker) {
     try {
       const handle = await nativePicker({ mode: slot === 'destination' ? 'readwrite' : 'read' });
+      const absolutePath = askForFolderPath(slot);
+
+      if (!absolutePath) {
+        return null;
+      }
 
       return {
         name: handle.name,
+        path: absolutePath,
         source: 'native',
         handle
       };
@@ -267,6 +290,7 @@ export const useFolderSelections = () => {
     const selection = {
       slot,
       name: pickedDirectory.name,
+      path: pickedDirectory.path,
       updatedAt: Date.now(),
       source: pickedDirectory.source,
       persisted: true
@@ -279,6 +303,7 @@ export const useFolderSelections = () => {
 
     await saveFolderSelection(slot, {
       name: pickedDirectory.name,
+      path: pickedDirectory.path,
       source: pickedDirectory.source,
       handle: pickedDirectory.handle
     });

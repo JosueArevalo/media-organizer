@@ -25,6 +25,7 @@ export type SourceTreeNode = SourceTreeDirectoryNode | SourceTreeFileNode;
 export type FolderSelectionSnapshot = {
   slot: FolderSlot;
   name: string;
+  path: string | null;
   updatedAt: number;
   source: FolderSelectionSource;
   persisted: boolean;
@@ -40,6 +41,7 @@ export type SourceSelectionScopeSnapshot = {
 
 type SelectionMetadata = {
   name: string;
+  path: string | null;
   updatedAt: number;
   source: FolderSelectionSource;
 };
@@ -237,6 +239,7 @@ const deleteRecord = async (slot: FolderSlot) => {
 const toSnapshot = (slot: FolderSlot, metadata: SelectionMetadata, persisted: boolean): FolderSelectionSnapshot => ({
   slot,
   name: metadata.name,
+  path: metadata.path ?? null,
   updatedAt: metadata.updatedAt,
   source: metadata.source,
   persisted
@@ -265,13 +268,14 @@ export const loadFolderSelections = async (): Promise<SelectionState> => {
 
 export const saveFolderSelection = async (
   slot: FolderSlot,
-  selection: { name: string; source: FolderSelectionSource; handle?: FileSystemDirectoryHandle }
+  selection: { name: string; path: string | null; source: FolderSelectionSource; handle?: FileSystemDirectoryHandle }
 ) => {
   const metadata = readMetadata();
   const nextMetadata = {
     ...metadata,
     [slot]: {
       name: selection.name,
+      path: selection.path,
       updatedAt: Date.now(),
       source: selection.source
     }
@@ -289,6 +293,7 @@ export const saveFolderSelection = async (
     await writeRecord({
       slot,
       name: selection.name,
+      path: selection.path,
       updatedAt: nextMetadata[slot]?.updatedAt ?? Date.now(),
       source: selection.source,
       handle: selection.handle

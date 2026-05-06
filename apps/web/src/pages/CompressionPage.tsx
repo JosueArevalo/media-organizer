@@ -354,8 +354,8 @@ export const CompressionPage = () => {
     navigate('/selection');
   };
 
-  const sourcePath = sourceSelection?.name ?? '';
-  const destinationPath = destinationSelection?.name ?? '';
+  const sourcePath = sourceSelection?.path ?? '';
+  const destinationPath = destinationSelection?.path ?? '';
   const canStartRealCompression = isLikelyAbsolutePath(sourcePath) && isLikelyAbsolutePath(destinationPath);
 
   const handleStartCompression = async () => {
@@ -385,7 +385,7 @@ export const CompressionPage = () => {
         imageProfileLabel: selectedImageProfileLabel,
         imageQuality: effectiveImageQuality,
         videoPresetLabel: selectedVideoProfileLabel,
-        outputRootLabel: destinationSelection.name
+        outputRootLabel: destinationPath
       });
 
       const poll = async () => {
@@ -443,7 +443,7 @@ export const CompressionPage = () => {
       <div className="page-card">
         <p className="page-section-title">Compression job</p>
         <p className="page-summary-note">
-          Outputs will be written under the selected Destination folder{destinationSelection ? ` (${destinationSelection.name})` : ''}.
+          Outputs will be written under the selected Destination folder{destinationPath ? ` (${destinationPath})` : ''}.
         </p>
         {!canStartRealCompression && (
           <p className="error">

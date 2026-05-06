@@ -44,6 +44,7 @@ export const FolderPickerCard = ({
         ) : selection ? (
           <>
             <p className="folder-picker-value">{selection.name}</p>
+            {selection.path && <p className="folder-picker-meta">Path: {selection.path}</p>}
             <p className="folder-picker-meta">
               Saved {formatTimestamp(selection.updatedAt)} {selection.persisted ? '• persisted locally' : ''}
             </p>
