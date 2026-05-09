@@ -8,14 +8,16 @@ export const ImportPage = () => {
     sourceSelection,
     destinationSelection,
     isLoading,
-    supportsNativeDirectoryPicker,
-    pickSourceFolder,
-    pickDestinationFolder,
+    updateSourceFolderPath,
+    updateDestinationFolderPath,
     clearSourceFolder,
     clearDestinationFolder
   } = useFolderSelections();
 
-  const canContinue = Boolean(sourceSelection && destinationSelection);
+  const canContinue = Boolean(
+    sourceSelection?.path?.trim() &&
+    destinationSelection?.path?.trim()
+  );
 
   const handleContinue = () => {
     if (!canContinue) {
@@ -41,8 +43,7 @@ export const ImportPage = () => {
           description="Where your photos and videos are"
           selection={sourceSelection}
           isLoading={isLoading}
-          pickLabel="Choose source folder"
-          onPick={pickSourceFolder}
+          onPathChange={updateSourceFolderPath}
           onClear={clearSourceFolder}
         />
 
@@ -52,8 +53,7 @@ export const ImportPage = () => {
           description="Where to save organized files"
           selection={destinationSelection}
           isLoading={isLoading}
-          pickLabel="Choose destination folder"
-          onPick={pickDestinationFolder}
+          onPathChange={updateDestinationFolderPath}
           onClear={clearDestinationFolder}
         />
       </div>

@@ -4,6 +4,7 @@ import { runMigrations } from './state/migrations/runMigrations.js';
 import { getDbPath } from './state/db.js';
 import { getCompressionJob, startCompressionJob } from './pipeline/compression/compressionJob.service.js';
 import { executeCompressionJob } from './pipeline/compression/compressionJob.runner.js';
+import { scanSourceTreeByPath } from './pipeline/source/sourceTreeScan.service.js';
 
 const port = Number(process.env.PORT ?? 4000);
 
@@ -96,6 +97,29 @@ const server = createServer((req, res) => {
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to start compression job.'
+        });
+      }
+    })();
+
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/source-tree/scan' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as { sourcePath?: string } | null;
+
+        if (!body?.sourcePath || !body.sourcePath.trim()) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'sourcePath is required.' });
+          return;
+        }
+
+        const tree = await scanSourceTreeByPath(body.sourcePath.trim());
+        sendJson(res, 200, { tree });
+      } catch (error) {
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not scan source path.'
         });
       }
     })();

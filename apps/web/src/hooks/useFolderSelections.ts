@@ -1,44 +1,14 @@
 import { useEffect, useState } from 'react';
 import {
   clearFolderSelection,
-  clearSourceTreeSnapshot,
   getDefaultFolderSelections,
   loadFolderSelections,
-  saveSourceTreeSnapshot,
   saveFolderSelection,
   type FolderSelectionSnapshot,
-  type FolderSlot,
-  type FolderSelectionSource,
-  type SourceTreeDirectoryNode
+  type FolderSlot
 } from '../services/folder-selection.store';
 
 type SelectionState = Record<FolderSlot, FolderSelectionSnapshot | null>;
-
-type PickedDirectory = {
-  name: string;
-  path: string | null;
-  source: FolderSelectionSource;
-  handle?: FileSystemDirectoryHandle;
-  treeSnapshot?: SourceTreeDirectoryNode;
-};
-
-const getDirectoryPicker = () => {
-  const nativeWindow = window as Window & {
-    showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
-  };
-
-  return nativeWindow.showDirectoryPicker;
-};
-
-const askForFolderPath = (slot: FolderSlot) => {
-  const label = slot === 'source' ? 'source' : 'destination';
-  const enteredPath = window.prompt(
-    `Paste the full absolute path for the selected ${label} folder:`,
-    ''
-  );
-
-  return enteredPath?.trim() || null;
-};
 
 const getFolderNameFromPath = (folderPath: string) => {
   const normalized = folderPath.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -47,221 +17,12 @@ const getFolderNameFromPath = (folderPath: string) => {
   return segments[segments.length - 1] || folderPath;
 };
 
-const getFileType = (fileName: string, mimeType = '') => {
-  if (mimeType.startsWith('image/')) {
-    return 'Image';
-  }
-
-  if (mimeType.startsWith('video/')) {
-    return 'Video';
-  }
-
-  const extension = fileName.split('.').pop()?.toLowerCase() ?? '';
-
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif'].includes(extension)) {
-    return 'Image';
-  }
-
-  if (['mp4', 'mov', 'm4v', 'avi', 'mkv'].includes(extension)) {
-    return 'Video';
-  }
-
-  if (['pdf', 'doc', 'docx', 'txt'].includes(extension)) {
-    return 'Document';
-  }
-
-  return 'File';
-};
-
-type TreeBuilderFile = {
-  kind: 'file';
-  name: string;
-  path: string;
-  sizeBytes: number;
-  fileType: string;
-};
-
-type TreeBuilderDirectory = {
-  kind: 'directory';
-  name: string;
-  path: string;
-  children: Map<string, TreeBuilderDirectory | TreeBuilderFile>;
-};
-
-const createDirectoryNode = (name: string, path: string): TreeBuilderDirectory => ({
-  kind: 'directory',
-  name,
-  path,
-  children: new Map()
-});
-
-const finalizeDirectoryNode = (node: TreeBuilderDirectory): SourceTreeDirectoryNode => {
-  const children = Array.from(node.children.values()).map((child) =>
-    child.kind === 'directory' ? finalizeDirectoryNode(child) : child
-  );
-
-  const summary = children.reduce(
-    (accumulator, child) => {
-      accumulator.sizeBytes += child.sizeBytes;
-
-      if (child.kind === 'file') {
-        accumulator.fileCount += 1;
-      } else {
-        accumulator.fileCount += child.fileCount;
-        accumulator.directoryCount += 1 + child.directoryCount;
-      }
-
-      return accumulator;
-    },
-    { sizeBytes: 0, fileCount: 0, directoryCount: 0 }
-  );
-
-  return {
-    kind: 'directory',
-    name: node.name,
-    path: node.path,
-    sizeBytes: summary.sizeBytes,
-    fileCount: summary.fileCount,
-    directoryCount: summary.directoryCount,
-    children
-  };
-};
-
-const buildFallbackTreeSnapshot = (files: File[]): SourceTreeDirectoryNode | null => {
-  if (files.length === 0) {
-    return null;
-  }
-
-  const rootName = files[0].webkitRelativePath.split('/')[0] || files[0].name;
-  const root = createDirectoryNode(rootName, rootName);
-
-  for (const file of files) {
-    const segments = file.webkitRelativePath.split('/').filter(Boolean);
-    const fileName = segments[segments.length - 1] || file.name;
-    const folderSegments = segments.slice(1, -1);
-
-    let currentNode = root;
-    let currentPath = rootName;
-
-    for (const segment of folderSegments) {
-      currentPath = `${currentPath}/${segment}`;
-
-      let childNode = currentNode.children.get(segment);
-
-      if (!childNode || childNode.kind !== 'directory') {
-        childNode = createDirectoryNode(segment, currentPath);
-        currentNode.children.set(segment, childNode);
-      }
-
-      currentNode = childNode;
-    }
-
-    const filePath = `${rootName}/${segments.slice(1).join('/') || fileName}`;
-    currentNode.children.set(fileName, {
-      kind: 'file',
-      name: fileName,
-      path: filePath,
-      sizeBytes: file.size,
-      fileType: getFileType(fileName, file.type)
-    });
-  }
-
-  return finalizeDirectoryNode(root);
-};
-
-const pickDirectoryWithFallback = async (slot: FolderSlot): Promise<PickedDirectory | null> => {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.multiple = true;
-  input.setAttribute('webkitdirectory', '');
-  input.setAttribute('directory', '');
-  input.style.display = 'none';
-
-  return new Promise((resolve) => {
-    const cleanup = () => {
-      input.remove();
-    };
-
-    input.addEventListener('change', () => {
-      const files = Array.from(input.files ?? []);
-
-      if (files.length > 0) {
-        const topLevelFolder = files[0].webkitRelativePath.split('/')[0] || files[0].name;
-        const treeSnapshot = buildFallbackTreeSnapshot(files);
-        const absolutePath = askForFolderPath(slot);
-
-        if (!absolutePath) {
-          cleanup();
-          resolve(null);
-          return;
-        }
-
-        cleanup();
-        resolve({
-          name: topLevelFolder,
-          path: absolutePath,
-          source: 'fallback',
-          treeSnapshot: treeSnapshot ?? undefined
-        });
-        return;
-      }
-
-      cleanup();
-
-      const manualPath = askForFolderPath(slot);
-
-      if (!manualPath) {
-        resolve(null);
-        return;
-      }
-
-      resolve({
-        name: getFolderNameFromPath(manualPath),
-        path: manualPath,
-        source: 'fallback'
-      });
-    });
-
-    document.body.appendChild(input);
-    input.click();
-  });
-};
-
-const pickDirectory = async (slot: FolderSlot): Promise<PickedDirectory | null> => {
-  const nativePicker = getDirectoryPicker();
-
-  if (nativePicker) {
-    try {
-      const handle = await nativePicker({ mode: slot === 'destination' ? 'readwrite' : 'read' });
-      const absolutePath = askForFolderPath(slot);
-
-      if (!absolutePath) {
-        return null;
-      }
-
-      return {
-        name: handle.name,
-        path: absolutePath,
-        source: 'native',
-        handle
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  return pickDirectoryWithFallback(slot);
-};
-
 export const useFolderSelections = () => {
   const [selections, setSelections] = useState<SelectionState>(getDefaultFolderSelections);
   const [isLoading, setIsLoading] = useState(true);
-  const [supportsNativeDirectoryPicker, setSupportsNativeDirectoryPicker] = useState(false);
 
   useEffect(() => {
     let isActive = true;
-
-    setSupportsNativeDirectoryPicker(typeof window !== 'undefined' && 'showDirectoryPicker' in window);
 
     loadFolderSelections()
       .then((loadedSelections) => {
@@ -280,43 +41,57 @@ export const useFolderSelections = () => {
     };
   }, []);
 
-  const pickFolder = async (slot: FolderSlot) => {
-    const pickedDirectory = await pickDirectory(slot);
+  const updateFolderPath = async (slot: FolderSlot, path: string) => {
+    const nextPath = path.trim();
 
-    if (!pickedDirectory) {
+    if (!nextPath) {
       return;
     }
 
-    const selection = {
-      slot,
-      name: pickedDirectory.name,
-      path: pickedDirectory.path,
-      updatedAt: Date.now(),
-      source: pickedDirectory.source,
-      persisted: true
-    } as FolderSelectionSnapshot;
+    const nextName = getFolderNameFromPath(nextPath);
+    const currentSelection = selections[slot];
+
+    if (!currentSelection) {
+      const newSelection: FolderSelectionSnapshot = {
+        slot,
+        name: nextName,
+        path: nextPath,
+        updatedAt: Date.now(),
+        source: 'fallback',
+        persisted: true
+      } as FolderSelectionSnapshot;
+
+      setSelections((currentSelections) => ({
+        ...currentSelections,
+        [slot]: newSelection
+      }));
+
+      await saveFolderSelection(slot, {
+        name: newSelection.name,
+        path: newSelection.path,
+        source: newSelection.source
+      });
+
+      return;
+    }
+
+    const nextSelection: FolderSelectionSnapshot = {
+      ...currentSelection,
+      name: nextName,
+      path: nextPath,
+      updatedAt: Date.now()
+    };
 
     setSelections((currentSelections) => ({
       ...currentSelections,
-      [slot]: selection
+      [slot]: nextSelection
     }));
 
     await saveFolderSelection(slot, {
-      name: pickedDirectory.name,
-      path: pickedDirectory.path,
-      source: pickedDirectory.source,
-      handle: pickedDirectory.handle
+      name: nextName,
+      path: nextPath,
+      source: currentSelection.source
     });
-
-    if (slot === 'source') {
-      if (pickedDirectory.source === 'fallback' && pickedDirectory.treeSnapshot) {
-        saveSourceTreeSnapshot('source', pickedDirectory.treeSnapshot);
-      }
-
-      if (pickedDirectory.source === 'native') {
-        clearSourceTreeSnapshot('source');
-      }
-    }
   };
 
   const clearFolder = async (slot: FolderSlot) => {
@@ -332,9 +107,8 @@ export const useFolderSelections = () => {
     sourceSelection: selections.source,
     destinationSelection: selections.destination,
     isLoading,
-    supportsNativeDirectoryPicker,
-    pickSourceFolder: () => pickFolder('source'),
-    pickDestinationFolder: () => pickFolder('destination'),
+    updateSourceFolderPath: (path: string) => updateFolderPath('source', path),
+    updateDestinationFolderPath: (path: string) => updateFolderPath('destination', path),
     clearSourceFolder: () => clearFolder('source'),
     clearDestinationFolder: () => clearFolder('destination')
   };

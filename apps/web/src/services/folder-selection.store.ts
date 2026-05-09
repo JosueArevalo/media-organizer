@@ -299,7 +299,19 @@ export const saveFolderSelection = async (
       handle: selection.handle
     });
   } else {
-    await deleteRecord(slot);
+    const existingRecord = await readRecord(slot);
+
+    if (existingRecord) {
+      await writeRecord({
+        ...existingRecord,
+        name: selection.name,
+        path: selection.path,
+        updatedAt: nextMetadata[slot]?.updatedAt ?? Date.now(),
+        source: selection.source
+      });
+    } else {
+      await deleteRecord(slot);
+    }
   }
 
   notifySelectionChange();
