@@ -10,7 +10,7 @@ import {
   type SourceTreeDirectoryNode,
   type SourceTreeNode
 } from '../services/folder-selection.store';
-import { completeCompressionJob, failCompressionJob, startCompressionJob } from '../services/compression-job.store';
+import { completeCompressionJob, failCompressionJob, startCompressionJob, resetCompressionJob } from '../services/compression-job.store';
 import { getCompressionJobRequest, startCompressionJobRequest } from '../services/compression.service';
 
 type ImagePresetId = 'balanced' | 'high' | 'aggressive' | 'custom';
@@ -146,7 +146,46 @@ const isUnderExcludedAncestor = (path: string, scope: ScopeSets) => {
   return ancestorExcluded;
 };
 
-const isFileIncludedByScope = (path: string, scope: ScopeSets) => {
+const extractCompressionErrorDetails = (payloadJson: string | null): { completedCount: number; failedCount: number; failedItems: Array<{ source: string; error?: string }> } => {
+  if (!payloadJson) {
+    return { completedCount: 0, failedCount: 0, failedItems: [] };
+  }
+
+  try {
+    const payload = JSON.parse(payloadJson) as {
+      summary?: { completedItems: number; failedItems: number };
+      image?: { items: Array<{ source: string; status: string; error?: string }> };
+      video?: { items: Array<{ source: string; status: string; error?: string }> };
+    };
+
+    const completedCount = payload.summary?.completedItems ?? 0;
+    const failedCount = payload.summary?.failedItems ?? 0;
+
+    const failedItems: Array<{ source: string; error?: string }> = [];
+
+    if (payload.image?.items) {
+      for (const item of payload.image.items) {
+        if (item.status === 'failed') {
+          failedItems.push({ source: item.source, error: item.error });
+        }
+      }
+    }
+
+    if (payload.video?.items) {
+      for (const item of payload.video.items) {
+        if (item.status === 'failed') {
+          failedItems.push({ source: item.source, error: item.error });
+        }
+      }
+    }
+
+    return { completedCount, failedCount, failedItems };
+  } catch (e) {
+    return { completedCount: 0, failedCount: 0, failedItems: [] };
+  }
+};
+
+function isFileIncludedByScope(path: string, scope: ScopeSets) {
   const ancestorExcluded = isUnderExcludedAncestor(path, scope);
 
   if (scope.excludedFiles.has(path)) {
@@ -158,7 +197,7 @@ const isFileIncludedByScope = (path: string, scope: ScopeSets) => {
   }
 
   return scope.includedFiles.has(path);
-};
+}
 
 const mergeMediaStats = (base: MediaStats, extra: MediaStats): MediaStats => ({
   imageCount: base.imageCount + extra.imageCount,
@@ -400,8 +439,31 @@ export const CompressionPage = () => {
         }
 
         if (status === 'failed' || status === 'cancelled') {
-          failCompressionJob(`Compression job ended with status: ${status}`);
-          setBackendError(`Compression job ended with status: ${status}`);
+          const errorDetails = extractCompressionErrorDetails(job.checkpoint?.payloadJson ?? null);
+          let errorMessage = `Compression job ended with status: ${status}`;
+
+          if (errorDetails.failedCount > 0) {
+            errorMessage = `${errorDetails.completedCount} items completed, ${errorDetails.failedCount} items failed`;
+
+            if (errorDetails.failedItems.length > 0) {
+              const failedReasons = errorDetails.failedItems
+                .slice(0, 3)
+                .map((item) => {
+                  const reason = item.error || 'Unknown error';
+                  return `• ${item.source.split('/').pop() || item.source}: ${reason}`;
+                })
+                .join('\n');
+
+              errorMessage += `\n\nFailed items:\n${failedReasons}`;
+
+              if (errorDetails.failedItems.length > 3) {
+                errorMessage += `\n... and ${errorDetails.failedItems.length - 3} more`;
+              }
+            }
+          }
+
+          failCompressionJob(errorMessage);
+          setBackendError(errorMessage);
           setIsStartingCompression(false);
           return;
         }
@@ -450,12 +512,25 @@ export const CompressionPage = () => {
             Real backend compression needs absolute filesystem paths for Source and Destination.
           </p>
         )}
-        {backendError && <p className="error">{backendError}</p>}
+        {backendError && (
+          <pre className="error compression-error-details">
+            {backendError}
+          </pre>
+        )}
         {compressionJobState.status === 'idle' && <p className="page-summary-note">No compression job has been started yet.</p>}
         {compressionJobState.status === 'running' && <p className="page-summary-note">Compression jobs are running. Grouping stays locked until they finish.</p>}
         {compressionJobState.status === 'completed' && <p className="page-summary-note">Compression is complete. You can continue to grouping.</p>}
         {compressionJobState.status === 'failed' && (
-          <p className="error">Compression failed: {compressionJobState.errorMessage ?? 'Check backend logs and tool installation.'}</p>
+          <div className="compression-error-section">
+            <p className="error">Compression failed: {compressionJobState.errorMessage ?? 'Check backend logs and tool installation.'}</p>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => resetCompressionJob()}
+            >
+              ↻ Try Again
+            </button>
+          </div>
         )}
       </div>
 
