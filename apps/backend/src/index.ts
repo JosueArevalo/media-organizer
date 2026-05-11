@@ -7,6 +7,7 @@ import { getDbPath } from './state/db.js';
 import { getCompressionJob, startCompressionJob } from './pipeline/compression/compressionJob.service.js';
 import { executeCompressionJob } from './pipeline/compression/compressionJob.runner.js';
 import { scanSourceTreeByPath } from './pipeline/source/sourceTreeScan.service.js';
+import { resolveToolCommand } from './pipeline/compression/toolCommandResolver.js';
 
 const port = Number(process.env.PORT ?? 4000);
 
@@ -83,6 +84,8 @@ const server = createServer((req, res) => {
               imageQuality?: number;
               imageProfileLabel?: string;
               videoPresetLabel?: string;
+              imageToolCommand?: string;
+              videoToolCommand?: string;
             }
           | null;
 
@@ -97,7 +100,9 @@ const server = createServer((req, res) => {
           outputDir: body.outputDir,
           imageQuality: body.imageQuality,
           imageProfileLabel: body.imageProfileLabel,
-          videoPresetLabel: body.videoPresetLabel
+          videoPresetLabel: body.videoPresetLabel,
+          imageToolCommand: body.imageToolCommand,
+          videoToolCommand: body.videoToolCommand
         });
 
         void executeCompressionJob(result.job.id).catch((error) => {
@@ -183,6 +188,34 @@ const server = createServer((req, res) => {
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not clear destination folder.'
+        });
+      }
+    })();
+
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/system/maintenance/resolve-command' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as { command?: string } | null;
+        const command = body?.command?.trim() ?? '';
+
+        if (!command) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'command is required.' });
+          return;
+        }
+
+        const resolvedPath = resolveToolCommand(command);
+        sendJson(res, 200, {
+          status: 'ok',
+          command,
+          resolvedPath
+        });
+      } catch (error) {
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not resolve command path.'
         });
       }
     })();

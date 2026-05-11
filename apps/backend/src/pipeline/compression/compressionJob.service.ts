@@ -10,6 +10,7 @@ import {
   buildCompressionJobOutputRoot,
   buildCompressionVideosOutputDir
 } from './compressionJob.paths.js';
+import { resolveToolCommand } from './toolCommandResolver.js';
 
 export type CompressionJobRequest = {
   name?: string;
@@ -127,6 +128,10 @@ export const startCompressionJob = (request: CompressionJobRequest): Compression
   const imageOutputDir = buildCompressionImagesOutputDir(outputRoot);
   const videoOutputDir = buildCompressionVideosOutputDir(outputRoot);
   const manifestPath = buildCompressionJobManifestPath(outputRoot);
+  const imageCommandFromRequest = request.imageToolCommand?.trim() || 'cjpeg';
+  const videoCommandFromRequest = request.videoToolCommand?.trim() || 'HandBrakeCLI';
+  const resolvedImageCommand = resolveToolCommand(imageCommandFromRequest) ?? imageCommandFromRequest;
+  const resolvedVideoCommand = resolveToolCommand(videoCommandFromRequest) ?? videoCommandFromRequest;
   const manifest: CompressionJobManifest = {
     jobId,
     sourceDir: request.sourceDir,
@@ -137,8 +142,8 @@ export const startCompressionJob = (request: CompressionJobRequest): Compression
     imageQuality: request.imageQuality,
     imageProfileLabel: request.imageProfileLabel,
     videoPresetLabel: request.videoPresetLabel,
-    imageToolCommand: request.imageToolCommand ?? 'cjpeg',
-    videoToolCommand: request.videoToolCommand ?? 'HandBrakeCLI',
+    imageToolCommand: resolvedImageCommand,
+    videoToolCommand: resolvedVideoCommand,
     createdAt: timestamp
   };
 

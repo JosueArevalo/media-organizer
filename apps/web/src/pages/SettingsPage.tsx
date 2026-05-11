@@ -31,6 +31,7 @@ const SettingsPage = () => {
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [toolPathMessage, setToolPathMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [maintenanceMessage, setMaintenanceMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isResettingState, setIsResettingState] = useState(false);
   const [isClearingDestination, setIsClearingDestination] = useState(false);
@@ -71,15 +72,56 @@ const SettingsPage = () => {
     );
   };
 
+  const resolveToolPath = async (candidate: string) => {
+    const response = await fetch('/api/system/maintenance/resolve-command', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ command: candidate })
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as { resolvedPath?: string | null };
+    return payload.resolvedPath ?? null;
+  };
+
   const handleBrowse = (tool: 'image' | 'video') => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.exe';
-    input.onchange = (e) => {
+    input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file) {
-        const path = (file as any).path || file.name;
-        handlePathChange(tool, path);
+        const fileWithPath = file as File & { path?: string };
+        const rawPath = (typeof fileWithPath.path === 'string' && fileWithPath.path.trim().length > 0)
+          ? fileWithPath.path.trim()
+          : file.name;
+
+        const resolvedPath = await resolveToolPath(rawPath);
+        const nextPath = resolvedPath ?? rawPath;
+
+        handlePathChange(tool, nextPath);
+
+        if (resolvedPath) {
+          setToolPathMessage({
+            type: 'success',
+            text: `Resolved full path: ${resolvedPath}`
+          });
+        } else if (!rawPath.includes('\\') && !rawPath.includes('/')) {
+          setToolPathMessage({
+            type: 'error',
+            text: 'Browser returned only the file name. Paste an absolute path manually if this command is not in PATH.'
+          });
+        } else {
+          setToolPathMessage({
+            type: 'success',
+            text: `Selected path: ${nextPath}`
+          });
+        }
       }
     };
     input.click();
@@ -311,6 +353,12 @@ const SettingsPage = () => {
         {saveMessage && (
           <div className={`message message-${saveMessage.type}`}>
             {saveMessage.text}
+          </div>
+        )}
+
+        {toolPathMessage && (
+          <div className={`message message-${toolPathMessage.type}`}>
+            {toolPathMessage.text}
           </div>
         )}
 
