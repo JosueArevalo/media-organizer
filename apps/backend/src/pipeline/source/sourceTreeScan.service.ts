@@ -99,7 +99,7 @@ const scanDirectory = async (
 
   return {
     kind: 'directory',
-    name: basename(rootAbsolutePath),
+    name: basename(absoluteDirPath),
     path: logicalPath,
     depth,
     sizeBytes,

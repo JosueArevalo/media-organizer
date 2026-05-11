@@ -12,6 +12,7 @@ import {
 } from '../services/folder-selection.store';
 import { completeCompressionJob, failCompressionJob, startCompressionJob, resetCompressionJob } from '../services/compression-job.store';
 import { getCompressionJobRequest, startCompressionJobRequest } from '../services/compression.service';
+import { scanSourceTreeRequest } from '../services/source-tree.service';
 
 type ImagePresetId = 'balanced' | 'high' | 'aggressive' | 'custom';
 type VideoPresetId = 'fast' | 'balanced' | 'quality';
@@ -112,6 +113,24 @@ const createDefaultScopeSets = (): ScopeSets => ({
   includedDirectories: new Set(),
   includedFiles: new Set()
 });
+
+type ScannedDirectory = {
+  kind: 'directory';
+  name: string;
+  path: string;
+  depth: number;
+  sizeBytes: number;
+  fileCount: number;
+  directoryCount: number;
+  children: Array<ScannedDirectory | {
+    kind: 'file';
+    name: string;
+    path: string;
+    depth: number;
+    sizeBytes: number;
+    fileType: string;
+  }>;
+};
 
 const toScopeSets = (scope: SourceSelectionScopeSnapshot | null): ScopeSets => {
   if (!scope) {
@@ -338,6 +357,9 @@ export const CompressionPage = () => {
           nextStats = await summarizeNativeDirectory(handle, scopeSets);
         } else if (snapshot) {
           nextStats = summarizeSnapshot(snapshot, scopeSets);
+        } else if (sourceSelection.path) {
+          const scannedTree = await scanSourceTreeRequest(sourceSelection.path);
+          nextStats = summarizeSnapshot(scannedTree as SourceTreeDirectoryNode, scopeSets);
         }
 
         if (!nextStats) {
