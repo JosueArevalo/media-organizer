@@ -10,6 +10,7 @@ import {
   type SourceTreeDirectoryNode,
   type SourceTreeNode
 } from '../services/folder-selection.store';
+import { loadEncoderSettings, type EncoderSettingsSnapshot } from '../services/encoder-settings.store';
 import { completeCompressionJob, failCompressionJob, startCompressionJob, resetCompressionJob } from '../services/compression-job.store';
 import { getCompressionJobRequest, startCompressionJobRequest } from '../services/compression.service';
 import { scanSourceTreeRequest } from '../services/source-tree.service';
@@ -327,12 +328,23 @@ export const CompressionPage = () => {
   const [mediaStatsState, setMediaStatsState] = useState<MediaStatsState>({ status: 'idle', data: null, error: null });
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isStartingCompression, setIsStartingCompression] = useState(false);
+  const [encoderSettings, setEncoderSettings] = useState<EncoderSettingsSnapshot>({
+    imageToolCommand: '',
+    videoToolCommand: '',
+    updatedAt: 0
+  });
   const completionTimerRef = useRef<number | null>(null);
 
   const activePreset = IMAGE_PRESETS.find((preset) => preset.id === imagePreset);
   const effectiveImageQuality = imagePreset === 'custom' ? customQuality : (activePreset?.quality ?? 80);
   const selectedImageProfileLabel = imagePreset === 'custom' ? 'Custom' : (activePreset?.label ?? 'Balanced');
   const selectedVideoProfileLabel = videoPreset === 'quality' ? 'Quality' : videoPreset === 'fast' ? 'Fast' : 'Balanced';
+
+  useEffect(() => {
+    loadEncoderSettings().then((settings) => {
+      setEncoderSettings(settings);
+    });
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -438,7 +450,9 @@ export const CompressionPage = () => {
         outputDir: destinationPath,
         imageQuality: effectiveImageQuality,
         imageProfileLabel: selectedImageProfileLabel,
-        videoPresetLabel: selectedVideoProfileLabel
+        videoPresetLabel: selectedVideoProfileLabel,
+        imageToolCommand: encoderSettings.imageToolCommand,
+        videoToolCommand: encoderSettings.videoToolCommand
       });
 
       startCompressionJob({

@@ -5,6 +5,8 @@ export type CompressionJobRequest = {
   imageQuality: number;
   imageProfileLabel: string;
   videoPresetLabel: string;
+  imageToolCommand?: string;
+  videoToolCommand?: string;
 };
 
 export type CompressionJobApiResponse = {

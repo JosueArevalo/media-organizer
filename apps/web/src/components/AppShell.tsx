@@ -86,6 +86,9 @@ const AppShell = () => {
           <Link to="/jobs" className={`quick-link ${isJobs ? 'active' : ''}`}>
             ⚙️ Jobs
           </Link>
+          <Link to="/settings" className={`quick-link ${location.pathname === '/settings' ? 'active' : ''}`}>
+            🔧 Settings
+          </Link>
         </section>
 
         {/* Settings footer */}

@@ -8,6 +8,7 @@ import GroupingPage from './pages/GroupingPage';
 import ImportPage from './pages/ImportPage';
 import JobsPage from './pages/JobsPage';
 import SelectionPage from './pages/SelectionPage';
+import SettingsPage from './pages/SettingsPage';
 
 const GuardedWorkflowStep = ({ children }: { children: JSX.Element }) => {
   const isImportStepComplete = useImportStepCompletion();
@@ -42,6 +43,7 @@ const App = () => {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/import" element={<ImportPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route
             path="/selection"
             element={
