@@ -4,6 +4,12 @@ import {
   saveEncoderSettings,
   type EncoderSettingsSnapshot
 } from '../services/encoder-settings.store';
+import { resetCompressionJob } from '../services/compression-job.store';
+import {
+  clearSourceSelectionScope,
+  clearSourceTreeSnapshot,
+  loadFolderSelections
+} from '../services/folder-selection.store';
 import '../styles/SettingsPage.css';
 
 type ToolStatus = 'ready' | 'missing' | 'unknown';
@@ -25,12 +31,22 @@ const SettingsPage = () => {
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [maintenanceMessage, setMaintenanceMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isResettingState, setIsResettingState] = useState(false);
+  const [isClearingDestination, setIsClearingDestination] = useState(false);
+  const [sourcePath, setSourcePath] = useState('');
+  const [destinationPath, setDestinationPath] = useState('');
 
   useEffect(() => {
     loadEncoderSettings().then((loaded) => {
       setSettings(loaded);
       // Validate paths
       validatePaths(loaded.imageToolCommand, loaded.videoToolCommand);
+    });
+
+    loadFolderSelections().then((selections) => {
+      setSourcePath(selections.source?.path ?? '');
+      setDestinationPath(selections.destination?.path ?? '');
     });
   }, []);
 
@@ -99,6 +115,83 @@ const SettingsPage = () => {
     }
   };
 
+  const handleResetRuntimeState = () => {
+    setIsResettingState(true);
+
+    try {
+      resetCompressionJob();
+      clearSourceSelectionScope();
+      clearSourceTreeSnapshot('source');
+      clearSourceTreeSnapshot('destination');
+
+      setMaintenanceMessage({
+        type: 'success',
+        text: 'Runtime state reset. Compression status and cached source scope were cleared.'
+      });
+    } catch (error) {
+      setMaintenanceMessage({
+        type: 'error',
+        text: `Could not reset runtime state: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
+    } finally {
+      setIsResettingState(false);
+    }
+  };
+
+  const handleClearDestination = async () => {
+    if (!destinationPath) {
+      setMaintenanceMessage({
+        type: 'error',
+        text: 'No destination folder is configured. Go to Import and select a destination first.'
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `This will remove all files and subfolders inside Destination.\n\nDestination:\n${destinationPath}\n\nContinue?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsClearingDestination(true);
+
+    try {
+      const response = await fetch('/api/system/maintenance/clear-destination', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          destinationPath,
+          sourcePath
+        })
+      });
+
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(body || `Request failed with status ${response.status}`);
+      }
+
+      const result = (await response.json()) as { deletedEntries?: number };
+
+      resetCompressionJob();
+
+      setMaintenanceMessage({
+        type: 'success',
+        text: `Destination cleaned (${result.deletedEntries ?? 0} entries removed). Compression state was reset.`
+      });
+    } catch (error) {
+      setMaintenanceMessage({
+        type: 'error',
+        text: `Could not clear destination: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
+    } finally {
+      setIsClearingDestination(false);
+    }
+  };
+
   return (
     <div className="settings-page">
       <div className="settings-header">
@@ -119,7 +212,7 @@ const SettingsPage = () => {
                 className="path-input"
                 value={settings.imageToolCommand}
                 onChange={(e) => handlePathChange('image', e.target.value)}
-                placeholder="C:\Program Files\mozjpeg\cjpeg-static.exe"
+                placeholder="C:\\Program Files\\mozjpeg\\cjpeg-static.exe"
               />
               <button
                 className="path-btn"
@@ -156,7 +249,7 @@ const SettingsPage = () => {
                 className="path-input"
                 value={settings.videoToolCommand}
                 onChange={(e) => handlePathChange('video', e.target.value)}
-                placeholder="C:\Program Files\HandBrake\HandBrakeCLI.exe"
+                placeholder="C:\\Program Files\\HandBrake\\HandBrakeCLI.exe"
               />
               <button
                 className="path-btn"
@@ -181,9 +274,49 @@ const SettingsPage = () => {
           </div>
         </div>
 
+        <div className="settings-card">
+          <div className="card-title">Maintenance</div>
+          <div className="card-subtitle">Recover from stale UI state and clean generated outputs safely.</div>
+
+          <div className="maintenance-group">
+            <p className="maintenance-note">
+              Reset runtime state clears app cache for compression status and source-scope snapshots.
+            </p>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={handleResetRuntimeState}
+              disabled={isResettingState || isClearingDestination}
+            >
+              {isResettingState ? 'Resetting...' : 'Reset Runtime State'}
+            </button>
+          </div>
+
+          <div className="maintenance-group maintenance-danger">
+            <p className="maintenance-note">
+              Destination cleanup removes everything inside the current Destination folder but never touches Source.
+            </p>
+            <p className="maintenance-path">Destination: {destinationPath || 'Not configured'}</p>
+            <button
+              className="btn btn-danger"
+              type="button"
+              onClick={() => void handleClearDestination()}
+              disabled={isClearingDestination || isResettingState || !destinationPath}
+            >
+              {isClearingDestination ? 'Clearing Destination...' : 'Clear Destination Contents'}
+            </button>
+          </div>
+        </div>
+
         {saveMessage && (
           <div className={`message message-${saveMessage.type}`}>
             {saveMessage.text}
+          </div>
+        )}
+
+        {maintenanceMessage && (
+          <div className={`message message-${maintenanceMessage.type}`}>
+            {maintenanceMessage.text}
           </div>
         )}
 

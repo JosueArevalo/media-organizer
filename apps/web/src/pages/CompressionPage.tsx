@@ -400,6 +400,57 @@ export const CompressionPage = () => {
     };
   }, [sourceSelection?.updatedAt]);
 
+  useEffect(() => {
+    if (compressionJobState.status !== 'running' || !compressionJobState.backendJobId) {
+      return;
+    }
+
+    let isActive = true;
+
+    const reconcileRunningState = async () => {
+      try {
+        const job = await getCompressionJobRequest(compressionJobState.backendJobId as string);
+
+        if (!isActive) {
+          return;
+        }
+
+        const status = job.job.status;
+
+        if (status === 'completed') {
+          completeCompressionJob();
+          setIsStartingCompression(false);
+          return;
+        }
+
+        if (status === 'failed' || status === 'cancelled') {
+          const errorDetails = extractCompressionErrorDetails(job.checkpoint?.payloadJson ?? null);
+          const message = errorDetails.failedCount > 0
+            ? `${errorDetails.completedCount} items completed, ${errorDetails.failedCount} items failed`
+            : `Compression job ended with status: ${status}`;
+
+          failCompressionJob(message);
+          setBackendError(message);
+          setIsStartingCompression(false);
+        }
+      } catch {
+        if (!isActive) {
+          return;
+        }
+
+        resetCompressionJob();
+        setIsStartingCompression(false);
+        setBackendError('Detected stale compression state and reset it. You can start a new compression job now.');
+      }
+    };
+
+    void reconcileRunningState();
+
+    return () => {
+      isActive = false;
+    };
+  }, [compressionJobState.backendJobId, compressionJobState.status]);
+
   const imageEstimatedSavedBytes = useMemo(() => {
     if (mediaStatsState.status !== 'ready') {
       return 0;

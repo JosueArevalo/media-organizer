@@ -1,5 +1,7 @@
 import { createServer } from 'node:http';
 import { URL } from 'node:url';
+import path from 'node:path';
+import { readdir, rm, stat } from 'node:fs/promises';
 import { runMigrations } from './state/migrations/runMigrations.js';
 import { getDbPath } from './state/db.js';
 import { getCompressionJob, startCompressionJob } from './pipeline/compression/compressionJob.service.js';
@@ -34,6 +36,16 @@ const readRequestJson = async (req: import('node:http').IncomingMessage): Promis
   }
 
   return JSON.parse(raw) as unknown;
+};
+
+const clearDirectoryContents = async (directoryPath: string) => {
+  const entries = await readdir(directoryPath, { withFileTypes: true });
+
+  await Promise.all(
+    entries.map((entry) => rm(path.join(directoryPath, entry.name), { recursive: true, force: true }))
+  );
+
+  return entries.length;
 };
 
 const server = createServer((req, res) => {
@@ -120,6 +132,57 @@ const server = createServer((req, res) => {
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not scan source path.'
+        });
+      }
+    })();
+
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/system/maintenance/clear-destination' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as { destinationPath?: string; sourcePath?: string } | null;
+        const destinationPath = body?.destinationPath?.trim();
+        const sourcePath = body?.sourcePath?.trim();
+
+        if (!destinationPath || !path.isAbsolute(destinationPath)) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'destinationPath must be an absolute path.' });
+          return;
+        }
+
+        const destinationResolved = path.resolve(destinationPath);
+        const sourceResolved = sourcePath && path.isAbsolute(sourcePath) ? path.resolve(sourcePath) : null;
+
+        if (sourceResolved && sourceResolved === destinationResolved) {
+          sendJson(res, 400, {
+            status: 'invalid_request',
+            message: 'Destination path cannot be the same as source path.'
+          });
+          return;
+        }
+
+        const destinationStats = await stat(destinationResolved).catch(() => null);
+
+        if (!destinationStats || !destinationStats.isDirectory()) {
+          sendJson(res, 400, {
+            status: 'invalid_request',
+            message: 'Destination path was not found or is not a directory.'
+          });
+          return;
+        }
+
+        const deletedEntries = await clearDirectoryContents(destinationResolved);
+
+        sendJson(res, 200, {
+          status: 'ok',
+          destinationPath: destinationResolved,
+          deletedEntries
+        });
+      } catch (error) {
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not clear destination folder.'
         });
       }
     })();
