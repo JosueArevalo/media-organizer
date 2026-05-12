@@ -245,77 +245,98 @@ const SettingsPage = () => {
       </div>
 
       <div className="settings-content">
-        <div className="settings-card">
-          <div className="card-title">📸 Image Compression (mozjpeg)</div>
-          <div className="card-subtitle">Required for JPEG optimization using cjpeg</div>
-
-          <div className="form-group">
-            <label className="form-label">cjpeg-static.exe path</label>
-            <div className="path-input-group">
-              <input
-                type="text"
-                className="path-input"
-                value={settings.imageToolCommand}
-                onChange={(e) => handlePathChange('image', e.target.value)}
-                placeholder="C:\\Program Files\\mozjpeg\\cjpeg-static.exe"
-              />
-              <button
-                className="path-btn"
-                onClick={() => handleBrowse('image')}
-                type="button"
-              >
-                Browse…
-              </button>
-            </div>
-            {statuses.image === 'ready' && (
-              <div className="status status-ready">
-                <span className="status-dot"></span>
-                <span>✓ Configured</span>
-              </div>
-            )}
-            {statuses.image === 'missing' && (
-              <div className="status status-missing">
-                <span className="status-dot"></span>
-                <span>✗ Not configured</span>
-              </div>
-            )}
+        <div className="settings-card settings-card-encoders">
+          <div className="card-title">Encoder Tools</div>
+          <div className="card-subtitle">
+            Configure the external tools used by compression. Save only applies to these paths.
           </div>
-        </div>
 
-        <div className="settings-card">
-          <div className="card-title">🎬 Video Compression (HandBrake)</div>
-          <div className="card-subtitle">Required for video re-encoding</div>
+          <div className="settings-card-encoder-block">
+            <div className="card-title card-title-compact">📸 Image Compression (mozjpeg)</div>
+            <div className="card-subtitle">Required for JPEG optimization using cjpeg</div>
 
-          <div className="form-group">
-            <label className="form-label">HandBrakeCLI.exe path</label>
-            <div className="path-input-group">
-              <input
-                type="text"
-                className="path-input"
-                value={settings.videoToolCommand}
-                onChange={(e) => handlePathChange('video', e.target.value)}
-                placeholder="C:\\Program Files\\HandBrake\\HandBrakeCLI.exe"
-              />
-              <button
-                className="path-btn"
-                onClick={() => handleBrowse('video')}
-                type="button"
-              >
-                Browse…
-              </button>
+            <div className="form-group">
+              <label className="form-label">cjpeg-static.exe path</label>
+              <div className="path-input-group">
+                <input
+                  type="text"
+                  className="path-input"
+                  value={settings.imageToolCommand}
+                  onChange={(e) => handlePathChange('image', e.target.value)}
+                  placeholder="C:\\Program Files\\mozjpeg\\cjpeg-static.exe"
+                />
+                <button
+                  className="path-btn"
+                  onClick={() => handleBrowse('image')}
+                  type="button"
+                >
+                  Browse…
+                </button>
+              </div>
+              {statuses.image === 'ready' && (
+                <div className="status status-ready">
+                  <span className="status-dot"></span>
+                  <span>✓ Configured</span>
+                </div>
+              )}
+              {statuses.image === 'missing' && (
+                <div className="status status-missing">
+                  <span className="status-dot"></span>
+                  <span>✗ Not configured</span>
+                </div>
+              )}
             </div>
-            {statuses.video === 'ready' && (
-              <div className="status status-ready">
-                <span className="status-dot"></span>
-                <span>✓ Configured</span>
+          </div>
+
+          <div className="settings-card-encoder-block">
+            <div className="card-title card-title-compact">🎬 Video Compression (HandBrake)</div>
+            <div className="card-subtitle">Required for video re-encoding</div>
+
+            <div className="form-group">
+              <label className="form-label">HandBrakeCLI.exe path</label>
+              <div className="path-input-group">
+                <input
+                  type="text"
+                  className="path-input"
+                  value={settings.videoToolCommand}
+                  onChange={(e) => handlePathChange('video', e.target.value)}
+                  placeholder="C:\\Program Files\\HandBrake\\HandBrakeCLI.exe"
+                />
+                <button
+                  className="path-btn"
+                  onClick={() => handleBrowse('video')}
+                  type="button"
+                >
+                  Browse…
+                </button>
               </div>
-            )}
-            {statuses.video === 'missing' && (
-              <div className="status status-missing">
-                <span className="status-dot"></span>
-                <span>✗ Not configured</span>
-              </div>
-            )}
+              {statuses.video === 'ready' && (
+                <div className="status status-ready">
+                  <span className="status-dot"></span>
+                  <span>✓ Configured</span>
+                </div>
+              )}
+              {statuses.video === 'missing' && (
+                <div className="status status-missing">
+                  <span className="status-dot"></span>
+                  <span>✗ Not configured</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="encoder-actions-footer">
+            <p className="encoder-actions-note">
+              Changes stay local to this screen until you save them.
+            </p>
+            <button
+              className="btn btn-primary"
+              onClick={handleSave}
+              disabled={isSaving || !settings.imageToolCommand || !settings.videoToolCommand}
+              type="button"
+            >
+              {isSaving ? 'Saving...' : 'Save Encoder Paths'}
+            </button>
           </div>
         </div>
 
@@ -370,17 +391,6 @@ const SettingsPage = () => {
             {maintenanceMessage.text}
           </div>
         )}
-
-        <div className="button-group">
-          <button
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={isSaving || !settings.imageToolCommand || !settings.videoToolCommand}
-            type="button"
-          >
-            {isSaving ? 'Saving...' : 'Save Configuration'}
-          </button>
-        </div>
       </div>
     </div>
   );
