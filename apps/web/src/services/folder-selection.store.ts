@@ -61,6 +61,41 @@ const DATABASE_VERSION = 1;
 const STORE_NAME = 'folder-selections';
 const SCOPE_STORAGE_KEY = 'media-organizer-source-scope';
 const handleCache = new Map<FolderSlot, FileSystemDirectoryHandle>();
+const openDatabases = new Set<IDBDatabase>();
+
+const registerDatabaseConnection = (database: IDBDatabase) => {
+  openDatabases.add(database);
+
+  database.onversionchange = () => {
+    try {
+      database.close();
+    } catch {
+      // Ignore close errors when the browser is already tearing down the connection.
+    } finally {
+      openDatabases.delete(database);
+    }
+  };
+};
+
+const closeDatabaseConnection = (database: IDBDatabase | null | undefined) => {
+  if (!database) {
+    return;
+  }
+
+  try {
+    database.close();
+  } catch {
+    // Ignore close errors and continue cleanup.
+  } finally {
+    openDatabases.delete(database);
+  }
+};
+
+const closeAllDatabaseConnections = () => {
+  for (const database of openDatabases) {
+    closeDatabaseConnection(database);
+  }
+};
 
 const createEmptyState = (): SelectionState => ({
   source: null,
@@ -180,7 +215,10 @@ const openDatabase = (): Promise<IDBDatabase | null> => {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      registerDatabaseConnection(request.result);
+      resolve(request.result);
+    };
     request.onerror = () => reject(request.error);
   });
 };
@@ -192,14 +230,18 @@ const readRecord = async (slot: FolderSlot): Promise<SelectionRecord | null> => 
     return null;
   }
 
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.get(slot);
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(slot);
 
-    request.onsuccess = () => resolve((request.result as SelectionRecord | undefined) ?? null);
-    request.onerror = () => reject(request.error);
-  });
+      request.onsuccess = () => resolve((request.result as SelectionRecord | undefined) ?? null);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    closeDatabaseConnection(database);
+  }
 };
 
 const writeRecord = async (record: SelectionRecord) => {
@@ -209,14 +251,18 @@ const writeRecord = async (record: SelectionRecord) => {
     return;
   }
 
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.put(record);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.put(record);
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    closeDatabaseConnection(database);
+  }
 };
 
 const deleteRecord = async (slot: FolderSlot) => {
@@ -226,14 +272,18 @@ const deleteRecord = async (slot: FolderSlot) => {
     return;
   }
 
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.delete(slot);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(slot);
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    closeDatabaseConnection(database);
+  }
 };
 
 const toSnapshot = (slot: FolderSlot, metadata: SelectionMetadata, persisted: boolean): FolderSelectionSnapshot => ({
@@ -407,6 +457,7 @@ export const clearFolderSelectionPersistence = async () => {
   }
 
   handleCache.clear();
+  closeAllDatabaseConnections();
 
   if (typeof window === 'undefined' || !window.indexedDB) {
     return;
