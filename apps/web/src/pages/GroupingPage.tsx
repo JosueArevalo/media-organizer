@@ -18,9 +18,9 @@ export const GroupingPage = () => {
   return (
     <div className="page-stack">
       <div className="page-header">
-        <h2 className="page-title">Structure your output</h2>
+        <h2 className="page-title">Review the final structure</h2>
         <p className="page-subtitle">
-          Review and customize how your media will be organized into folders. This is the final confirmation step before running processing jobs.
+          Review and customize how your media will be organized into folders after compression has completed. This is the final confirmation step before organization.
         </p>
       </div>
 
@@ -66,7 +66,7 @@ export const GroupingPage = () => {
           ← Back
         </button>
         <button className="btn btn-primary" type="button">
-          Confirm Grouping and Start Processing
+          Confirm Grouping and Start Organization
         </button>
       </div>
     </div>

@@ -25,6 +25,7 @@ export type SourceTreeNode = SourceTreeDirectoryNode | SourceTreeFileNode;
 export type FolderSelectionSnapshot = {
   slot: FolderSlot;
   name: string;
+  path: string | null;
   updatedAt: number;
   source: FolderSelectionSource;
   persisted: boolean;
@@ -40,6 +41,7 @@ export type SourceSelectionScopeSnapshot = {
 
 type SelectionMetadata = {
   name: string;
+  path: string | null;
   updatedAt: number;
   source: FolderSelectionSource;
 };
@@ -59,6 +61,41 @@ const DATABASE_VERSION = 1;
 const STORE_NAME = 'folder-selections';
 const SCOPE_STORAGE_KEY = 'media-organizer-source-scope';
 const handleCache = new Map<FolderSlot, FileSystemDirectoryHandle>();
+const openDatabases = new Set<IDBDatabase>();
+
+const registerDatabaseConnection = (database: IDBDatabase) => {
+  openDatabases.add(database);
+
+  database.onversionchange = () => {
+    try {
+      database.close();
+    } catch {
+      // Ignore close errors when the browser is already tearing down the connection.
+    } finally {
+      openDatabases.delete(database);
+    }
+  };
+};
+
+const closeDatabaseConnection = (database: IDBDatabase | null | undefined) => {
+  if (!database) {
+    return;
+  }
+
+  try {
+    database.close();
+  } catch {
+    // Ignore close errors and continue cleanup.
+  } finally {
+    openDatabases.delete(database);
+  }
+};
+
+const closeAllDatabaseConnections = () => {
+  for (const database of openDatabases) {
+    closeDatabaseConnection(database);
+  }
+};
 
 const createEmptyState = (): SelectionState => ({
   source: null,
@@ -178,7 +215,10 @@ const openDatabase = (): Promise<IDBDatabase | null> => {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      registerDatabaseConnection(request.result);
+      resolve(request.result);
+    };
     request.onerror = () => reject(request.error);
   });
 };
@@ -190,14 +230,18 @@ const readRecord = async (slot: FolderSlot): Promise<SelectionRecord | null> => 
     return null;
   }
 
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.get(slot);
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(slot);
 
-    request.onsuccess = () => resolve((request.result as SelectionRecord | undefined) ?? null);
-    request.onerror = () => reject(request.error);
-  });
+      request.onsuccess = () => resolve((request.result as SelectionRecord | undefined) ?? null);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    closeDatabaseConnection(database);
+  }
 };
 
 const writeRecord = async (record: SelectionRecord) => {
@@ -207,14 +251,18 @@ const writeRecord = async (record: SelectionRecord) => {
     return;
   }
 
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.put(record);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.put(record);
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    closeDatabaseConnection(database);
+  }
 };
 
 const deleteRecord = async (slot: FolderSlot) => {
@@ -224,19 +272,24 @@ const deleteRecord = async (slot: FolderSlot) => {
     return;
   }
 
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.delete(slot);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(slot);
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    closeDatabaseConnection(database);
+  }
 };
 
 const toSnapshot = (slot: FolderSlot, metadata: SelectionMetadata, persisted: boolean): FolderSelectionSnapshot => ({
   slot,
   name: metadata.name,
+  path: metadata.path ?? null,
   updatedAt: metadata.updatedAt,
   source: metadata.source,
   persisted
@@ -265,13 +318,14 @@ export const loadFolderSelections = async (): Promise<SelectionState> => {
 
 export const saveFolderSelection = async (
   slot: FolderSlot,
-  selection: { name: string; source: FolderSelectionSource; handle?: FileSystemDirectoryHandle }
+  selection: { name: string; path: string | null; source: FolderSelectionSource; handle?: FileSystemDirectoryHandle }
 ) => {
   const metadata = readMetadata();
   const nextMetadata = {
     ...metadata,
     [slot]: {
       name: selection.name,
+      path: selection.path,
       updatedAt: Date.now(),
       source: selection.source
     }
@@ -289,12 +343,25 @@ export const saveFolderSelection = async (
     await writeRecord({
       slot,
       name: selection.name,
+      path: selection.path,
       updatedAt: nextMetadata[slot]?.updatedAt ?? Date.now(),
       source: selection.source,
       handle: selection.handle
     });
   } else {
-    await deleteRecord(slot);
+    const existingRecord = await readRecord(slot);
+
+    if (existingRecord) {
+      await writeRecord({
+        ...existingRecord,
+        name: selection.name,
+        path: selection.path,
+        updatedAt: nextMetadata[slot]?.updatedAt ?? Date.now(),
+        source: selection.source
+      });
+    } else {
+      await deleteRecord(slot);
+    }
   }
 
   notifySelectionChange();
@@ -378,6 +445,33 @@ export const loadSourceSelectionScope = (): SourceSelectionScopeSnapshot | null 
 export const clearSourceSelectionScope = () => {
   writeScopeSnapshot(null);
   notifySelectionChange();
+};
+
+export const clearFolderSelectionPersistence = async () => {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(TREE_STORAGE_KEY);
+    window.localStorage.removeItem(SCOPE_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures and continue clearing other stores.
+  }
+
+  handleCache.clear();
+  closeAllDatabaseConnections();
+
+  if (typeof window === 'undefined' || !window.indexedDB) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const request = window.indexedDB.deleteDatabase(DATABASE_NAME);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => resolve();
+  }).catch(() => {
+    // If the database is busy, we still consider the browser cache cleared enough for the reset flow.
+  });
 };
 
 export const loadFolderSelectionHandle = async (slot: FolderSlot): Promise<FileSystemDirectoryHandle | null> => {

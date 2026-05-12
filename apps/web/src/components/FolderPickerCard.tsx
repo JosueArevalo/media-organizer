@@ -1,3 +1,4 @@
+import React, { useEffect, useState } from 'react';
 import type { FolderSelectionSnapshot } from '../services/folder-selection.store';
 
 type FolderPickerCardProps = {
@@ -6,8 +7,7 @@ type FolderPickerCardProps = {
   description: string;
   selection: FolderSelectionSnapshot | null;
   isLoading: boolean;
-  pickLabel: string;
-  onPick: () => void;
+  onPathChange: (path: string) => void;
   onClear: () => void;
 };
 
@@ -23,10 +23,30 @@ export const FolderPickerCard = ({
   description,
   selection,
   isLoading,
-  pickLabel,
-  onPick,
+  onPathChange,
   onClear
 }: FolderPickerCardProps) => {
+  const [inputValue, setInputValue] = useState(selection?.path ?? '');
+
+  useEffect(() => {
+    setInputValue(selection?.path ?? '');
+  }, [selection?.path]);
+
+  const handleInputChange = (val: string) => {
+    setInputValue(val);
+    if (val.trim()) {
+      onPathChange(val);
+    } else {
+      // User cleared the input manually, clear the selection
+      onClear();
+    }
+  };
+
+  const handleClear = () => {
+    setInputValue('');
+    onClear();
+  };
+
   return (
     <section className="page-card folder-picker-card">
       <div className="page-icon-badge" aria-hidden="true">
@@ -41,29 +61,41 @@ export const FolderPickerCard = ({
             <p className="folder-picker-value">Checking saved folder...</p>
             <p className="folder-picker-meta">Loading your previous selection.</p>
           </>
-        ) : selection ? (
-          <>
-            <p className="folder-picker-value">{selection.name}</p>
-            <p className="folder-picker-meta">
-              Saved {formatTimestamp(selection.updatedAt)} {selection.persisted ? '• persisted locally' : ''}
-            </p>
-          </>
         ) : (
           <>
-            <p className="folder-picker-value">No folder selected yet</p>
-            <p className="folder-picker-meta">Choose a directory to keep this setup ready for the next session.</p>
-          </>
-        )}
-      </div>
+            <p className="folder-picker-value">{selection ? selection.name : 'No folder selected yet'}</p>
 
-      <div className="folder-picker-actions">
-        <button className="btn btn-secondary folder-picker-button" type="button" onClick={onPick}>
-          {pickLabel}
-        </button>
-        {selection && (
-          <button className="btn btn-ghost folder-picker-button" type="button" onClick={onClear}>
-            Clear
-          </button>
+            <label className="folder-picker-path-field">
+              <span className="folder-picker-path-label">Path editable inline</span>
+              <div className="folder-picker-input-group">
+                <input
+                  className="folder-picker-path-input"
+                  type="text"
+                  value={inputValue}
+                  onChange={(event) => handleInputChange(event.target.value)}
+                  placeholder="Paste absolute path here"
+                />
+                {selection && (
+                  <button
+                    className="folder-picker-clear-btn"
+                    type="button"
+                    aria-label="Clear folder selection"
+                    onClick={handleClear}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </label>
+
+            {selection ? (
+              <p className="folder-picker-meta">
+                Saved {formatTimestamp(selection.updatedAt)} {selection.persisted ? '• persisted locally' : ''}
+              </p>
+            ) : (
+              <p className="folder-picker-meta">You can paste a full absolute path and it will be saved.</p>
+            )}
+          </>
         )}
       </div>
     </section>

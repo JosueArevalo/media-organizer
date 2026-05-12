@@ -24,3 +24,7 @@ apps/**/.vite/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Python bytecode caches
+__pycache__/
+*.pyc

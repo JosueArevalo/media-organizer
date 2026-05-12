@@ -8,6 +8,7 @@ import {
   type SourceTreeDirectoryNode,
   type SourceTreeNode
 } from '../services/folder-selection.store';
+import { scanSourceTreeRequest } from '../services/source-tree.service';
 
 type SelectionMode = 'files' | 'directories';
 type ScopePreset = 'all' | 'whatsapp' | 'camera' | 'custom';
@@ -432,6 +433,8 @@ export const SelectionPage = () => {
           tree = await scanDirectoryTree(handle);
         } else if (snapshot) {
           tree = normalizeSnapshotRoot(snapshot);
+        } else if (sourceSelection.path) {
+          tree = await scanSourceTreeRequest(sourceSelection.path);
         }
 
         if (!tree) {
@@ -623,8 +626,8 @@ export const SelectionPage = () => {
             </div>
           </div>
           <p className="page-summary-note">
-            The source scan is read directly from the stored directory handle, so the content here should match the folder the user
-            selected instead of a synthetic demo list.
+            The source scan is loaded from a stored directory handle when available, or from backend path-based scanning when using
+            manual absolute paths.
           </p>
         </article>
 
