@@ -3,7 +3,7 @@ import { URL } from 'node:url';
 import path from 'node:path';
 import { readdir, rm, stat } from 'node:fs/promises';
 import { runMigrations } from './state/migrations/runMigrations.js';
-import { getDbPath } from './state/db.js';
+import { getDb, getDbPath } from './state/db.js';
 import { getCompressionJob, startCompressionJob } from './pipeline/compression/compressionJob.service.js';
 import { executeCompressionJob } from './pipeline/compression/compressionJob.runner.js';
 import { scanSourceTreeByPath } from './pipeline/source/sourceTreeScan.service.js';
@@ -188,6 +188,36 @@ const server = createServer((req, res) => {
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not clear destination folder.'
+        });
+      }
+    })();
+
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/system/maintenance/reset-persistent-state' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const db = getDb();
+
+        db.exec(`
+          BEGIN TRANSACTION;
+          DELETE FROM job_checkpoints;
+          DELETE FROM item_stage_status;
+          DELETE FROM item_decisions;
+          DELETE FROM media_items;
+          DELETE FROM jobs;
+          COMMIT;
+        `);
+
+        sendJson(res, 200, {
+          status: 'ok',
+          cleared: ['jobs', 'media_items', 'item_decisions', 'item_stage_status', 'job_checkpoints']
+        });
+      } catch (error) {
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not reset backend persistent state.'
         });
       }
     })();

@@ -397,6 +397,32 @@ export const clearSourceSelectionScope = () => {
   notifySelectionChange();
 };
 
+export const clearFolderSelectionPersistence = async () => {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(TREE_STORAGE_KEY);
+    window.localStorage.removeItem(SCOPE_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures and continue clearing other stores.
+  }
+
+  handleCache.clear();
+
+  if (typeof window === 'undefined' || !window.indexedDB) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const request = window.indexedDB.deleteDatabase(DATABASE_NAME);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => resolve();
+  }).catch(() => {
+    // If the database is busy, we still consider the browser cache cleared enough for the reset flow.
+  });
+};
+
 export const loadFolderSelectionHandle = async (slot: FolderSlot): Promise<FileSystemDirectoryHandle | null> => {
   const cachedHandle = handleCache.get(slot);
 

@@ -4,12 +4,9 @@ import {
   saveEncoderSettings,
   type EncoderSettingsSnapshot
 } from '../services/encoder-settings.store';
+import { loadFolderSelections } from '../services/folder-selection.store';
+import { resetAllPersistentAppState } from '../services/app-maintenance.store';
 import { resetCompressionJob } from '../services/compression-job.store';
-import {
-  clearSourceSelectionScope,
-  clearSourceTreeSnapshot,
-  loadFolderSelections
-} from '../services/folder-selection.store';
 import '../styles/SettingsPage.css';
 
 type ToolStatus = 'ready' | 'missing' | 'unknown';
@@ -157,18 +154,24 @@ const SettingsPage = () => {
     }
   };
 
-  const handleResetRuntimeState = () => {
+  const handleResetRuntimeState = async () => {
     setIsResettingState(true);
 
     try {
-      resetCompressionJob();
-      clearSourceSelectionScope();
-      clearSourceTreeSnapshot('source');
-      clearSourceTreeSnapshot('destination');
+      await resetAllPersistentAppState();
+
+      const response = await fetch('/api/system/maintenance/reset-persistent-state', {
+        method: 'POST'
+      });
+
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(body || `Request failed with status ${response.status}`);
+      }
 
       setMaintenanceMessage({
         type: 'success',
-        text: 'Runtime state reset. Compression status and cached source scope were cleared.'
+        text: 'Reset completed. Cleared: Source/Destination selections, source tree cache, scope cache, compression job snapshot, theme, IndexedDB folder cache, and backend job history. Encoder paths were preserved.'
       });
     } catch (error) {
       setMaintenanceMessage({
