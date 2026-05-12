@@ -18,6 +18,12 @@ const SettingsPage = () => {
     updatedAt: 0
   });
 
+  const [savedSettings, setSavedSettings] = useState<EncoderSettingsSnapshot>({
+    imageToolCommand: '',
+    videoToolCommand: '',
+    updatedAt: 0
+  });
+
   const [statuses, setStatuses] = useState<{
     image: ToolStatus;
     video: ToolStatus;
@@ -38,6 +44,7 @@ const SettingsPage = () => {
   useEffect(() => {
     loadEncoderSettings().then((loaded) => {
       setSettings(loaded);
+      setSavedSettings(loaded);
       // Validate paths
       validatePaths(loaded.imageToolCommand, loaded.videoToolCommand);
     });
@@ -67,6 +74,14 @@ const SettingsPage = () => {
       tool === 'image' ? value : settings.imageToolCommand,
       tool === 'video' ? value : settings.videoToolCommand
     );
+  };
+
+  const handleClearPath = (tool: 'image' | 'video') => {
+    handlePathChange(tool, '');
+    setToolPathMessage({
+      type: 'success',
+      text: `${tool === 'image' ? 'cjpeg-static.exe' : 'HandBrakeCLI.exe'} path cleared locally. Press Save Encoder Paths to apply it.`
+    });
   };
 
   const resolveToolPath = async (candidate: string) => {
@@ -125,23 +140,22 @@ const SettingsPage = () => {
   };
 
   const handleSave = async () => {
-    if (!settings.imageToolCommand || !settings.videoToolCommand) {
-      setSaveMessage({
-        type: 'error',
-        text: 'Please configure both encoder paths before saving'
-      });
-      return;
-    }
-
     setIsSaving(true);
     try {
       await saveEncoderSettings({
         imageToolCommand: settings.imageToolCommand,
         videoToolCommand: settings.videoToolCommand
       });
+      setSavedSettings({
+        imageToolCommand: settings.imageToolCommand,
+        videoToolCommand: settings.videoToolCommand,
+        updatedAt: Date.now()
+      });
       setSaveMessage({
         type: 'success',
-        text: 'Encoder settings saved successfully'
+        text: settings.imageToolCommand && settings.videoToolCommand
+          ? 'Encoder settings saved successfully.'
+          : 'Encoder settings saved. Compression will remain blocked until both paths are configured.'
       });
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error) {
@@ -153,6 +167,10 @@ const SettingsPage = () => {
       setIsSaving(false);
     }
   };
+
+  const hasPendingEncoderChanges =
+    settings.imageToolCommand !== savedSettings.imageToolCommand ||
+    settings.videoToolCommand !== savedSettings.videoToolCommand;
 
   const handleResetRuntimeState = async () => {
     setIsResettingState(true);
@@ -272,6 +290,14 @@ const SettingsPage = () => {
                 >
                   Browse…
                 </button>
+                <button
+                  className="path-btn path-btn-clear"
+                  onClick={() => handleClearPath('image')}
+                  type="button"
+                  disabled={!settings.imageToolCommand}
+                >
+                  Clear
+                </button>
               </div>
               {statuses.image === 'ready' && (
                 <div className="status status-ready">
@@ -309,6 +335,14 @@ const SettingsPage = () => {
                 >
                   Browse…
                 </button>
+                <button
+                  className="path-btn path-btn-clear"
+                  onClick={() => handleClearPath('video')}
+                  type="button"
+                  disabled={!settings.videoToolCommand}
+                >
+                  Clear
+                </button>
               </div>
               {statuses.video === 'ready' && (
                 <div className="status status-ready">
@@ -332,7 +366,7 @@ const SettingsPage = () => {
             <button
               className="btn btn-primary"
               onClick={handleSave}
-              disabled={isSaving || !settings.imageToolCommand || !settings.videoToolCommand}
+              disabled={isSaving || !hasPendingEncoderChanges}
               type="button"
             >
               {isSaving ? 'Saving...' : 'Save Encoder Paths'}

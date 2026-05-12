@@ -480,7 +480,11 @@ export const CompressionPage = () => {
 
   const sourcePath = sourceSelection?.path ?? '';
   const destinationPath = destinationSelection?.path ?? '';
-  const canStartRealCompression = isLikelyAbsolutePath(sourcePath) && isLikelyAbsolutePath(destinationPath);
+  const hasConfiguredEncoders = Boolean(encoderSettings.imageToolCommand.trim() && encoderSettings.videoToolCommand.trim());
+  const canStartRealCompression =
+    isLikelyAbsolutePath(sourcePath) &&
+    isLikelyAbsolutePath(destinationPath) &&
+    hasConfiguredEncoders;
 
   const handleStartCompression = async () => {
     if (!destinationSelection || !sourceSelection || mediaStatsState.status === 'error') {
@@ -488,7 +492,11 @@ export const CompressionPage = () => {
     }
 
     if (!canStartRealCompression) {
-      setBackendError('Real compression requires absolute source and destination paths. Use fallback path mode in Import for now.');
+      setBackendError(
+        !hasConfiguredEncoders
+          ? 'Configure and save both encoder paths in Settings before starting compression.'
+          : 'Real compression requires absolute source and destination paths. Use fallback path mode in Import for now.'
+      );
       return;
     }
 
@@ -597,7 +605,9 @@ export const CompressionPage = () => {
         </p>
         {!canStartRealCompression && (
           <p className="error">
-            Real backend compression needs absolute filesystem paths for Source and Destination.
+            {!hasConfiguredEncoders
+              ? 'Compression is blocked until both encoder paths are configured and saved in Settings.'
+              : 'Real backend compression needs absolute filesystem paths for Source and Destination.'}
           </p>
         )}
         {backendError && (

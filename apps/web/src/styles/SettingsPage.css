@@ -85,6 +85,7 @@
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .path-input {
@@ -119,6 +120,15 @@
 .path-btn:hover {
   background: var(--surface-muted);
   border-color: var(--accent);
+}
+
+.path-btn-clear {
+  color: var(--warn);
+}
+
+.path-btn-clear:hover:not(:disabled) {
+  border-color: var(--warn);
+  background: rgba(244, 114, 114, 0.12);
 }
 
 .status {
