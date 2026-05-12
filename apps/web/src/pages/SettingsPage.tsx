@@ -283,34 +283,17 @@ const SettingsPage = () => {
                   onChange={(e) => handlePathChange('image', e.target.value)}
                   placeholder="C:\\Program Files\\mozjpeg\\cjpeg-static.exe"
                 />
-                <button
-                  className="path-btn"
-                  onClick={() => handleBrowse('image')}
-                  type="button"
-                >
-                  Browse…
-                </button>
-                <button
-                  className="path-btn path-btn-clear"
-                  onClick={() => handleClearPath('image')}
-                  type="button"
-                  disabled={!settings.imageToolCommand}
-                >
-                  Clear
-                </button>
+                {settings.imageToolCommand && (
+                  <button
+                    className="path-btn path-btn-clear"
+                    onClick={() => handleClearPath('image')}
+                    type="button"
+                    aria-label="Clear image encoder path"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
-              {statuses.image === 'ready' && (
-                <div className="status status-ready">
-                  <span className="status-dot"></span>
-                  <span>✓ Configured</span>
-                </div>
-              )}
-              {statuses.image === 'missing' && (
-                <div className="status status-missing">
-                  <span className="status-dot"></span>
-                  <span>✗ Not configured</span>
-                </div>
-              )}
             </div>
           </div>
 
@@ -328,34 +311,17 @@ const SettingsPage = () => {
                   onChange={(e) => handlePathChange('video', e.target.value)}
                   placeholder="C:\\Program Files\\HandBrake\\HandBrakeCLI.exe"
                 />
-                <button
-                  className="path-btn"
-                  onClick={() => handleBrowse('video')}
-                  type="button"
-                >
-                  Browse…
-                </button>
-                <button
-                  className="path-btn path-btn-clear"
-                  onClick={() => handleClearPath('video')}
-                  type="button"
-                  disabled={!settings.videoToolCommand}
-                >
-                  Clear
-                </button>
+                {settings.videoToolCommand && (
+                  <button
+                    className="path-btn path-btn-clear"
+                    onClick={() => handleClearPath('video')}
+                    type="button"
+                    aria-label="Clear video encoder path"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
-              {statuses.video === 'ready' && (
-                <div className="status status-ready">
-                  <span className="status-dot"></span>
-                  <span>✓ Configured</span>
-                </div>
-              )}
-              {statuses.video === 'missing' && (
-                <div className="status status-missing">
-                  <span className="status-dot"></span>
-                  <span>✗ Not configured</span>
-                </div>
-              )}
             </div>
           </div>
 
