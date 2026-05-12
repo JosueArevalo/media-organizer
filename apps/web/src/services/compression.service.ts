@@ -7,6 +7,13 @@ export type CompressionJobRequest = {
   videoPresetLabel: string;
   imageToolCommand?: string;
   videoToolCommand?: string;
+  selectionScope?: {
+    excludedDirectories: string[];
+    excludedFiles: string[];
+    includedDirectories: string[];
+    includedFiles: string[];
+    updatedAt: number;
+  } | null;
 };
 
 export type CompressionJobApiResponse = {

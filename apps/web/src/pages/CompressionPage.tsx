@@ -503,7 +503,8 @@ export const CompressionPage = () => {
         imageProfileLabel: selectedImageProfileLabel,
         videoPresetLabel: selectedVideoProfileLabel,
         imageToolCommand: encoderSettings.imageToolCommand,
-        videoToolCommand: encoderSettings.videoToolCommand
+        videoToolCommand: encoderSettings.videoToolCommand,
+        selectionScope: loadSourceSelectionScope()
       });
 
       startCompressionJob({

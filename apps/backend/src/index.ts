@@ -86,6 +86,13 @@ const server = createServer((req, res) => {
               videoPresetLabel?: string;
               imageToolCommand?: string;
               videoToolCommand?: string;
+              selectionScope?: {
+                excludedDirectories: string[];
+                excludedFiles: string[];
+                includedDirectories: string[];
+                includedFiles: string[];
+                updatedAt: number;
+              } | null;
             }
           | null;
 
@@ -102,7 +109,8 @@ const server = createServer((req, res) => {
           imageProfileLabel: body.imageProfileLabel,
           videoPresetLabel: body.videoPresetLabel,
           imageToolCommand: body.imageToolCommand,
-          videoToolCommand: body.videoToolCommand
+          videoToolCommand: body.videoToolCommand,
+          selectionScope: body.selectionScope ?? undefined
         });
 
         void executeCompressionJob(result.job.id).catch((error) => {

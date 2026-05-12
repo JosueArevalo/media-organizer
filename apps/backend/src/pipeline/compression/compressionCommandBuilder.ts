@@ -21,7 +21,9 @@ export const buildImageCompressionCommand = (manifest: CompressionJobManifest) =
     '--quality',
     String(manifest.imageQuality),
     '--encoder-command',
-    manifest.imageToolCommand
+    manifest.imageToolCommand,
+    '--selection-scope-json',
+    JSON.stringify(manifest.selectionScope)
   ]
 });
 
@@ -36,6 +38,8 @@ export const buildVideoCompressionCommand = (manifest: CompressionJobManifest) =
     '--preset',
     manifest.videoPresetLabel.toLowerCase(),
     '--encoder-command',
-    manifest.videoToolCommand
+    manifest.videoToolCommand,
+    '--selection-scope-json',
+    JSON.stringify(manifest.selectionScope)
   ]
 });

@@ -19,6 +19,29 @@ type ScriptResultPayload = {
   items: ScriptResultItem[];
 };
 
+type SelectionScope = {
+  excludedDirectories: string[];
+  excludedFiles: string[];
+  includedDirectories: string[];
+  includedFiles: string[];
+  updatedAt: number;
+};
+
+type CompressionManifestData = {
+  outputRoot: string;
+  manifest: {
+    sourceDir: string;
+    imageOutputDir: string;
+    videoOutputDir: string;
+    imageQuality: number;
+    imageProfileLabel: string;
+    videoPresetLabel: string;
+    imageToolCommand: string;
+    videoToolCommand: string;
+    selectionScope?: SelectionScope;
+  };
+};
+
 const executeCommand = async (command: string, args: string[]): Promise<ScriptResultPayload> => {
   return await new Promise<ScriptResultPayload>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -68,6 +91,38 @@ const executeCommand = async (command: string, args: string[]): Promise<ScriptRe
   });
 };
 
+const normalizePath = (value: string) => path.resolve(value).replace(/\\/g, '/').toLowerCase();
+
+const resolveScopePath = (sourceDir: string, scopePath: string) => {
+  const trimmed = scopePath.trim();
+
+  if (!trimmed) {
+    return normalizePath(sourceDir);
+  }
+
+  if (path.isAbsolute(trimmed)) {
+    return normalizePath(trimmed);
+  }
+
+  const normalizedInput = trimmed.replace(/\\/g, '/').replace(/^\/+/, '');
+  const sourceRootName = path.basename(sourceDir).replace(/\\/g, '/').toLowerCase();
+  const segments = normalizedInput.split('/').filter(Boolean);
+
+  if (segments[0]?.toLowerCase() === sourceRootName) {
+    segments.shift();
+  }
+
+  return normalizePath(path.join(sourceDir, ...segments));
+};
+
+const resolveSelectionScope = (sourceDir: string, scope: SelectionScope) => ({
+  excludedDirectories: scope.excludedDirectories.map((entry) => resolveScopePath(sourceDir, entry)),
+  excludedFiles: scope.excludedFiles.map((entry) => resolveScopePath(sourceDir, entry)),
+  includedDirectories: scope.includedDirectories.map((entry) => resolveScopePath(sourceDir, entry)),
+  includedFiles: scope.includedFiles.map((entry) => resolveScopePath(sourceDir, entry)),
+  updatedAt: scope.updatedAt
+});
+
 const getMediaTypeFromPath = (filePath: string): MediaType => {
   const extension = path.extname(filePath).toLowerCase();
 
@@ -88,22 +143,55 @@ const parseManifestFromCheckpoint = (payloadJson: string | null) => {
   }
 
   try {
-    return JSON.parse(payloadJson) as {
-      outputRoot: string;
-      manifest: {
-        sourceDir: string;
-        imageOutputDir: string;
-        videoOutputDir: string;
-        imageQuality: number;
-        imageProfileLabel: string;
-        videoPresetLabel: string;
-        imageToolCommand: string;
-        videoToolCommand: string;
-      };
-    };
+    return JSON.parse(payloadJson) as CompressionManifestData;
   } catch {
     return null;
   }
+};
+
+const isUnderExcludedAncestor = (
+  absolutePath: string,
+  excludedDirectories: Set<string>,
+  includedDirectories: Set<string>
+) => {
+  const normalized = normalizePath(absolutePath);
+  const segments = normalized.split('/').filter(Boolean);
+  let currentPath = '';
+  let ancestorExcluded = false;
+
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    currentPath = currentPath ? `${currentPath}/${segments[index]}` : segments[index];
+
+    if (excludedDirectories.has(currentPath)) {
+      ancestorExcluded = true;
+    }
+
+    if (ancestorExcluded && includedDirectories.has(currentPath)) {
+      ancestorExcluded = false;
+    }
+  }
+
+  return ancestorExcluded;
+};
+
+const isFileCompressed = (absolutePath: string, scope: SelectionScope) => {
+  const normalizedPath = normalizePath(absolutePath);
+  const excludedDirectories = new Set(scope.excludedDirectories.map(normalizePath));
+  const includedDirectories = new Set(scope.includedDirectories.map(normalizePath));
+  const excludedFiles = new Set(scope.excludedFiles.map(normalizePath));
+  const includedFiles = new Set(scope.includedFiles.map(normalizePath));
+
+  if (excludedFiles.has(normalizedPath)) {
+    return false;
+  }
+
+  const ancestorExcluded = isUnderExcludedAncestor(absolutePath, excludedDirectories, includedDirectories);
+
+  if (!ancestorExcluded) {
+    return true;
+  }
+
+  return includedFiles.has(normalizedPath);
 };
 
 const upsertMediaItem = (jobId: string, sourcePath: string, sourceDir: string, outputPath: string) => {
@@ -143,7 +231,7 @@ const upsertMediaItem = (jobId: string, sourcePath: string, sourceDir: string, o
   return row.id;
 };
 
-const upsertDecision = (jobId: string, itemId: string) => {
+const upsertDecision = (jobId: string, itemId: string, selectedForCompression: boolean) => {
   const db = getDb();
   const now = new Date().toISOString();
 
@@ -158,12 +246,12 @@ const upsertDecision = (jobId: string, itemId: string) => {
         target_group_label,
         user_overridden,
         updated_at
-      ) VALUES (?, ?, ?, 1, 1, NULL, 0, ?)
+      ) VALUES (?, ?, ?, ?, 1, NULL, 0, ?)
       ON CONFLICT(job_id, item_id) DO UPDATE SET
         selected_for_compression = excluded.selected_for_compression,
         updated_at = excluded.updated_at
     `
-  ).run(randomUUID(), jobId, itemId, now);
+  ).run(randomUUID(), jobId, itemId, selectedForCompression ? 1 : 0, now);
 };
 
 const upsertStageStatus = (jobId: string, itemId: string, status: 'completed' | 'failed', errorMessage: string | null) => {
@@ -241,6 +329,15 @@ export const executeCompressionJob = async (jobId: string) => {
     throw new Error('Compression manifest data is missing or malformed.');
   }
 
+  const selectionScope: SelectionScope = checkpointData.manifest.selectionScope ?? {
+    excludedDirectories: [],
+    excludedFiles: [],
+    includedDirectories: [],
+    includedFiles: [],
+    updatedAt: 0
+  };
+  const resolvedSelectionScope = resolveSelectionScope(checkpointData.manifest.sourceDir, selectionScope);
+
   const imageCommand = buildImageCompressionCommand({
     jobId,
     sourceDir: checkpointData.manifest.sourceDir,
@@ -253,6 +350,7 @@ export const executeCompressionJob = async (jobId: string) => {
     videoPresetLabel: checkpointData.manifest.videoPresetLabel,
     imageToolCommand: checkpointData.manifest.imageToolCommand,
     videoToolCommand: checkpointData.manifest.videoToolCommand,
+    selectionScope: resolvedSelectionScope,
     createdAt: snapshot.job.createdAt
   });
 
@@ -268,6 +366,7 @@ export const executeCompressionJob = async (jobId: string) => {
     videoPresetLabel: checkpointData.manifest.videoPresetLabel,
     imageToolCommand: checkpointData.manifest.imageToolCommand,
     videoToolCommand: checkpointData.manifest.videoToolCommand,
+    selectionScope: resolvedSelectionScope,
     createdAt: snapshot.job.createdAt
   });
 
@@ -280,7 +379,8 @@ export const executeCompressionJob = async (jobId: string) => {
 
   for (const item of allItems) {
     const itemId = upsertMediaItem(jobId, item.source, checkpointData.manifest.sourceDir, item.output);
-    upsertDecision(jobId, itemId);
+    const selectedForCompression = isFileCompressed(item.source, resolvedSelectionScope);
+    upsertDecision(jobId, itemId, selectedForCompression);
     upsertStageStatus(jobId, itemId, item.status, item.error ?? null);
 
     if (item.status === 'completed') {

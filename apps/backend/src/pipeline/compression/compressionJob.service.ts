@@ -21,6 +21,13 @@ export type CompressionJobRequest = {
   videoPresetLabel: string;
   imageToolCommand?: string;
   videoToolCommand?: string;
+  selectionScope?: {
+    excludedDirectories: string[];
+    excludedFiles: string[];
+    includedDirectories: string[];
+    includedFiles: string[];
+    updatedAt: number;
+  };
 };
 
 export type CompressionJobManifest = {
@@ -35,6 +42,13 @@ export type CompressionJobManifest = {
   videoPresetLabel: string;
   imageToolCommand: string;
   videoToolCommand: string;
+  selectionScope: {
+    excludedDirectories: string[];
+    excludedFiles: string[];
+    includedDirectories: string[];
+    includedFiles: string[];
+    updatedAt: number;
+  };
   createdAt: string;
 };
 
@@ -132,6 +146,13 @@ export const startCompressionJob = (request: CompressionJobRequest): Compression
   const videoCommandFromRequest = request.videoToolCommand?.trim() || 'HandBrakeCLI';
   const resolvedImageCommand = resolveToolCommand(imageCommandFromRequest) ?? imageCommandFromRequest;
   const resolvedVideoCommand = resolveToolCommand(videoCommandFromRequest) ?? videoCommandFromRequest;
+  const selectionScope = request.selectionScope ?? {
+    excludedDirectories: [],
+    excludedFiles: [],
+    includedDirectories: [],
+    includedFiles: [],
+    updatedAt: Date.now()
+  };
   const manifest: CompressionJobManifest = {
     jobId,
     sourceDir: request.sourceDir,
@@ -144,6 +165,7 @@ export const startCompressionJob = (request: CompressionJobRequest): Compression
     videoPresetLabel: request.videoPresetLabel,
     imageToolCommand: resolvedImageCommand,
     videoToolCommand: resolvedVideoCommand,
+    selectionScope,
     createdAt: timestamp
   };
 
