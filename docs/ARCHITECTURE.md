@@ -25,8 +25,10 @@ Frontend (React)
 - Modular monolith (simple but scalable)
 - Separation of concerns
 - Pipeline-based processing (core concept)
-- Avoid over-engineering in V1
+- Simple, minimal abstractions (one active session at a time)
 - User-selected input and output folders
+- Output structure mirrors source structure (flat)
+- Compressed photos and videos in same output tree
 - Preview-first workflows before file mutations
 - Resumable workflows for long-running sessions
 - Minimal SQLite persistence for V1 state
@@ -103,7 +105,7 @@ The backend is responsible for:
 - Orchestrating the pipeline
 - Executing scripts and external tools
 - Managing filesystem operations
-- Persisting resumable job state and manifests
+- Persisting resumable session state
 
 ### Layers
 
@@ -114,11 +116,13 @@ The backend is responsible for:
 ### V1 Workflow
 
 - Receive a source folder and a destination folder from the dashboard
-- Create a processing job that can be resumed later
-- Scan nested media files without modifying them
-- Build preview data for compression and grouping
+- Start a processing session that can be paused and resumed
+- Scan nested media files without modifying them (preview-only)
+- Build preview data for compression and grouping decisions
 - Classify files with basic source heuristics (camera, WhatsApp, screenshot, unknown)
-- Apply user-approved actions through the pipeline
+- Apply user-approved decisions through the pipeline
+- Output structure mirrors source structure directly to destination folder
+- Both compressed images and videos go to the same output tree
 
 ---
 
@@ -175,7 +179,9 @@ Groups media files by rules (date, event, etc.).
 Handles file system operations (read, write, move).
 
 ### state
-Stores job state, checkpoints, selections and processed items using a minimal SQLite database.
+Stores session state, checkpoints, selections and processed items using a minimal SQLite database.
+
+Only one session can be active at a time. Previous sessions are archived or cleaned up.
 
 State contract reference:
 

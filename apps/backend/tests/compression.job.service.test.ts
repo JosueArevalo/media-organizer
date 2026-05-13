@@ -25,11 +25,11 @@ afterEach(() => {
   resetDbForTests();
 });
 
-test('startCompressionJob creates a resumable job and output scaffold', async () => {
-  const { startCompressionJob, getCompressionJob } = await import('../src/pipeline/compression/compressionJob.service.js');
+test('startCompressionSession creates a resumable session and output scaffold', async () => {
+  const { startCompressionSession, getCompressionSession } = await import('../src/pipeline/compression/compressionJob.service.js');
 
-  const result = startCompressionJob({
-    name: 'Test compression job',
+  const result = startCompressionSession({
+    name: 'Test compression session',
     sourceDir,
     outputDir,
     imageQuality: 82,
@@ -37,7 +37,7 @@ test('startCompressionJob creates a resumable job and output scaffold', async ()
     videoPresetLabel: 'Balanced'
   });
 
-  assert.equal(result.job.status, 'running');
+  assert.equal(result.session.status, 'running');
   assert.match(result.outputRoot, new RegExp(`^${outputDir.replace(/\\/g, '\\\\')}`));
   assert.ok(fs.existsSync(result.outputRoot));
   assert.ok(fs.existsSync(result.manifestPath));
@@ -46,25 +46,25 @@ test('startCompressionJob creates a resumable job and output scaffold', async ()
   assert.equal(manifest.imageToolCommand, 'cjpeg');
   assert.equal(manifest.videoToolCommand, 'HandBrakeCLI');
 
-  const persisted = getCompressionJob(result.job.id);
+  const persisted = getCompressionSession(result.session.id);
   assert.ok(persisted);
-  assert.equal(persisted?.job.status, 'running');
+  assert.equal(persisted?.session.status, 'running');
   assert.equal(persisted?.checkpoint?.stage, 'compress');
 
   const db = getDb();
-  const jobRows = db.prepare('SELECT id, status, source_dir, output_dir FROM jobs WHERE id = ?').all(result.job.id) as Array<{
+  const sessionRows = db.prepare('SELECT id, status, source_dir, output_dir FROM sessions WHERE id = ?').all(result.session.id) as Array<{
     id: string;
     status: string;
     source_dir: string;
     output_dir: string;
   }>;
 
-  assert.equal(jobRows.length, 1);
-  assert.equal(jobRows[0].status, 'running');
-  assert.equal(jobRows[0].source_dir, sourceDir);
-  assert.equal(jobRows[0].output_dir, outputDir);
+  assert.equal(sessionRows.length, 1);
+  assert.equal(sessionRows[0].status, 'running');
+  assert.equal(sessionRows[0].source_dir, sourceDir);
+  assert.equal(sessionRows[0].output_dir, outputDir);
 
-  const checkpointRows = db.prepare('SELECT stage, payload_json FROM job_checkpoints WHERE job_id = ?').all(result.job.id) as Array<{
+  const checkpointRows = db.prepare('SELECT stage, payload_json FROM session_checkpoints WHERE session_id = ?').all(result.session.id) as Array<{
     stage: string;
     payload_json: string | null;
   }>;
@@ -74,16 +74,16 @@ test('startCompressionJob creates a resumable job and output scaffold', async ()
   assert.ok(checkpointRows[0].payload_json?.includes('outputRoot'));
 });
 
-test('executeCompressionJob persists per-item compression statuses', async () => {
-  const { startCompressionJob, getCompressionJob } = await import('../src/pipeline/compression/compressionJob.service.js');
-  const { executeCompressionJob } = await import('../src/pipeline/compression/compressionJob.runner.js');
+test('executeCompressionSession persists per-item compression statuses', async () => {
+  const { startCompressionSession, getCompressionSession } = await import('../src/pipeline/compression/compressionJob.service.js');
+  const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js');
 
   fs.mkdirSync(path.join(sourceDir, 'album'), { recursive: true });
   fs.writeFileSync(path.join(sourceDir, 'album', 'photo.jpg'), 'fake-jpg-content', 'utf8');
   fs.writeFileSync(path.join(sourceDir, 'album', 'clip.mp4'), 'fake-video-content', 'utf8');
 
-  const started = startCompressionJob({
-    name: 'Execution test job',
+  const started = startCompressionSession({
+    name: 'Execution test session',
     sourceDir,
     outputDir,
     imageQuality: 80,
@@ -93,14 +93,14 @@ test('executeCompressionJob persists per-item compression statuses', async () =>
     videoToolCommand: '__missing_video_encoder__'
   });
 
-  await executeCompressionJob(started.job.id);
+  await executeCompressionSession(started.session.id);
 
-  const persisted = getCompressionJob(started.job.id);
+  const persisted = getCompressionSession(started.session.id);
   assert.ok(persisted);
-  assert.equal(persisted?.job.status, 'failed');
+  assert.equal(persisted?.session.status, 'failed');
 
   const db = getDb();
-  const itemRows = db.prepare('SELECT source_path FROM media_items WHERE job_id = ? ORDER BY source_path').all(started.job.id) as Array<{
+  const itemRows = db.prepare('SELECT source_path FROM media_items WHERE session_id = ? ORDER BY source_path').all(started.session.id) as Array<{
     source_path: string;
   }>;
   assert.equal(itemRows.length, 2);
@@ -111,17 +111,17 @@ test('executeCompressionJob persists per-item compression statuses', async () =>
         SELECT iss.status, mi.source_path
         FROM item_stage_status iss
         JOIN media_items mi ON mi.id = iss.item_id
-        WHERE iss.job_id = ? AND iss.stage = 'compress'
+        WHERE iss.session_id = ? AND iss.stage = 'compress'
         ORDER BY mi.source_path
       `
     )
-    .all(started.job.id) as Array<{ status: string; source_path: string }>;
+    .all(started.session.id) as Array<{ status: string; source_path: string }>;
 
   assert.equal(statusRows.length, 2);
   assert.deepEqual(statusRows.map((row) => row.status), ['failed', 'failed']);
 
-  const outputImage = path.join(started.outputRoot, 'compressed', 'images', 'album', 'photo.jpg');
-  const outputVideo = path.join(started.outputRoot, 'compressed', 'videos', 'album', 'clip.mp4');
+  const outputImage = path.join(started.outputRoot, 'album', 'photo.jpg');
+  const outputVideo = path.join(started.outputRoot, 'album', 'clip.mp4');
 
   assert.ok(fs.existsSync(outputImage));
   assert.ok(fs.existsSync(outputVideo));

@@ -1,4 +1,4 @@
-export type CompressionJobRequest = {
+export type CompressionSessionRequest = {
   name?: string;
   sourceDir: string;
   outputDir: string;
@@ -16,8 +16,8 @@ export type CompressionJobRequest = {
   } | null;
 };
 
-export type CompressionJobApiResponse = {
-  job: {
+export type CompressionSessionApiResponse = {
+  session: {
     id: string;
     status: 'draft' | 'scanned' | 'ready' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
     sourceDir: string;
@@ -47,8 +47,8 @@ export type HandBrakePresetsApiResponse = {
   presets: HandBrakePresetOption[];
 };
 
-export const startCompressionJobRequest = async (payload: CompressionJobRequest): Promise<CompressionJobApiResponse> => {
-  const response = await fetch('/api/compression/jobs', {
+export const startCompressionSessionRequest = async (payload: CompressionSessionRequest): Promise<CompressionSessionApiResponse> => {
+  const response = await fetch('/api/compression/sessions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -58,21 +58,21 @@ export const startCompressionJobRequest = async (payload: CompressionJobRequest)
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Could not start compression job (${response.status}): ${body}`);
+    throw new Error(`Could not start compression session (${response.status}): ${body}`);
   }
 
-  return (await response.json()) as CompressionJobApiResponse;
+  return (await response.json()) as CompressionSessionApiResponse;
 };
 
-export const getCompressionJobRequest = async (jobId: string): Promise<CompressionJobApiResponse> => {
-  const response = await fetch(`/api/compression/jobs/${jobId}`);
+export const getCompressionSessionRequest = async (sessionId: string): Promise<CompressionSessionApiResponse> => {
+  const response = await fetch(`/api/compression/sessions/${sessionId}`);
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Could not fetch compression job (${response.status}): ${body}`);
+    throw new Error(`Could not fetch compression session (${response.status}): ${body}`);
   }
 
-  return (await response.json()) as CompressionJobApiResponse;
+  return (await response.json()) as CompressionSessionApiResponse;
 };
 
 export const loadHandBrakePresetsRequest = async (command: string): Promise<HandBrakePresetsApiResponse> => {

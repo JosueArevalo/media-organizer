@@ -2,13 +2,14 @@
 
 ## 1. Purpose
 
-This document defines the minimum persistent state contract for V1.
+This document defines the minimal persistent state contract for V1.
 
 Goals:
-- Resume long-running jobs safely.
-- Keep user decisions across sessions.
-- Track per-file progress for pipeline steps.
-- Stay simple and implementation-friendly.
+- Resume long-running processing sessions safely
+- Keep user decisions across sessions
+- Track per-file progress for pipeline steps
+- Stay simple: one active session at a time
+- Support resumable, idempotent pipeline execution
 
 ---
 
@@ -16,24 +17,26 @@ Goals:
 
 V1 uses a local SQLite database as the source of truth for runtime state.
 
+Only one processing session is active at a time. Previous sessions may be archived or cleaned up (out of scope for V1).
+
 Optional JSON manifests can be exported for debugging and audit, but they are not the primary state store.
 
 ---
 
 ## 3. Core Concepts
 
-- Job: a resumable processing session with source and output folders.
-- Media Item: one discovered file linked to a job.
-- Decision: user choice for compression and target grouping.
-- Stage Status: per-item status for scan, classify, compress, and organize.
-- Checkpoint: progress marker to continue safely after interruption.
+- **Session**: A single processing run with a source folder and output folder.
+- **Media Item**: One discovered file linked to the active session.
+- **Decision**: User choice for compression and target grouping per file.
+- **Stage Status**: Per-item status for scan, classify, compress, and organize.
+- **Checkpoint**: Progress marker to continue safely after interruption.
 
 ---
 
 ## 4. Required Enums
 
 ```text
-job_status:
+session_status:
 - draft
 - scanned
 - ready
@@ -72,14 +75,16 @@ stage_status:
 
 ## 5. Minimal Schema
 
-### 5.1 jobs
+Note: There is always at most one active session at a time.
+
+### 5.1 sessions (was: jobs)
 
 ```text
 id TEXT PRIMARY KEY                -- UUID
 name TEXT NULL
 source_dir TEXT NOT NULL
 output_dir TEXT NOT NULL
-status TEXT NOT NULL               -- job_status
+status TEXT NOT NULL               -- session_status
 created_at TEXT NOT NULL           -- ISO-8601
 updated_at TEXT NOT NULL           -- ISO-8601
 last_opened_at TEXT NULL           -- ISO-8601
@@ -89,7 +94,7 @@ last_opened_at TEXT NULL           -- ISO-8601
 
 ```text
 id TEXT PRIMARY KEY                -- UUID
-job_id TEXT NOT NULL               -- FK jobs.id
+session_id TEXT NOT NULL           -- FK sessions.id
 source_path TEXT NOT NULL
 relative_path TEXT NOT NULL
 media_type TEXT NOT NULL           -- media_type
@@ -100,14 +105,14 @@ capture_time TEXT NULL             -- ISO-8601
 created_at TEXT NOT NULL
 updated_at TEXT NOT NULL
 
-UNIQUE(job_id, source_path)
+UNIQUE(session_id, source_path)
 ```
 
 ### 5.3 item_decisions
 
 ```text
 id TEXT PRIMARY KEY                -- UUID
-job_id TEXT NOT NULL               -- FK jobs.id
+session_id TEXT NOT NULL           -- FK sessions.id
 item_id TEXT NOT NULL              -- FK media_items.id
 selected_for_compression INTEGER NOT NULL DEFAULT 0
 selected_for_output INTEGER NOT NULL DEFAULT 1
@@ -115,14 +120,14 @@ target_group_label TEXT NULL       -- Example: 2026.04.15 - BBQ
 user_overridden INTEGER NOT NULL DEFAULT 0
 updated_at TEXT NOT NULL
 
-UNIQUE(job_id, item_id)
+UNIQUE(session_id, item_id)
 ```
 
 ### 5.4 item_stage_status
 
 ```text
 id TEXT PRIMARY KEY                -- UUID
-job_id TEXT NOT NULL               -- FK jobs.id
+session_id TEXT NOT NULL           -- FK sessions.id
 item_id TEXT NOT NULL              -- FK media_items.id
 stage TEXT NOT NULL                -- stage_name
 status TEXT NOT NULL               -- stage_status
@@ -130,28 +135,28 @@ attempt_count INTEGER NOT NULL DEFAULT 0
 last_error TEXT NULL
 updated_at TEXT NOT NULL
 
-UNIQUE(job_id, item_id, stage)
+UNIQUE(session_id, item_id, stage)
 ```
 
 ### 5.5 job_checkpoints
 
 ```text
 id TEXT PRIMARY KEY                -- UUID
-job_id TEXT NOT NULL               -- FK jobs.id
+session_id TEXT NOT NULL           -- FK sessions.id
 stage TEXT NOT NULL                -- stage_name
 cursor TEXT NULL                   -- implementation-defined pointer
 payload_json TEXT NULL             -- optional serialized metadata
 updated_at TEXT NOT NULL
 
-UNIQUE(job_id, stage)
+UNIQUE(session_id, stage)
 ```
 
 ---
 
-## 6. Job Lifecycle
+## 6. Session Lifecycle
 
 ```text
-Create job      : draft
+Create session  : draft
 Scan finished   : scanned
 User decisions  : ready
 Pipeline start  : running
@@ -163,16 +168,17 @@ User cancel     : cancelled
 
 Transition rules:
 - `running -> paused` must be allowed at any time.
-- On app restart, stale `running` jobs must be recovered as `paused`.
-- `completed` jobs are immutable for processing status.
-- `cancelled` jobs are not resumed unless explicitly cloned to a new job.
+- On app restart, stale `running` sessions must be recovered as `paused`.
+- `completed` sessions are immutable for processing status.
+- `cancelled` sessions are not resumed unless explicitly cloned to a new session.
+- Only one session can be active at a time (status != `completed`, `failed`, `cancelled`).
 
 ---
 
 ## 7. Resume Rules
 
-When resuming a job:
-1. Load latest job and checkpoints.
+When resuming the active session:
+1. Load the current session and its checkpoints.
 2. For each stage, treat stale `running` item statuses as `pending`.
 3. Continue with items in `pending` and retryable `failed`.
 4. Skip items in `completed` or `skipped`.
@@ -181,7 +187,7 @@ When resuming a job:
 Idempotency constraints:
 - Re-running a completed stage must not duplicate outputs.
 - Stage handlers should verify output existence before writing.
-- Any filesystem mutation should be traceable to one `(job_id, item_id, stage)` record.
+- Any filesystem mutation should be traceable to one `(session_id, item_id, stage)` record.
 
 ---
 
@@ -215,13 +221,16 @@ Selectors update `item_decisions.selected_for_compression`.
 ## 10. Minimum API Expectations
 
 These operations must be supported by the backend service layer:
-- Create job.
-- Resume job.
+- Start or resume the active session (source + output folders).
+- Pause session.
 - Scan source folder and upsert media items.
 - Read paginated items with filters (kind, type, status, size).
 - Update item decisions (single and bulk).
-- Start, pause, and continue pipeline execution.
-- Read job progress summary by stage.
+- Continue pipeline execution.
+- Read session progress summary by stage.
+- Get current session status (or null if none active).
+
+Note: Only one session can be active at a time. Creating a new session implicitly closes the previous one.
 
 ---
 

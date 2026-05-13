@@ -4,8 +4,8 @@ import path from 'node:path';
 import { readdir, rm, stat } from 'node:fs/promises';
 import { runMigrations } from './state/migrations/runMigrations.js';
 import { getDb, getDbPath } from './state/db.js';
-import { getCompressionJob, startCompressionJob } from './pipeline/compression/compressionJob.service.js';
-import { executeCompressionJob } from './pipeline/compression/compressionJob.runner.js';
+import { getCompressionSession, startCompressionSession } from './pipeline/compression/compressionJob.service.js';
+import { executeCompressionSession } from './pipeline/compression/compressionJob.runner.js';
 import { scanSourceTreeByPath } from './pipeline/source/sourceTreeScan.service.js';
 import { resolveToolCommand } from './pipeline/compression/toolCommandResolver.js';
 import { listHandBrakePresets } from './pipeline/compression/handbrakePresets.service.js';
@@ -74,7 +74,7 @@ const server = createServer((req, res) => {
     return;
   }
 
-  if (requestUrl.pathname === '/api/compression/jobs' && req.method === 'POST') {
+  if (requestUrl.pathname === '/api/compression/sessions' && req.method === 'POST') {
     void (async () => {
       try {
         const body = (await readRequestJson(req)) as
@@ -102,7 +102,7 @@ const server = createServer((req, res) => {
           return;
         }
 
-        const result = startCompressionJob({
+        const result = startCompressionSession({
           name: body.name,
           sourceDir: body.sourceDir,
           outputDir: body.outputDir,
@@ -114,15 +114,15 @@ const server = createServer((req, res) => {
           selectionScope: body.selectionScope ?? undefined
         });
 
-        void executeCompressionJob(result.job.id).catch((error) => {
-          console.error(`[backend] compression job ${result.job.id} failed`, error);
+        void executeCompressionSession(result.session.id).catch((error) => {
+          console.error(`[backend] compression session ${result.session.id} failed`, error);
         });
 
         sendJson(res, 201, result);
       } catch (error) {
         sendJson(res, 500, {
           status: 'error',
-          message: error instanceof Error ? error.message : 'Failed to start compression job.'
+          message: error instanceof Error ? error.message : 'Failed to start compression session.'
         });
       }
     })();
@@ -211,17 +211,17 @@ const server = createServer((req, res) => {
 
         db.exec(`
           BEGIN TRANSACTION;
-          DELETE FROM job_checkpoints;
+          DELETE FROM session_checkpoints;
           DELETE FROM item_stage_status;
           DELETE FROM item_decisions;
           DELETE FROM media_items;
-          DELETE FROM jobs;
+          DELETE FROM sessions;
           COMMIT;
         `);
 
         sendJson(res, 200, {
           status: 'ok',
-          cleared: ['jobs', 'media_items', 'item_decisions', 'item_stage_status', 'job_checkpoints']
+          cleared: ['sessions', 'media_items', 'item_decisions', 'item_stage_status', 'session_checkpoints']
         });
       } catch (error) {
         sendJson(res, 500, {
@@ -283,22 +283,22 @@ const server = createServer((req, res) => {
     return;
   }
 
-  if (requestUrl.pathname.startsWith('/api/compression/jobs/') && req.method === 'GET') {
-    const jobId = requestUrl.pathname.split('/').pop();
+  if (requestUrl.pathname.startsWith('/api/compression/sessions/') && req.method === 'GET') {
+    const sessionId = requestUrl.pathname.split('/').pop();
 
-    if (!jobId) {
+    if (!sessionId) {
       sendJson(res, 400, { status: 'invalid_request' });
       return;
     }
 
-    const job = getCompressionJob(jobId);
+    const session = getCompressionSession(sessionId);
 
-    if (!job) {
+    if (!session) {
       sendJson(res, 404, { status: 'not_found' });
       return;
     }
 
-    sendJson(res, 200, job);
+    sendJson(res, 200, session);
     return;
   }
 

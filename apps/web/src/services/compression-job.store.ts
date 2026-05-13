@@ -1,8 +1,8 @@
-export type CompressionJobStatus = 'idle' | 'running' | 'completed' | 'failed';
+export type CompressionSessionStatus = 'idle' | 'running' | 'completed' | 'failed';
 
-export type CompressionJobSnapshot = {
-  backendJobId: string | null;
-  status: CompressionJobStatus;
+export type CompressionSessionSnapshot = {
+  backendSessionId: string | null;
+  status: CompressionSessionStatus;
   startedAt: number | null;
   completedAt: number | null;
   imageProfileLabel: string | null;
@@ -13,19 +13,19 @@ export type CompressionJobSnapshot = {
   updatedAt: number;
 };
 
-export type CompressionJobStartPayload = {
-  backendJobId: string | null;
+export type CompressionSessionStartPayload = {
+  backendSessionId: string | null;
   imageProfileLabel: string;
   imageQuality: number;
   videoPresetLabel: string;
   outputRootLabel: string;
 };
 
-const STORAGE_KEY = 'media-organizer-compression-job';
-const STORAGE_EVENT_NAME = 'media-organizer-compression-job-updated';
+const STORAGE_KEY = 'media-organizer-compression-session';
+const STORAGE_EVENT_NAME = 'media-organizer-compression-session-updated';
 
-const createEmptySnapshot = (): CompressionJobSnapshot => ({
-  backendJobId: null,
+const createEmptySnapshot = (): CompressionSessionSnapshot => ({
+  backendSessionId: null,
   status: 'idle',
   startedAt: null,
   completedAt: null,
@@ -37,7 +37,7 @@ const createEmptySnapshot = (): CompressionJobSnapshot => ({
   updatedAt: 0
 });
 
-const readSnapshot = (): CompressionJobSnapshot => {
+const readSnapshot = (): CompressionSessionSnapshot => {
   if (typeof window === 'undefined') {
     return createEmptySnapshot();
   }
@@ -49,7 +49,7 @@ const readSnapshot = (): CompressionJobSnapshot => {
       return createEmptySnapshot();
     }
 
-    const parsed = JSON.parse(raw) as Partial<CompressionJobSnapshot>;
+    const parsed = JSON.parse(raw) as Partial<CompressionSessionSnapshot>;
 
     return {
       ...createEmptySnapshot(),
@@ -61,7 +61,7 @@ const readSnapshot = (): CompressionJobSnapshot => {
   }
 };
 
-const writeSnapshot = (snapshot: CompressionJobSnapshot) => {
+const writeSnapshot = (snapshot: CompressionSessionSnapshot) => {
   if (typeof window === 'undefined') {
     return;
   }
@@ -70,17 +70,17 @@ const writeSnapshot = (snapshot: CompressionJobSnapshot) => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
     window.dispatchEvent(new CustomEvent(STORAGE_EVENT_NAME));
   } catch {
-    // Ignore storage failures and keep the job state in memory.
+    // Ignore storage failures and keep the session state in memory.
   }
 };
 
-export const loadCompressionJobSnapshot = () => readSnapshot();
+export const loadCompressionSessionSnapshot = () => readSnapshot();
 
-export const isCompressionJobComplete = () => readSnapshot().status === 'completed';
+export const isCompressionSessionComplete = () => readSnapshot().status === 'completed';
 
-export const startCompressionJob = (payload: CompressionJobStartPayload) => {
-  const snapshot: CompressionJobSnapshot = {
-    backendJobId: payload.backendJobId,
+export const startCompressionSession = (payload: CompressionSessionStartPayload) => {
+  const snapshot: CompressionSessionSnapshot = {
+    backendSessionId: payload.backendSessionId,
     status: 'running',
     startedAt: Date.now(),
     completedAt: null,
@@ -97,14 +97,14 @@ export const startCompressionJob = (payload: CompressionJobStartPayload) => {
   return snapshot;
 };
 
-export const completeCompressionJob = () => {
+export const completeCompressionSession = () => {
   const current = readSnapshot();
 
   if (current.status === 'completed') {
     return current;
   }
 
-  const snapshot: CompressionJobSnapshot = {
+  const snapshot: CompressionSessionSnapshot = {
     ...current,
     status: 'completed',
     completedAt: Date.now(),
@@ -117,7 +117,7 @@ export const completeCompressionJob = () => {
   return snapshot;
 };
 
-export const resetCompressionJob = () => {
+export const resetCompressionSession = () => {
   const snapshot = createEmptySnapshot();
 
   writeSnapshot(snapshot);
@@ -125,9 +125,9 @@ export const resetCompressionJob = () => {
   return snapshot;
 };
 
-export const failCompressionJob = (errorMessage: string) => {
+export const failCompressionSession = (errorMessage: string) => {
   const current = readSnapshot();
-  const snapshot: CompressionJobSnapshot = {
+  const snapshot: CompressionSessionSnapshot = {
     ...current,
     status: 'failed',
     completedAt: Date.now(),
@@ -140,7 +140,7 @@ export const failCompressionJob = (errorMessage: string) => {
   return snapshot;
 };
 
-export const subscribeCompressionJobChanges = (callback: () => void) => {
+export const subscribeCompressionSessionChanges = (callback: () => void) => {
   if (typeof window === 'undefined') {
     return () => undefined;
   }

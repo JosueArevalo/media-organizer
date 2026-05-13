@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { CompressionJobManifest } from './compressionJob.service.js';
+import type { CompressionSessionManifest } from './compressionJob.service.js';
 
 const currentFile = fileURLToPath(import.meta.url);
 const currentDir = path.dirname(currentFile);
@@ -10,7 +10,7 @@ export const getCompressionScriptsDir = () => path.join(repoRootDir, 'scripts', 
 
 export const getPythonCommand = () => process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python';
 
-export const buildImageCompressionCommand = (manifest: CompressionJobManifest) => ({
+export const buildImageCompressionCommand = (manifest: CompressionSessionManifest) => ({
   command: getPythonCommand(),
   args: [
     path.join(getCompressionScriptsDir(), 'compress_images.py'),
@@ -27,7 +27,7 @@ export const buildImageCompressionCommand = (manifest: CompressionJobManifest) =
   ]
 });
 
-export const buildVideoCompressionCommand = (manifest: CompressionJobManifest) => ({
+export const buildVideoCompressionCommand = (manifest: CompressionSessionManifest) => ({
   command: getPythonCommand(),
   args: [
     path.join(getCompressionScriptsDir(), 'compress_videos.py'),

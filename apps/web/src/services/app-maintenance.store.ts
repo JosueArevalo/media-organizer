@@ -1,4 +1,4 @@
-import { resetCompressionJob } from './compression-job.store';
+import { resetCompressionSession } from './compression-job.store';
 import {
   clearFolderSelectionPersistence,
   clearSourceSelectionScope,
@@ -42,5 +42,5 @@ export const resetAllPersistentAppState = async () => {
   clearSourceSelectionScope();
   clearSourceTreeSnapshot('source');
   clearSourceTreeSnapshot('destination');
-  resetCompressionJob();
+  resetCompressionSession();
 };

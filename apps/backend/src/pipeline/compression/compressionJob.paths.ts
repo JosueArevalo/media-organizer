@@ -1,10 +1,13 @@
 import path from 'node:path';
 
-export const buildCompressionJobOutputRoot = (outputDir: string, jobId: string) =>
-  path.join(outputDir, 'media-organizer', 'jobs', jobId);
+/**
+ * Build the root output directory for compression.
+ * Output now mirrors the source tree directly under the selected destination.
+ */
+export const buildCompressionSessionOutputRoot = (outputDir: string): string => outputDir;
 
-export const buildCompressionJobManifestPath = (outputRoot: string) => path.join(outputRoot, 'compression-job.json');
+export const buildCompressionSessionManifestPath = (outputRoot: string) => path.join(outputRoot, '.media-organizer', 'session.json');
 
-export const buildCompressionImagesOutputDir = (outputRoot: string) => path.join(outputRoot, 'compressed', 'images');
+export const buildCompressionImagesOutputDir = (outputRoot: string) => outputRoot;
 
-export const buildCompressionVideosOutputDir = (outputRoot: string) => path.join(outputRoot, 'compressed', 'videos');
+export const buildCompressionVideosOutputDir = (outputRoot: string) => outputRoot;

@@ -2,7 +2,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Stepper, type StepConfig } from './Stepper';
 import { useTheme } from '../hooks/useTheme';
 import { useImportStepCompletion } from '../hooks/useImportStepCompletion';
-import { useCompressionJobState } from '../hooks/useCompressionJobState';
+import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 
 const workflowStepBlueprint = [
   {
@@ -39,8 +39,8 @@ const AppShell = () => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const isImportStepComplete = useImportStepCompletion();
-  const compressionJobState = useCompressionJobState();
-  const isCompressionComplete = compressionJobState.status === 'completed';
+  const compressionSessionState = useCompressionSessionState();
+  const isCompressionComplete = compressionSessionState.status === 'completed';
 
   const workflowSteps: StepConfig[] = workflowStepBlueprint.map((step, index) => ({
     ...step,
@@ -58,7 +58,7 @@ const AppShell = () => {
   const headerTitles: Record<string, string> = {
     import: 'Prepare your source folders',
     selection: 'Select what gets compressed',
-    compression: 'Tune compression settings and launch jobs',
+    compression: 'Tune compression settings and launch the session',
     grouping: 'Review the final structure'
   };
 
@@ -84,7 +84,7 @@ const AppShell = () => {
             📊 Dashboard
           </Link>
           <Link to="/jobs" className={`quick-link ${isJobs ? 'active' : ''}`}>
-            ⚙️ Jobs
+            ⚙️ Sessions
           </Link>
           <Link to="/settings" className={`quick-link ${location.pathname === '/settings' ? 'active' : ''}`}>
             🔧 Settings
