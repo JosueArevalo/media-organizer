@@ -6,20 +6,22 @@
 
 The pipeline is the core of the system.
 
-It processes media step by step.
+It processes media step by step as part of an active session.
+
+Each step processes items independently and records checkpoint data to support resuming after interruption.
 
 ---
 
 ### Rules
 
 - Each step must do one thing
-- Steps must be independent
-- Steps must be composable
-- Input/output must be clear
+- Steps must be independent and composable
+- Input/output contracts must be clear
 - Separate preview steps from mutation steps
 - Do not write to the filesystem during scan-only steps
 - Track per-file checkpoints to support interruption and resume
-- Keep step behavior idempotent when possible
+- Keep step behavior idempotent (re-running should not duplicate outputs)
+- Steps must verify output existence before overwriting
 
 ---
 

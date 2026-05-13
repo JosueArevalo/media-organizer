@@ -6,7 +6,7 @@ import {
 } from '../services/encoder-settings.store';
 import { loadFolderSelections } from '../services/folder-selection.store';
 import { resetAllPersistentAppState } from '../services/app-maintenance.store';
-import { resetCompressionJob } from '../services/compression-job.store';
+import { resetCompressionSession } from '../services/compression-job.store';
 import '../styles/SettingsPage.css';
 
 type ToolStatus = 'ready' | 'missing' | 'unknown';
@@ -189,7 +189,7 @@ const SettingsPage = () => {
 
       setMaintenanceMessage({
         type: 'success',
-        text: 'Reset completed. Cleared: Source/Destination selections, source tree cache, scope cache, compression job snapshot, theme, IndexedDB folder cache, and backend job history. Encoder paths were preserved.'
+        text: 'Reset completed. Cleared: Source/Destination selections, source tree cache, scope cache, compression session snapshot, theme, IndexedDB folder cache, and backend session history. Encoder paths were preserved.'
       });
     } catch (error) {
       setMaintenanceMessage({
@@ -239,7 +239,7 @@ const SettingsPage = () => {
 
       const result = (await response.json()) as { deletedEntries?: number };
 
-      resetCompressionJob();
+      resetCompressionSession();
 
       setMaintenanceMessage({
         type: 'success',

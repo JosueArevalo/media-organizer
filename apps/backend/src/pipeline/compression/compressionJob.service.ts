@@ -3,16 +3,16 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../../state/db.js';
 import { runMigrations } from '../../state/migrations/runMigrations.js';
-import type { JobRecord, JobCheckpointRecord } from '../../state/dto/state.types.js';
+import type { SessionRecord, SessionCheckpointRecord } from '../../state/dto/state.types.js';
 import {
   buildCompressionImagesOutputDir,
-  buildCompressionJobManifestPath,
-  buildCompressionJobOutputRoot,
+  buildCompressionSessionManifestPath,
+  buildCompressionSessionOutputRoot,
   buildCompressionVideosOutputDir
 } from './compressionJob.paths.js';
 import { resolveToolCommand } from './toolCommandResolver.js';
 
-export type CompressionJobRequest = {
+export type CompressionSessionRequest = {
   name?: string;
   sourceDir: string;
   outputDir: string;
@@ -30,8 +30,8 @@ export type CompressionJobRequest = {
   };
 };
 
-export type CompressionJobManifest = {
-  jobId: string;
+export type CompressionSessionManifest = {
+  sessionId: string;
   sourceDir: string;
   outputDir: string;
   outputRoot: string;
@@ -52,10 +52,10 @@ export type CompressionJobManifest = {
   createdAt: string;
 };
 
-export type CompressionJobLaunchResult = {
-  job: JobRecord;
-  checkpoint: JobCheckpointRecord;
-  manifest: CompressionJobManifest;
+export type CompressionSessionLaunchResult = {
+  session: SessionRecord;
+  checkpoint: SessionCheckpointRecord;
+  manifest: CompressionSessionManifest;
   outputRoot: string;
   manifestPath: string;
 };
@@ -66,12 +66,12 @@ const ensureDirectory = (directoryPath: string) => {
   fs.mkdirSync(directoryPath, { recursive: true });
 };
 
-const upsertJob = (request: CompressionJobRequest, jobId: string, timestamp: string): JobRecord => {
+const upsertSession = (request: CompressionSessionRequest, sessionId: string, timestamp: string): SessionRecord => {
   const db = getDb();
 
   db.prepare(
     `
-      INSERT INTO jobs (id, name, source_dir, output_dir, status, created_at, updated_at, last_opened_at)
+      INSERT INTO sessions (id, name, source_dir, output_dir, status, created_at, updated_at, last_opened_at)
       VALUES (?, ?, ?, ?, 'running', ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
@@ -81,67 +81,67 @@ const upsertJob = (request: CompressionJobRequest, jobId: string, timestamp: str
         updated_at = excluded.updated_at,
         last_opened_at = excluded.last_opened_at
     `
-  ).run(jobId, request.name ?? null, request.sourceDir, request.outputDir, timestamp, timestamp, timestamp);
+  ).run(sessionId, request.name ?? null, request.sourceDir, request.outputDir, timestamp, timestamp, timestamp);
 
-  const job = db
-    .prepare('SELECT id, name, source_dir, output_dir, status, created_at, updated_at, last_opened_at FROM jobs WHERE id = ?')
-    .get(jobId) as {
+  const session = db
+    .prepare('SELECT id, name, source_dir, output_dir, status, created_at, updated_at, last_opened_at FROM sessions WHERE id = ?')
+    .get(sessionId) as {
     id: string;
     name: string | null;
     source_dir: string;
     output_dir: string;
-    status: JobRecord['status'];
+    status: SessionRecord['status'];
     created_at: string;
     updated_at: string;
     last_opened_at: string | null;
   };
 
   return {
-    id: job.id,
-    name: job.name,
-    sourceDir: job.source_dir,
-    outputDir: job.output_dir,
-    status: job.status,
-    createdAt: job.created_at,
-    updatedAt: job.updated_at,
-    lastOpenedAt: job.last_opened_at
+    id: session.id,
+    name: session.name,
+    sourceDir: session.source_dir,
+    outputDir: session.output_dir,
+    status: session.status,
+    createdAt: session.created_at,
+    updatedAt: session.updated_at,
+    lastOpenedAt: session.last_opened_at
   };
 };
 
-const upsertCompressionCheckpoint = (jobId: string, outputRoot: string, manifest: CompressionJobManifest, timestamp: string) => {
+const upsertCompressionCheckpoint = (sessionId: string, outputRoot: string, manifest: CompressionSessionManifest, timestamp: string) => {
   const db = getDb();
 
   db.prepare(
     `
-      INSERT INTO job_checkpoints (id, job_id, stage, cursor, payload_json, updated_at)
+      INSERT INTO session_checkpoints (id, session_id, stage, cursor, payload_json, updated_at)
       VALUES (?, ?, 'compress', NULL, ?, ?)
-      ON CONFLICT(job_id, stage) DO UPDATE SET
+      ON CONFLICT(session_id, stage) DO UPDATE SET
         payload_json = excluded.payload_json,
         updated_at = excluded.updated_at
     `
-  ).run(randomUUID(), jobId, JSON.stringify({ outputRoot, manifest }), timestamp);
+  ).run(randomUUID(), sessionId, JSON.stringify({ outputRoot, manifest }), timestamp);
 
   return db
-    .prepare('SELECT id, job_id, stage, cursor, payload_json, updated_at FROM job_checkpoints WHERE job_id = ? AND stage = ?')
-    .get(jobId, 'compress') as {
+    .prepare('SELECT id, session_id, stage, cursor, payload_json, updated_at FROM session_checkpoints WHERE session_id = ? AND stage = ?')
+    .get(sessionId, 'compress') as {
     id: string;
-    job_id: string;
-    stage: JobCheckpointRecord['stage'];
+    session_id: string;
+    stage: SessionCheckpointRecord['stage'];
     cursor: string | null;
     payload_json: string | null;
     updated_at: string;
   };
 };
 
-export const startCompressionJob = (request: CompressionJobRequest): CompressionJobLaunchResult => {
+export const startCompressionSession = (request: CompressionSessionRequest): CompressionSessionLaunchResult => {
   runMigrations();
 
-  const jobId = randomUUID();
+  const sessionId = randomUUID();
   const timestamp = nowIso();
-  const outputRoot = buildCompressionJobOutputRoot(request.outputDir, jobId);
+  const outputRoot = buildCompressionSessionOutputRoot(request.outputDir);
   const imageOutputDir = buildCompressionImagesOutputDir(outputRoot);
   const videoOutputDir = buildCompressionVideosOutputDir(outputRoot);
-  const manifestPath = buildCompressionJobManifestPath(outputRoot);
+  const manifestPath = buildCompressionSessionManifestPath(outputRoot);
   const imageCommandFromRequest = request.imageToolCommand?.trim() || 'cjpeg';
   const videoCommandFromRequest = request.videoToolCommand?.trim() || 'HandBrakeCLI';
   const resolvedImageCommand = resolveToolCommand(imageCommandFromRequest) ?? imageCommandFromRequest;
@@ -153,8 +153,8 @@ export const startCompressionJob = (request: CompressionJobRequest): Compression
     includedFiles: [],
     updatedAt: Date.now()
   };
-  const manifest: CompressionJobManifest = {
-    jobId,
+  const manifest: CompressionSessionManifest = {
+    sessionId,
     sourceDir: request.sourceDir,
     outputDir: request.outputDir,
     outputRoot,
@@ -171,15 +171,16 @@ export const startCompressionJob = (request: CompressionJobRequest): Compression
 
   ensureDirectory(imageOutputDir);
   ensureDirectory(videoOutputDir);
+  ensureDirectory(path.dirname(manifestPath));
 
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
-  const job = upsertJob(request, jobId, timestamp);
-  const checkpointRow = upsertCompressionCheckpoint(jobId, outputRoot, manifest, timestamp);
+  const session = upsertSession(request, sessionId, timestamp);
+  const checkpointRow = upsertCompressionCheckpoint(sessionId, outputRoot, manifest, timestamp);
 
-  const checkpoint: JobCheckpointRecord = {
+  const checkpoint: SessionCheckpointRecord = {
     id: checkpointRow.id,
-    jobId: checkpointRow.job_id,
+    sessionId: checkpointRow.session_id,
     stage: checkpointRow.stage,
     cursor: checkpointRow.cursor,
     payloadJson: checkpointRow.payload_json,
@@ -187,7 +188,7 @@ export const startCompressionJob = (request: CompressionJobRequest): Compression
   };
 
   return {
-    job,
+    session,
     checkpoint,
     manifest,
     outputRoot,
@@ -195,36 +196,36 @@ export const startCompressionJob = (request: CompressionJobRequest): Compression
   };
 };
 
-export const getCompressionJob = (jobId: string) => {
+export const getCompressionSession = (sessionId: string) => {
   runMigrations();
   const db = getDb();
 
-  const job = db
-    .prepare('SELECT id, name, source_dir, output_dir, status, created_at, updated_at, last_opened_at FROM jobs WHERE id = ?')
-    .get(jobId) as
+  const session = db
+    .prepare('SELECT id, name, source_dir, output_dir, status, created_at, updated_at, last_opened_at FROM sessions WHERE id = ?')
+    .get(sessionId) as
     | {
         id: string;
         name: string | null;
         source_dir: string;
         output_dir: string;
-        status: JobRecord['status'];
+        status: SessionRecord['status'];
         created_at: string;
         updated_at: string;
         last_opened_at: string | null;
       }
     | undefined;
 
-  if (!job) {
+  if (!session) {
     return null;
   }
 
   const checkpointRow = db
-    .prepare('SELECT id, job_id, stage, cursor, payload_json, updated_at FROM job_checkpoints WHERE job_id = ? AND stage = ?')
-    .get(jobId, 'compress') as
+    .prepare('SELECT id, session_id, stage, cursor, payload_json, updated_at FROM session_checkpoints WHERE session_id = ? AND stage = ?')
+    .get(sessionId, 'compress') as
     | {
         id: string;
-        job_id: string;
-        stage: JobCheckpointRecord['stage'];
+        session_id: string;
+        stage: SessionCheckpointRecord['stage'];
         cursor: string | null;
         payload_json: string | null;
         updated_at: string;
@@ -232,20 +233,20 @@ export const getCompressionJob = (jobId: string) => {
     | undefined;
 
   return {
-    job: {
-      id: job.id,
-      name: job.name,
-      sourceDir: job.source_dir,
-      outputDir: job.output_dir,
-      status: job.status,
-      createdAt: job.created_at,
-      updatedAt: job.updated_at,
-      lastOpenedAt: job.last_opened_at
+    session: {
+      id: session.id,
+      name: session.name,
+      sourceDir: session.source_dir,
+      outputDir: session.output_dir,
+      status: session.status,
+      createdAt: session.created_at,
+      updatedAt: session.updated_at,
+      lastOpenedAt: session.last_opened_at
     },
     checkpoint: checkpointRow
       ? {
           id: checkpointRow.id,
-          jobId: checkpointRow.job_id,
+          sessionId: checkpointRow.session_id,
           stage: checkpointRow.stage,
           cursor: checkpointRow.cursor,
           payloadJson: checkpointRow.payload_json,

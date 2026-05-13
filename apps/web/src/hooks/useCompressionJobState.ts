@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
 import {
-  loadCompressionJobSnapshot,
-  subscribeCompressionJobChanges,
-  type CompressionJobSnapshot
+  loadCompressionSessionSnapshot,
+  subscribeCompressionSessionChanges,
+  type CompressionSessionSnapshot
 } from '../services/compression-job.store';
 
-export const useCompressionJobState = () => {
-  const [jobSnapshot, setJobSnapshot] = useState<CompressionJobSnapshot>(loadCompressionJobSnapshot);
+export const useCompressionSessionState = () => {
+  const [jobSnapshot, setJobSnapshot] = useState<CompressionSessionSnapshot>(loadCompressionSessionSnapshot);
 
   useEffect(() => {
-    const unsubscribe = subscribeCompressionJobChanges(() => {
-      setJobSnapshot(loadCompressionJobSnapshot());
+    const unsubscribe = subscribeCompressionSessionChanges(() => {
+      setJobSnapshot(loadCompressionSessionSnapshot());
     });
 
     return unsubscribe;

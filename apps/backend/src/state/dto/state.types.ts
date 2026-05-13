@@ -1,4 +1,4 @@
-export type JobStatus =
+export type SessionStatus =
   | 'draft'
   | 'scanned'
   | 'ready'
@@ -16,12 +16,12 @@ export type StageName = 'scan' | 'classify' | 'compress' | 'organize';
 
 export type StageStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
-export interface JobRecord {
+export interface SessionRecord {
   id: string;
   name: string | null;
   sourceDir: string;
   outputDir: string;
-  status: JobStatus;
+  status: SessionStatus;
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string | null;
@@ -29,7 +29,7 @@ export interface JobRecord {
 
 export interface MediaItemRecord {
   id: string;
-  jobId: string;
+  sessionId: string;
   sourcePath: string;
   relativePath: string;
   mediaType: MediaType;
@@ -43,7 +43,7 @@ export interface MediaItemRecord {
 
 export interface ItemDecisionRecord {
   id: string;
-  jobId: string;
+  sessionId: string;
   itemId: string;
   selectedForCompression: boolean;
   selectedForOutput: boolean;
@@ -54,7 +54,7 @@ export interface ItemDecisionRecord {
 
 export interface ItemStageStatusRecord {
   id: string;
-  jobId: string;
+  sessionId: string;
   itemId: string;
   stage: StageName;
   status: StageStatus;
@@ -63,17 +63,17 @@ export interface ItemStageStatusRecord {
   updatedAt: string;
 }
 
-export interface JobCheckpointRecord {
+export interface SessionCheckpointRecord {
   id: string;
-  jobId: string;
+  sessionId: string;
   stage: StageName;
   cursor: string | null;
   payloadJson: string | null;
   updatedAt: string;
 }
 
-export interface JobProgressSummary {
-  jobId: string;
+export interface SessionProgressSummary {
+  sessionId: string;
   stage: StageName;
   pending: number;
   running: number;

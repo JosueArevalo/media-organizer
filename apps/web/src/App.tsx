@@ -1,6 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import AppShell from './components/AppShell';
-import { useCompressionJobState } from './hooks/useCompressionJobState';
+import { useCompressionSessionState } from './hooks/useCompressionJobState';
 import { useImportStepCompletion } from './hooks/useImportStepCompletion';
 import CompressionPage from './pages/CompressionPage';
 import DashboardPage from './pages/DashboardPage';
@@ -22,13 +22,13 @@ const GuardedWorkflowStep = ({ children }: { children: JSX.Element }) => {
 
 const GuardedGroupingStep = ({ children }: { children: JSX.Element }) => {
   const isImportStepComplete = useImportStepCompletion();
-  const compressionJobState = useCompressionJobState();
+  const compressionSessionState = useCompressionSessionState();
 
   if (!isImportStepComplete) {
     return <Navigate to="/import" replace />;
   }
 
-  if (compressionJobState.status !== 'completed') {
+  if (compressionSessionState.status !== 'completed') {
     return <Navigate to="/compression" replace />;
   }
 
