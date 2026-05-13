@@ -120,8 +120,8 @@ test('executeCompressionSession persists per-item compression statuses', async (
   assert.equal(statusRows.length, 2);
   assert.deepEqual(statusRows.map((row) => row.status), ['failed', 'failed']);
 
-  const outputImage = path.join(started.outputRoot, 'images', 'album', 'photo.jpg');
-  const outputVideo = path.join(started.outputRoot, 'videos', 'album', 'clip.mp4');
+  const outputImage = path.join(started.outputRoot, 'album', 'photo.jpg');
+  const outputVideo = path.join(started.outputRoot, 'album', 'clip.mp4');
 
   assert.ok(fs.existsSync(outputImage));
   assert.ok(fs.existsSync(outputVideo));
