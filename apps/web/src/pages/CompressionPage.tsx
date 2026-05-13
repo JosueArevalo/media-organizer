@@ -12,11 +12,21 @@ import {
 } from '../services/folder-selection.store';
 import { loadEncoderSettings, type EncoderSettingsSnapshot } from '../services/encoder-settings.store';
 import { completeCompressionJob, failCompressionJob, startCompressionJob, resetCompressionJob } from '../services/compression-job.store';
-import { getCompressionJobRequest, startCompressionJobRequest } from '../services/compression.service';
+import {
+  getCompressionJobRequest,
+  loadHandBrakePresetsRequest,
+  startCompressionJobRequest,
+  type HandBrakePresetOption
+} from '../services/compression.service';
 import { scanSourceTreeRequest } from '../services/source-tree.service';
 
 type ImagePresetId = 'balanced' | 'high' | 'aggressive' | 'custom';
-type VideoPresetId = 'fast' | 'balanced' | 'quality';
+
+type VideoPresetsState =
+  | { status: 'idle'; error: null }
+  | { status: 'loading'; error: null }
+  | { status: 'ready'; error: null }
+  | { status: 'error'; error: string };
 
 type MediaStats = {
   imageCount: number;
@@ -297,16 +307,26 @@ const estimateImageSavingsRatio = (quality: number) => {
   return Math.min(0.56, Math.max(0.04, linearRatio));
 };
 
-const estimateVideoSavingsRatio = (preset: VideoPresetId) => {
-  if (preset === 'quality') {
-    return 0.14;
+const estimateVideoSavingsRatio = (presetName: string) => {
+  const normalized = presetName.toLowerCase();
+
+  if (normalized.includes('super hq')) {
+    return 0.12;
   }
 
-  if (preset === 'balanced') {
+  if (normalized.includes('hq')) {
+    return 0.16;
+  }
+
+  if (normalized.includes('very fast')) {
+    return 0.3;
+  }
+
+  if (normalized.includes('fast')) {
     return 0.24;
   }
 
-  return 0.32;
+  return 0.2;
 };
 
 const isLikelyAbsolutePath = (value: string) => {
@@ -324,7 +344,9 @@ export const CompressionPage = () => {
   const compressionJobState = useCompressionJobState();
   const [imagePreset, setImagePreset] = useState<ImagePresetId>('balanced');
   const [customQuality, setCustomQuality] = useState<number>(72);
-  const [videoPreset, setVideoPreset] = useState<VideoPresetId>('balanced');
+  const [videoPreset, setVideoPreset] = useState<string>('Fast 1080p30');
+  const [videoPresets, setVideoPresets] = useState<HandBrakePresetOption[]>([]);
+  const [videoPresetsState, setVideoPresetsState] = useState<VideoPresetsState>({ status: 'idle', error: null });
   const [mediaStatsState, setMediaStatsState] = useState<MediaStatsState>({ status: 'idle', data: null, error: null });
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isStartingCompression, setIsStartingCompression] = useState(false);
@@ -338,13 +360,60 @@ export const CompressionPage = () => {
   const activePreset = IMAGE_PRESETS.find((preset) => preset.id === imagePreset);
   const effectiveImageQuality = imagePreset === 'custom' ? customQuality : (activePreset?.quality ?? 80);
   const selectedImageProfileLabel = imagePreset === 'custom' ? 'Custom' : (activePreset?.label ?? 'Balanced');
-  const selectedVideoProfileLabel = videoPreset === 'quality' ? 'Quality' : videoPreset === 'fast' ? 'Fast' : 'Balanced';
+  const selectedVideoProfileLabel = videoPreset;
 
   useEffect(() => {
     loadEncoderSettings().then((settings) => {
       setEncoderSettings(settings);
     });
   }, []);
+
+  useEffect(() => {
+    let isActive = true;
+    const configuredVideoCommand = encoderSettings.videoToolCommand.trim();
+
+    if (!configuredVideoCommand) {
+      setVideoPresets([]);
+      setVideoPresetsState({ status: 'idle', error: null });
+      return;
+    }
+
+    setVideoPresetsState({ status: 'loading', error: null });
+
+    void loadHandBrakePresetsRequest(configuredVideoCommand)
+      .then((response) => {
+        if (!isActive) {
+          return;
+        }
+
+        setVideoPresets(response.presets);
+        setVideoPresetsState({ status: 'ready', error: null });
+
+        const availableNames = new Set(response.presets.map((preset) => preset.name));
+        const fallbackPreset =
+          response.presets.find((preset) => preset.name.toLowerCase() === 'fast 1080p30')?.name
+          ?? response.defaultPreset
+          ?? response.presets[0]?.name
+          ?? 'Fast 1080p30';
+
+        setVideoPreset((current) => (availableNames.has(current) ? current : fallbackPreset));
+      })
+      .catch((error) => {
+        if (!isActive) {
+          return;
+        }
+
+        setVideoPresets([]);
+        setVideoPresetsState({
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Could not load HandBrake presets.'
+        });
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [encoderSettings.videoToolCommand]);
 
   useEffect(() => {
     let isActive = true;
@@ -481,10 +550,12 @@ export const CompressionPage = () => {
   const sourcePath = sourceSelection?.path ?? '';
   const destinationPath = destinationSelection?.path ?? '';
   const hasConfiguredEncoders = Boolean(encoderSettings.imageToolCommand.trim() && encoderSettings.videoToolCommand.trim());
+  const hasAvailableVideoPresets = videoPresets.length > 0;
   const canStartRealCompression =
     isLikelyAbsolutePath(sourcePath) &&
     isLikelyAbsolutePath(destinationPath) &&
-    hasConfiguredEncoders;
+    hasConfiguredEncoders &&
+    hasAvailableVideoPresets;
 
   const handleStartCompression = async () => {
     if (!destinationSelection || !sourceSelection || mediaStatsState.status === 'error') {
@@ -495,6 +566,8 @@ export const CompressionPage = () => {
       setBackendError(
         !hasConfiguredEncoders
           ? 'Configure and save both encoder paths in Settings before starting compression.'
+          : !hasAvailableVideoPresets
+            ? 'Load a valid HandBrake preset before starting compression. Check video encoder settings if this persists.'
           : 'Real compression requires absolute source and destination paths. Use fallback path mode in Import for now.'
       );
       return;
@@ -685,24 +758,50 @@ export const CompressionPage = () => {
           <p className="page-summary-note">HandBrake presets</p>
 
           <div className="page-option-list">
-            <label className="page-option">
-              <input type="radio" name="video" checked={videoPreset === 'fast'} onChange={() => setVideoPreset('fast')} />
-              <span className="page-option-label">
-                <strong>Fast</strong> (Quick encoding)
-              </span>
-            </label>
-            <label className="page-option">
-              <input type="radio" name="video" checked={videoPreset === 'balanced'} onChange={() => setVideoPreset('balanced')} />
-              <span className="page-option-label">
-                <strong>Balanced</strong> (Standard)
-              </span>
-            </label>
-            <label className="page-option">
-              <input type="radio" name="video" checked={videoPreset === 'quality'} onChange={() => setVideoPreset('quality')} />
-              <span className="page-option-label">
-                <strong>Quality</strong> (Slower, better)
-              </span>
-            </label>
+            {videoPresetsState.status === 'idle' && (
+              <p className="page-summary-note">Configure and save the HandBrake command in Settings to load available presets.</p>
+            )}
+
+            {videoPresetsState.status === 'loading' && (
+              <p className="page-summary-note">Loading HandBrake presets...</p>
+            )}
+
+            {videoPresetsState.status === 'error' && (
+              <p className="error">{videoPresetsState.error}</p>
+            )}
+
+            {videoPresetsState.status === 'ready' && hasAvailableVideoPresets && (
+              <label className="compression-video-preset" htmlFor="video-preset-select">
+                <span className="page-option-label">
+                  <strong>Preset</strong> (uses HandBrake preset names directly)
+                </span>
+                <select
+                  id="video-preset-select"
+                  className="compression-preset-select"
+                  value={videoPreset}
+                  onChange={(event) => setVideoPreset(event.target.value)}
+                >
+                  {Object.entries(
+                    videoPresets.reduce<Record<string, HandBrakePresetOption[]>>((groups, preset) => {
+                      if (!groups[preset.category]) {
+                        groups[preset.category] = [];
+                      }
+
+                      groups[preset.category].push(preset);
+                      return groups;
+                    }, {})
+                  ).map(([category, presets]) => (
+                    <optgroup key={category} label={category}>
+                      {presets.map((preset) => (
+                        <option key={`${preset.category}:${preset.name}`} value={preset.name}>
+                          {preset.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
         </div>
       </div>

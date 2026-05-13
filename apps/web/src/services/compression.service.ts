@@ -32,6 +32,21 @@ export type CompressionJobApiResponse = {
   };
 };
 
+export type HandBrakePresetOption = {
+  category: string;
+  name: string;
+  description: string | null;
+  isDefault: boolean;
+};
+
+export type HandBrakePresetsApiResponse = {
+  status: 'ok';
+  command: string;
+  resolvedCommand: string;
+  defaultPreset: string | null;
+  presets: HandBrakePresetOption[];
+};
+
 export const startCompressionJobRequest = async (payload: CompressionJobRequest): Promise<CompressionJobApiResponse> => {
   const response = await fetch('/api/compression/jobs', {
     method: 'POST',
@@ -58,4 +73,21 @@ export const getCompressionJobRequest = async (jobId: string): Promise<Compressi
   }
 
   return (await response.json()) as CompressionJobApiResponse;
+};
+
+export const loadHandBrakePresetsRequest = async (command: string): Promise<HandBrakePresetsApiResponse> => {
+  const response = await fetch('/api/system/tools/handbrake/presets', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ command })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Could not load HandBrake presets (${response.status}): ${body}`);
+  }
+
+  return (await response.json()) as HandBrakePresetsApiResponse;
 };

@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 VIDEO_EXTENSIONS = {'.mp4', '.mov', '.m4v', '.avi', '.mkv'}
+DEFAULT_PRESET = 'Fast 1080p30'
 
 
 def normalize_path(value: str) -> str:
@@ -106,11 +107,79 @@ def iter_video_files(source_dir: Path):
                 yield file_path
 
 
+def parse_handbrake_presets(output: str):
+    presets = []
+    current_category = None
+    category_indent = 0
+
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+
+        if stripped.endswith('/'):
+            current_category = stripped[:-1].strip()
+            category_indent = indent
+            continue
+
+        if current_category is None:
+            continue
+
+        if indent == category_indent + 4:
+            preset_name = stripped.replace('(Default)', '').replace('(Por defecto)', '').strip()
+            if preset_name:
+                presets.append(preset_name)
+            continue
+
+        if indent <= category_indent:
+            current_category = None
+
+    return presets
+
+
+def resolve_preset(encoder_command: str, requested_preset: str) -> str:
+    normalized_requested = (requested_preset or '').strip()
+
+    if not normalized_requested:
+        return DEFAULT_PRESET
+
+    try:
+        result = subprocess.run(
+            [encoder_command, '--preset-list'],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return normalized_requested
+
+    output = '\n'.join(part for part in [result.stdout, result.stderr] if part)
+    presets = parse_handbrake_presets(output)
+
+    if not presets:
+        return normalized_requested
+
+    presets_map = {preset.lower(): preset for preset in presets}
+    exact_match = presets_map.get(normalized_requested.lower())
+
+    if exact_match:
+        return exact_match
+
+    default_match = presets_map.get(DEFAULT_PRESET.lower())
+
+    if default_match:
+        return default_match
+
+    return presets[0]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description='Compress videos into a destination folder.')
     parser.add_argument('--source-dir', required=True)
     parser.add_argument('--output-dir', required=True)
-    parser.add_argument('--preset', default='balanced')
+    parser.add_argument('--preset', default=DEFAULT_PRESET)
     parser.add_argument('--encoder-command', default='HandBrakeCLI')
     parser.add_argument('--selection-scope-json', default='')
     args = parser.parse_args()
@@ -118,6 +187,7 @@ def main() -> int:
     source_dir = Path(args.source_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
     scope = resolve_scope(source_dir, load_scope(args.selection_scope_json))
+    resolved_preset = resolve_preset(args.encoder_command, args.preset)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = []
@@ -133,7 +203,7 @@ def main() -> int:
             '-o',
             str(output_file),
             '--preset',
-            args.preset,
+            resolved_preset,
         ]
 
         status = 'completed'
