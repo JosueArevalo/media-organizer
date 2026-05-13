@@ -36,7 +36,7 @@ export const buildVideoCompressionCommand = (manifest: CompressionJobManifest) =
     '--output-dir',
     manifest.videoOutputDir,
     '--preset',
-    manifest.videoPresetLabel.toLowerCase(),
+    manifest.videoPresetLabel,
     '--encoder-command',
     manifest.videoToolCommand,
     '--selection-scope-json',

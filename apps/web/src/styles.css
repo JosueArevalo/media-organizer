@@ -751,6 +751,26 @@ body {
   outline-offset: 1px;
 }
 
+.compression-video-preset {
+  display: grid;
+  gap: 8px;
+  max-width: 320px;
+}
+
+.compression-preset-select {
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.compression-preset-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .compression-error-section {
   display: flex;
   flex-direction: column;

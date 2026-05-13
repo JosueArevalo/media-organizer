@@ -8,6 +8,7 @@ import { getCompressionJob, startCompressionJob } from './pipeline/compression/c
 import { executeCompressionJob } from './pipeline/compression/compressionJob.runner.js';
 import { scanSourceTreeByPath } from './pipeline/source/sourceTreeScan.service.js';
 import { resolveToolCommand } from './pipeline/compression/toolCommandResolver.js';
+import { listHandBrakePresets } from './pipeline/compression/handbrakePresets.service.js';
 
 const port = Number(process.env.PORT ?? 4000);
 
@@ -254,6 +255,27 @@ const server = createServer((req, res) => {
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not resolve command path.'
+        });
+      }
+    })();
+
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/system/tools/handbrake/presets' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as { command?: string } | null;
+        const presets = await listHandBrakePresets(body?.command);
+
+        sendJson(res, 200, {
+          status: 'ok',
+          ...presets
+        });
+      } catch (error) {
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not load HandBrake presets.'
         });
       }
     })();
