@@ -630,7 +630,6 @@ export const CompressionPage = () => {
           if (status === 'completed') {
             completeCompressionSession();
             setIsStartingCompression(false);
-            navigate('/grouping', { state: { from: '/compression' } });
             return;
           }
 
@@ -952,8 +951,13 @@ export const CompressionPage = () => {
         <button className="btn btn-secondary" type="button" onClick={handleBack}>
           ← Back
         </button>
-        <button className="btn btn-primary" type="button" onClick={() => void handleStartCompression()} disabled={isCompressionRunning || !canStartRealCompression}>
-          {isCompressionRunning ? 'Compression running...' : 'Start Compression Session'}
+        <button
+          className="btn btn-primary"
+          type="button"
+          onClick={() => void handleStartCompression()}
+          disabled={isCompressionRunning || isCompressionComplete || !canStartRealCompression}
+        >
+          {isCompressionRunning ? 'Compression running...' : isCompressionComplete ? 'Compression completed' : 'Start Compression Session'}
         </button>
         <button className="btn btn-ghost" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })} disabled={!isCompressionComplete}>
           Continue to Grouping →
