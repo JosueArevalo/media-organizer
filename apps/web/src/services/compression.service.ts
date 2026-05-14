@@ -32,6 +32,23 @@ export type CompressionSessionApiResponse = {
   };
 };
 
+export type CompressionProgressApiResponse = {
+  sessionId: string;
+  status: string;
+  total: number;
+  completed: number;
+  failed: number;
+  currentlyProcessing: Array<{
+    id: string;
+    sourcePath: string;
+  }>;
+  processedItems: Array<{
+    id: string;
+    sourcePath: string;
+    status: 'completed' | 'failed';
+  }>;
+};
+
 export type HandBrakePresetOption = {
   category: string;
   name: string;
@@ -73,6 +90,17 @@ export const getCompressionSessionRequest = async (sessionId: string): Promise<C
   }
 
   return (await response.json()) as CompressionSessionApiResponse;
+};
+
+export const getCompressionProgressRequest = async (sessionId: string): Promise<CompressionProgressApiResponse> => {
+  const response = await fetch(`/api/compression/sessions/${sessionId}/progress`);
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Could not fetch compression progress (${response.status}): ${body}`);
+  }
+
+  return (await response.json()) as CompressionProgressApiResponse;
 };
 
 export const loadHandBrakePresetsRequest = async (command: string): Promise<HandBrakePresetsApiResponse> => {

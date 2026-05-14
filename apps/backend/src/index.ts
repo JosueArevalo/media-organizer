@@ -4,7 +4,7 @@ import path from 'node:path';
 import { readdir, rm, stat } from 'node:fs/promises';
 import { runMigrations } from './state/migrations/runMigrations.js';
 import { getDb, getDbPath } from './state/db.js';
-import { getCompressionSession, startCompressionSession } from './pipeline/compression/compressionJob.service.js';
+import { getCompressionSession, startCompressionSession, getCompressionProgress } from './pipeline/compression/compressionJob.service.js';
 import { executeCompressionSession } from './pipeline/compression/compressionJob.runner.js';
 import { scanSourceTreeByPath } from './pipeline/source/sourceTreeScan.service.js';
 import { resolveToolCommand } from './pipeline/compression/toolCommandResolver.js';
@@ -284,13 +284,29 @@ const server = createServer((req, res) => {
   }
 
   if (requestUrl.pathname.startsWith('/api/compression/sessions/') && req.method === 'GET') {
-    const sessionId = requestUrl.pathname.split('/').pop();
+    const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
+    const sessionId = pathSegments[3];
+    const subPath = pathSegments[4];
 
     if (!sessionId) {
       sendJson(res, 400, { status: 'invalid_request' });
       return;
     }
 
+    // Check if this is a progress request
+    if (subPath === 'progress') {
+      const progress = getCompressionProgress(sessionId);
+
+      if (!progress) {
+        sendJson(res, 404, { status: 'not_found' });
+        return;
+      }
+
+      sendJson(res, 200, progress);
+      return;
+    }
+
+    // Otherwise, get the session
     const session = getCompressionSession(sessionId);
 
     if (!session) {

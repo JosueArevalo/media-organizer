@@ -255,3 +255,118 @@ export const getCompressionSession = (sessionId: string) => {
       : null
   };
 };
+
+export interface CompressionProgressData {
+  sessionId: string;
+  status: string;
+  total: number;
+  completed: number;
+  failed: number;
+  currentlyProcessing: Array<{
+    id: string;
+    sourcePath: string;
+  }>;
+  processedItems: Array<{
+    id: string;
+    sourcePath: string;
+    status: 'completed' | 'failed';
+  }>;
+}
+
+export const getCompressionProgress = (sessionId: string): CompressionProgressData | null => {
+  runMigrations();
+  const db = getDb();
+
+  const session = db
+    .prepare('SELECT id, status FROM sessions WHERE id = ?')
+    .get(sessionId) as { id: string; status: string } | undefined;
+
+  if (!session) {
+    return null;
+  }
+
+  // Get total count from checkpoint
+  const checkpoint = db
+    .prepare('SELECT payload_json FROM session_checkpoints WHERE session_id = ? AND stage = ?')
+    .get(sessionId, 'compress') as { payload_json: string } | undefined;
+
+  let totalCount = 0;
+  let checkpointCompletedCount: number | null = null;
+  let checkpointFailedCount: number | null = null;
+  if (checkpoint?.payload_json) {
+    try {
+      const parsed = JSON.parse(checkpoint.payload_json);
+      totalCount = parsed.totalCount ?? 0;
+      checkpointCompletedCount = parsed.summary?.completedItems ?? null;
+      checkpointFailedCount = parsed.summary?.failedItems ?? null;
+      console.log(`[getCompressionProgress] sessionId=${sessionId} totalCount=${totalCount}`);
+      console.log(`[getCompressionProgress] checkpoint payload keys:`, Object.keys(parsed));
+    } catch (e) {
+      // Invalid JSON, use 0
+      console.log(`[getCompressionProgress] Failed to parse checkpoint JSON:`, e);
+    }
+  } else {
+    console.log(`[getCompressionProgress] No checkpoint found for sessionId=${sessionId}`);
+  }
+
+  // Get all processed items (completed and failed)
+  const allProcessedItems = db
+    .prepare(
+      `
+      SELECT mi.id, mi.source_path, iss.status
+      FROM item_stage_status iss
+      JOIN media_items mi ON iss.item_id = mi.id
+      WHERE iss.session_id = ? AND iss.stage = 'compress' AND iss.status IN ('completed', 'failed')
+      ORDER BY iss.updated_at ASC
+    `
+    )
+    .all(sessionId) as Array<{ id: string; source_path: string; status: string }>;
+
+  // Get completed and failed counts
+  let completedCount = 0;
+  let failedCount = 0;
+
+  for (const item of allProcessedItems) {
+    if (item.status === 'completed') {
+      completedCount += 1;
+    } else if (item.status === 'failed') {
+      failedCount += 1;
+    }
+  }
+
+  if (checkpointCompletedCount !== null || checkpointFailedCount !== null) {
+    completedCount = checkpointCompletedCount ?? completedCount;
+    failedCount = checkpointFailedCount ?? failedCount;
+  }
+
+  // Get a few recently processed items for "currently processing" display (most recent)
+  const recentItems = db
+    .prepare(
+      `
+      SELECT mi.id, mi.source_path
+      FROM item_stage_status iss
+      JOIN media_items mi ON iss.item_id = mi.id
+      WHERE iss.session_id = ? AND iss.stage = 'compress'
+      ORDER BY iss.updated_at DESC
+      LIMIT 3
+    `
+    )
+    .all(sessionId) as Array<{ id: string; source_path: string }>;
+
+  return {
+    sessionId,
+    status: session.status,
+    total: totalCount,
+    completed: completedCount,
+    failed: failedCount,
+    currentlyProcessing: recentItems.map((item) => ({
+      id: item.id,
+      sourcePath: item.source_path
+    })),
+    processedItems: allProcessedItems.map((item) => ({
+      id: item.id,
+      sourcePath: item.source_path,
+      status: item.status as 'completed' | 'failed'
+    }))
+  };
+};
