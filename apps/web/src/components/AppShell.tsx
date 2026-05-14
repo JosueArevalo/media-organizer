@@ -2,6 +2,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Stepper, type StepConfig } from './Stepper';
 import { useTheme } from '../hooks/useTheme';
 import { useImportStepCompletion } from '../hooks/useImportStepCompletion';
+import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 
 const workflowStepBlueprint = [
@@ -39,18 +40,46 @@ const AppShell = () => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const isImportStepComplete = useImportStepCompletion();
+  const { sourceSelection, destinationSelection } = useFolderSelections();
+  const isSelectionComplete = isImportStepComplete && Boolean(sourceSelection && destinationSelection);
   const compressionSessionState = useCompressionSessionState();
   const isCompressionComplete = compressionSessionState.status === 'completed';
 
   const workflowSteps: StepConfig[] = workflowStepBlueprint.map((step, index) => ({
     ...step,
-    state:
-      index === 0 || isImportStepComplete
-        ? step.id === 'grouping' && !isCompressionComplete
-          ? 'locked'
-          : 'pending'
-        : 'locked'
+    state: (() => {
+      if (step.id === 'import') {
+        return isImportStepComplete ? 'completed' : 'pending';
+      }
+
+      if (step.id === 'selection') {
+        return isSelectionComplete ? 'completed' : isImportStepComplete ? 'pending' : 'locked';
+      }
+
+      if (step.id === 'compression') {
+        return isCompressionComplete ? 'completed' : isSelectionComplete ? 'pending' : 'locked';
+      }
+
+      // grouping
+      return isCompressionComplete ? 'pending' : 'locked';
+    })()
   }));
+
+  const currentIndex = workflowStepBlueprint.findIndex((s) => s.path === location.pathname);
+
+  // If the user is on a later step, mark earlier unlocked steps as completed
+  if (currentIndex > 0) {
+    for (let i = 0; i < currentIndex; i++) {
+      const step = workflowSteps[i];
+
+      if (step.state !== 'locked') {
+        workflowSteps[i] = {
+          ...step,
+          state: 'completed'
+        };
+      }
+    }
+  }
 
   const currentStep = workflowSteps.find((s) => s.path === location.pathname);
   const isDashboard = location.pathname === '/dashboard';

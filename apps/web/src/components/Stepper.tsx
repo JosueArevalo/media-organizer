@@ -6,8 +6,9 @@ export type StepConfig = {
   label: string;
   description: string;
   path: string;
-  state: 'active' | 'pending' | 'locked';
+  state: 'active' | 'pending' | 'locked' | 'completed';
 };
+
 
 type StepperProps = {
   steps: StepConfig[];
@@ -25,7 +26,13 @@ export const Stepper = ({ steps }: StepperProps) => {
         const content = (
           <>
             <div className="step-circle">
-              <span className="step-number">{step.number}</span>
+              {step.state === 'completed' ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                  <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ) : (
+                <span className="step-number">{step.number}</span>
+              )}
             </div>
             <div className="step-text">
               <p className="step-label">{step.label}</p>
