@@ -5,6 +5,7 @@ import shutil
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -97,6 +98,10 @@ def build_output_path(source_dir: Path, output_dir: Path, source_file: Path) -> 
     return output_dir / relative_path
 
 
+def emit_event(payload: dict):
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
 def iter_image_files(source_dir: Path):
     for root, _, files in os.walk(source_dir):
         root_path = Path(root)
@@ -156,15 +161,24 @@ def main() -> int:
         if status == 'failed':
             shutil.copy2(source_file, output_file)
 
-        manifest.append({
+        item = {
             'source': str(source_file),
             'output': str(output_file),
             'command': command,
             'status': status,
             'error': error_message,
+        }
+
+        manifest.append(item)
+        emit_event({
+            'type': 'item',
+            'item': item,
         })
 
-    print(json.dumps({'items': manifest}, indent=2))
+    emit_event({
+        'type': 'complete',
+        'items': manifest,
+    })
     return 0
 
 

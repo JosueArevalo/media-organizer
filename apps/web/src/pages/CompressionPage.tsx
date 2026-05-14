@@ -14,6 +14,7 @@ import { loadEncoderSettings, type EncoderSettingsSnapshot } from '../services/e
 import { completeCompressionSession, failCompressionSession, startCompressionSession, resetCompressionSession } from '../services/compression-job.store';
 import {
   getCompressionSessionRequest,
+  getCompressionProgressRequest,
   loadHandBrakePresetsRequest,
   startCompressionSessionRequest,
   type HandBrakePresetOption
@@ -355,6 +356,15 @@ export const CompressionPage = () => {
     videoToolCommand: '',
     updatedAt: 0
   });
+  const [progressData, setProgressData] = useState<{
+    status: 'running' | 'completed' | 'failed' | 'cancelled';
+    total: number;
+    completed: number;
+    failed: number;
+    currentlyProcessing: Array<{ id: string; sourcePath: string }>;
+    processedItems: Array<{ id: string; sourcePath: string; status: 'completed' | 'failed' }>;
+  } | null>(null);
+  const [logsExpanded, setLogsExpanded] = useState(false);
   const completionTimerRef = useRef<number | null>(null);
 
   const activePreset = IMAGE_PRESETS.find((preset) => preset.id === imagePreset);
@@ -556,6 +566,9 @@ export const CompressionPage = () => {
     isLikelyAbsolutePath(destinationPath) &&
     hasConfiguredEncoders &&
     hasAvailableVideoPresets;
+  const estimatedTotalMediaCount = mediaStatsState.status === 'ready'
+    ? mediaStatsState.data.imageCount + mediaStatsState.data.videoCount
+    : 0;
 
   const handleStartCompression = async () => {
     if (!destinationSelection || !sourceSelection || mediaStatsState.status === 'error') {
@@ -575,6 +588,8 @@ export const CompressionPage = () => {
 
     setBackendError(null);
     setIsStartingCompression(true);
+    setProgressData(null);
+    setLogsExpanded(false);
 
     try {
       const started = await startCompressionSessionRequest({
@@ -597,49 +612,70 @@ export const CompressionPage = () => {
       });
 
       const poll = async () => {
-        const session = await getCompressionSessionRequest(started.session.id);
-        const status = session.session.status;
+        try {
+          // First, try to get progress
+          const progress = await getCompressionProgressRequest(started.session.id);
+          
+          setProgressData({
+            status: progress.status as 'running' | 'completed' | 'failed' | 'cancelled',
+            total: progress.total,
+            completed: progress.completed,
+            failed: progress.failed,
+            currentlyProcessing: progress.currentlyProcessing,
+            processedItems: progress.processedItems
+          });
 
-        if (status === 'completed') {
-          completeCompressionSession();
-          setIsStartingCompression(false);
-          navigate('/grouping', { state: { from: '/compression' } });
-          return;
-        }
+          const status = progress.status;
 
-        if (status === 'failed' || status === 'cancelled') {
-          const errorDetails = extractCompressionErrorDetails(session.checkpoint?.payloadJson ?? null);
-          let errorMessage = `Compression session ended with status: ${status}`;
-
-          if (errorDetails.failedCount > 0) {
-            errorMessage = `${errorDetails.completedCount} items completed, ${errorDetails.failedCount} items failed`;
-
-            if (errorDetails.failedItems.length > 0) {
-              const failedReasons = errorDetails.failedItems
-                .slice(0, 3)
-                .map((item) => {
-                  const reason = item.error || 'Unknown error';
-                  return `• ${item.source.split('/').pop() || item.source}: ${reason}`;
-                })
-                .join('\n');
-
-              errorMessage += `\n\nFailed items:\n${failedReasons}`;
-
-              if (errorDetails.failedItems.length > 3) {
-                errorMessage += `\n... and ${errorDetails.failedItems.length - 3} more`;
-              }
-            }
+          if (status === 'completed') {
+            completeCompressionSession();
+            setIsStartingCompression(false);
+            return;
           }
 
-          failCompressionSession(errorMessage);
-          setBackendError(errorMessage);
-          setIsStartingCompression(false);
-          return;
-        }
+          if (status === 'failed' || status === 'cancelled') {
+            // Fallback to session endpoint for error details
+            const session = await getCompressionSessionRequest(started.session.id);
+            const errorDetails = extractCompressionErrorDetails(session.checkpoint?.payloadJson ?? null);
+            let errorMessage = `Compression session ended with status: ${status}`;
 
-        completionTimerRef.current = window.setTimeout(() => {
-          void poll();
-        }, 1000);
+            if (errorDetails.failedCount > 0) {
+              errorMessage = `${errorDetails.completedCount} items completed, ${errorDetails.failedCount} items failed`;
+
+              if (errorDetails.failedItems.length > 0) {
+                const failedReasons = errorDetails.failedItems
+                  .slice(0, 3)
+                  .map((item) => {
+                    const reason = item.error || 'Unknown error';
+                    return `• ${item.source.split('/').pop() || item.source}: ${reason}`;
+                  })
+                  .join('\n');
+
+                errorMessage += `\n\nFailed items:\n${failedReasons}`;
+
+                if (errorDetails.failedItems.length > 3) {
+                  errorMessage += `\n... and ${errorDetails.failedItems.length - 3} more`;
+                }
+              }
+            }
+
+            failCompressionSession(errorMessage);
+            setBackendError(errorMessage);
+            setIsStartingCompression(false);
+            return;
+          }
+
+          completionTimerRef.current = window.setTimeout(() => {
+            void poll();
+          }, 1000);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Failed to poll progress';
+          console.error('[CompressionPage] polling error:', message);
+          
+          completionTimerRef.current = window.setTimeout(() => {
+            void poll();
+          }, 1000);
+        }
       };
 
       await poll();
@@ -650,14 +686,6 @@ export const CompressionPage = () => {
       setIsStartingCompression(false);
     }
   };
-
-  useEffect(() => {
-    return () => {
-      if (completionTimerRef.current) {
-        window.clearTimeout(completionTimerRef.current);
-      }
-    };
-  }, []);
 
   const isCompressionRunning = compressionSessionState.status === 'running' || isStartingCompression;
   const isCompressionComplete = compressionSessionState.status === 'completed';
@@ -704,6 +732,97 @@ export const CompressionPage = () => {
           </div>
         )}
       </div>
+
+      {isCompressionRunning && progressData && (
+        <div className="page-card compression-progress-card">
+          <p className="page-section-title">Compression Progress</p>
+          {progressData.total === 0 && estimatedTotalMediaCount > 0 && (
+            <p className="page-summary-note">
+              Preparing {estimatedTotalMediaCount} files for compression...
+            </p>
+          )}
+          
+          <div className="compression-progress-stats">
+            <div className="progress-stat">
+              <span className="progress-label">Total:</span>
+              <span className="progress-value">{progressData.total > 0 ? progressData.total : estimatedTotalMediaCount} files</span>
+            </div>
+            <div className="progress-stat">
+              <span className="progress-label">Completed:</span>
+              <span className="progress-value" style={{ color: '#10b981' }}>{progressData.completed}</span>
+            </div>
+            <div className="progress-stat">
+              <span className="progress-label">Failed:</span>
+              <span className="progress-value" style={{ color: progressData.failed > 0 ? '#ef4444' : '#6b7280' }}>{progressData.failed}</span>
+            </div>
+          </div>
+
+          <div className="compression-progress-bar">
+            <div 
+              className="compression-progress-fill"
+              style={{ width: (progressData.total > 0 ? progressData.total : estimatedTotalMediaCount) > 0 ? `${(progressData.completed / (progressData.total > 0 ? progressData.total : estimatedTotalMediaCount)) * 100}%` : '0%' }}
+            />
+          </div>
+          
+          {progressData.total === 0 ? (
+            progressData.status === 'completed' ? (
+              <p className="page-summary-note" style={{ color: '#ef4444', fontWeight: 500 }}>
+                ⚠️ No files found for compression. Check that your source folder contains image/video files and they're not all excluded.
+              </p>
+            ) : (
+              <p className="page-summary-note">
+                Gathering files to compress{estimatedTotalMediaCount > 0 ? ` (${estimatedTotalMediaCount} detected)` : ''}...
+              </p>
+            )
+          ) : (
+            <p className="page-summary-note">
+              {progressData.completed}/{progressData.total} items processed
+            </p>
+          )}
+
+          {progressData.currentlyProcessing.length > 0 && (
+            <div className="compression-currently-processing">
+              <p className="compression-processing-label">Processing:</p>
+              <div className="compression-processing-list">
+                {progressData.currentlyProcessing.slice(0, 2).map((item) => (
+                  <div key={item.id} className="compression-processing-item">
+                    📄 {item.sourcePath.split('/').pop() || item.sourcePath}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="compression-logs-section">
+            <button
+              className="compression-logs-toggle"
+              type="button"
+              onClick={() => setLogsExpanded(!logsExpanded)}
+            >
+              {logsExpanded ? '▼' : '▶'} Detailed Logs ({progressData.completed + progressData.failed} items)
+            </button>
+            
+            {logsExpanded && (
+              <div className="compression-logs-list">
+                {progressData.processedItems.length > 0 ? (
+                  progressData.processedItems.map((item) => (
+                    <div key={item.id} className={`compression-log-item compression-log-${item.status}`}>
+                      <span className="compression-log-status">
+                        {item.status === 'completed' ? '✓' : '✗'}
+                      </span>
+                      <span className="compression-log-name">
+                        {item.sourcePath.split('/').pop() || item.sourcePath}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="page-summary-note">No items processed yet</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="page-grid-2">
         <div className="page-card">
@@ -832,8 +951,13 @@ export const CompressionPage = () => {
         <button className="btn btn-secondary" type="button" onClick={handleBack}>
           ← Back
         </button>
-        <button className="btn btn-primary" type="button" onClick={() => void handleStartCompression()} disabled={isCompressionRunning || !canStartRealCompression}>
-          {isCompressionRunning ? 'Compression running...' : 'Start Compression Session'}
+        <button
+          className="btn btn-primary"
+          type="button"
+          onClick={() => void handleStartCompression()}
+          disabled={isCompressionRunning || isCompressionComplete || !canStartRealCompression}
+        >
+          {isCompressionRunning ? 'Compression running...' : isCompressionComplete ? 'Compression completed' : 'Start Compression Session'}
         </button>
         <button className="btn btn-ghost" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })} disabled={!isCompressionComplete}>
           Continue to Grouping →
