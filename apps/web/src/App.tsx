@@ -6,7 +6,6 @@ import CompressionPage from './pages/CompressionPage';
 import DashboardPage from './pages/DashboardPage';
 import GroupingPage from './pages/GroupingPage';
 import ImportPage from './pages/ImportPage';
-import JobsPage from './pages/JobsPage';
 import SelectionPage from './pages/SelectionPage';
 import SettingsPage from './pages/SettingsPage';
 
@@ -69,7 +68,6 @@ const App = () => {
               </GuardedGroupingStep>
             }
           />
-          <Route path="/jobs" element={<JobsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -83,7 +83,6 @@ const AppShell = () => {
 
   const currentStep = workflowSteps.find((s) => s.path === location.pathname);
   const isDashboard = location.pathname === '/dashboard';
-  const isJobs = location.pathname === '/jobs';
   const headerTitles: Record<string, string> = {
     import: 'Prepare your source folders',
     selection: 'Select what gets compressed',
@@ -111,9 +110,6 @@ const AppShell = () => {
           <p className="sidebar-label">Quick Access</p>
           <Link to="/dashboard" className={`quick-link ${isDashboard ? 'active' : ''}`}>
             📊 Dashboard
-          </Link>
-          <Link to="/jobs" className={`quick-link ${isJobs ? 'active' : ''}`}>
-            ⚙️ Sessions
           </Link>
           <Link to="/settings" className={`quick-link ${location.pathname === '/settings' ? 'active' : ''}`}>
             🔧 Settings
@@ -149,7 +145,6 @@ const AppShell = () => {
               </>
             )}
             {isDashboard && <p className="header-title">Control panel</p>}
-            {isJobs && <p className="header-title">Processing jobs</p>}
           </div>
         </header>
 

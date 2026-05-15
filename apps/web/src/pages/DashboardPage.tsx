@@ -34,14 +34,11 @@ export const DashboardPage = () => {
         <p className="panel-kicker">Status</p>
         <h2 className="panel-title">Welcome back</h2>
         <p className="panel-description">
-          Here's an overview of your media organization system. You can start a new workflow, resume a previous job, or check the status of running processes.
+          Here's an overview of your media organization system. You can start a new workflow or check current progress from the Compression page.
         </p>
         <div className="action-row">
           <Link to="/import" className="btn btn-primary">
             🚀 Start new workflow
-          </Link>
-          <Link to="/jobs" className="btn btn-secondary">
-            📋 View all jobs
           </Link>
         </div>
       </section>
@@ -75,9 +72,7 @@ export const DashboardPage = () => {
             <p className="panel-kicker">Recent jobs</p>
             <h3 className="panel-title small">Resume points (mocked)</h3>
           </div>
-          <Link to="/jobs" className="btn btn-ghost">
-            Open all jobs
-          </Link>
+          {/* Jobs page removed — controls available in Compression page */}
         </div>
 
         <ul className="job-list">
