@@ -116,7 +116,7 @@ The backend is responsible for:
 ### V1 Workflow
 
 - Receive a source folder and a destination folder from the dashboard
-- Start a processing session that can be paused and resumed
+- Start a processing session that can later be paused and resumed
 - Scan nested media files without modifying them (preview-only)
 - Build preview data for compression and grouping decisions
 - Classify files with basic source heuristics (camera, WhatsApp, screenshot, unknown)
