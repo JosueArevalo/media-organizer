@@ -1,4 +1,4 @@
-# Copilot Review Instructions
+# Copilot Review Instructions (archived)
 
 This file defines how Copilot should review changes in this repository.
 

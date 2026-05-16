@@ -187,7 +187,7 @@ The long-term goal is to build a system that can:
 - `docs/ARCHITECTURE.md` → System design
 - `docs/STATE_CONTRACT.md` → V1 persistence contract (SQLite schema, states, resume rules)
 - `AGENTS.md` → Instructions for AI agents
-- `copilot-instructions.md` → PR review guidance for Copilot
+ - `AI_CONTEXT.md` → Operational, tool-agnostic guidance for automated assistants
 
 ## Agent Skills
 

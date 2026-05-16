@@ -92,3 +92,10 @@ More details:
 - Choose the simplest solution
 - Follow existing patterns in the codebase
 - Prefer clarity over cleverness
+-
+---
+
+## AI Operational Context
+
+- For detailed, tool-agnostic guidance for automated reviewers and assistants, see AI_CONTEXT.md at the repository root.
+	That file contains review priorities, repository commands, expected deliverables, and other operational notes useful when porting context to other assistants.
