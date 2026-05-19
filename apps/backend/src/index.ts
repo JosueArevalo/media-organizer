@@ -6,6 +6,13 @@ import { runMigrations } from './state/migrations/runMigrations.js';
 import { getDb, getDbPath } from './state/db.js';
 import { getCompressionSession, startCompressionSession, getCompressionProgress } from './pipeline/compression/compressionJob.service.js';
 import { executeCompressionSession } from './pipeline/compression/compressionJob.runner.js';
+import {
+  getGroupingProgress,
+  getGroupingSession,
+  pauseGroupingSession,
+  resumeGroupingSession,
+  startGroupingSession
+} from './pipeline/grouping/groupingJob.service.js';
 import { scanSourceTreeByPath } from './pipeline/source/sourceTreeScan.service.js';
 import { resolveToolCommand } from './pipeline/compression/toolCommandResolver.js';
 import { listHandBrakePresets } from './pipeline/compression/handbrakePresets.service.js';
@@ -127,6 +134,108 @@ const server = createServer((req, res) => {
       }
     })();
 
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/grouping/start' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as
+          | {
+              name?: string;
+              sourceDir?: string;
+              outputDir?: string;
+              compressionSessionId?: string;
+              strategy?: 'date' | 'source-kind';
+              autoRename?: boolean;
+            }
+          | null;
+
+        if (!body?.sourceDir || !body?.outputDir) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'sourceDir and outputDir are required.' });
+          return;
+        }
+
+        const result = startGroupingSession({
+          name: body.name,
+          sourceDir: body.sourceDir,
+          outputDir: body.outputDir,
+          compressionSessionId: body.compressionSessionId,
+          strategy: body.strategy,
+          autoRename: body.autoRename
+        });
+
+        sendJson(res, 201, result);
+      } catch (error) {
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Failed to start grouping session.'
+        });
+      }
+    })();
+
+    return;
+  }
+
+  if (requestUrl.pathname.startsWith('/api/grouping/') && ['GET', 'POST'].includes(req.method ?? '')) {
+    const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
+    const sessionId = pathSegments[2];
+    const subPath = pathSegments[3];
+
+    if (!sessionId) {
+      sendJson(res, 400, { status: 'invalid_request' });
+      return;
+    }
+
+    if (req.method === 'GET' && subPath === 'progress') {
+      const progress = getGroupingProgress(sessionId);
+
+      if (!progress) {
+        sendJson(res, 404, { status: 'not_found' });
+        return;
+      }
+
+      sendJson(res, 200, progress);
+      return;
+    }
+
+    if (req.method === 'POST' && subPath === 'pause') {
+      const session = pauseGroupingSession(sessionId);
+
+      if (!session) {
+        sendJson(res, 404, { status: 'not_found' });
+        return;
+      }
+
+      sendJson(res, 200, session);
+      return;
+    }
+
+    if (req.method === 'POST' && subPath === 'resume') {
+      const session = resumeGroupingSession(sessionId);
+
+      if (!session) {
+        sendJson(res, 404, { status: 'not_found' });
+        return;
+      }
+
+      sendJson(res, 200, session);
+      return;
+    }
+
+    if (req.method === 'GET' && !subPath) {
+      const session = getGroupingSession(sessionId);
+
+      if (!session) {
+        sendJson(res, 404, { status: 'not_found' });
+        return;
+      }
+
+      sendJson(res, 200, session);
+      return;
+    }
+
+    sendJson(res, 404, { status: 'not_found' });
     return;
   }
 

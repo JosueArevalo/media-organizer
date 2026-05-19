@@ -12,7 +12,7 @@ export type MediaType = 'image' | 'video' | 'unknown';
 
 export type SourceKind = 'camera' | 'whatsapp' | 'screenshot' | 'unknown';
 
-export type StageName = 'scan' | 'classify' | 'compress' | 'organize';
+export type StageName = 'scan' | 'classify' | 'compress' | 'group' | 'organize';
 
 export type StageStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 

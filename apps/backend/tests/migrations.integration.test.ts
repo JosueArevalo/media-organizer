@@ -28,7 +28,7 @@ test('initial migration creates core state tables', async () => {
   const { runMigrations } = await import('../src/state/migrations/runMigrations.js?integration=1');
 
   const executed = runMigrations();
-  assert.deepEqual(executed, ['001_initial_state.sql']);
+  assert.deepEqual(executed, ['001_initial_state.sql', '003_grouping_stage.sql']);
 
   const db = getDb();
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;").all() as Array<{ name: string }>;
@@ -42,7 +42,7 @@ test('initial migration creates core state tables', async () => {
   assert.ok(tableNames.includes('schema_migrations'));
 
   const migrationRows = db.prepare('SELECT id FROM schema_migrations;').all() as Array<{ id: string }>;
-  assert.deepEqual(migrationRows.map((row) => row.id), ['001_initial_state.sql']);
+  assert.deepEqual(migrationRows.map((row) => row.id), ['001_initial_state.sql', '003_grouping_stage.sql']);
 });
 
 test('legacy jobs schema upgrades to sessions without data loss', async () => {
@@ -152,7 +152,7 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
 
   const executed = runMigrations();
 
-  assert.deepEqual(executed, ['002_jobs_to_sessions.sql']);
+  assert.deepEqual(executed, ['002_jobs_to_sessions.sql', '003_grouping_stage.sql']);
 
   const tableNames = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
@@ -192,5 +192,5 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
   assert.equal(checkpoints[0].stage, 'compress');
 
   const migrationRows = db.prepare('SELECT id FROM schema_migrations ORDER BY id;').all() as Array<{ id: string }>;
-  assert.deepEqual(migrationRows.map((row) => row.id), ['001_initial_state.sql', '002_jobs_to_sessions.sql']);
+  assert.deepEqual(migrationRows.map((row) => row.id), ['001_initial_state.sql', '002_jobs_to_sessions.sql', '003_grouping_stage.sql']);
 });
