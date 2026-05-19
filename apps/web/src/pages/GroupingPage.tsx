@@ -1,39 +1,47 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
+import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
+import { completeGroupingSession, failGroupingSession, startGroupingSession } from '../services/grouping-job.store';
 import {
-  completeGroupingSession,
-  failGroupingSession,
-  pauseGroupingSession,
-  resetGroupingSession,
-  resumeGroupingSession,
-  startGroupingSession
-} from '../services/grouping-job.store';
-import {
-  getGroupingProgressRequest,
-  getGroupingSessionRequest,
-  pauseGroupingSessionRequest,
-  resumeGroupingSessionRequest,
-  startGroupingSessionRequest,
-  type GroupingProgressApiResponse
+  applyGroupingWorkspaceRequest,
+  assignGroupingItemsRequest,
+  buildGroupingMediaUrl,
+  createGroupingFolderFromTemplateRequest,
+  createGroupingFolderRequest,
+  createGroupingTemplateRequest,
+  createGroupingWorkspaceRequest,
+  deleteGroupingFolderRequest,
+  deleteGroupingTemplateRequest,
+  getGroupingWorkspaceRequest,
+  renameGroupingFolderRequest,
+  updateGroupingTemplateRequest,
+  type GroupingFolderTemplate,
+  type GroupingWorkspace,
+  type GroupingWorkspaceFolder,
+  type GroupingWorkspaceItem
 } from '../services/grouping.service';
 
-const formatStatus = (status: string) => {
-  const statusLabels: Record<string, string> = {
-    idle: 'Not started',
-    running: 'Running',
-    paused: 'Paused',
-    completed: 'Completed',
-    failed: 'Failed',
-    cancelled: 'Cancelled'
-  };
+const formatBytes = (value: number) => {
+  if (value <= 0) return '0 B';
 
-  return statusLabels[status] ?? status;
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const size = value / 1024 ** exponent;
+
+  return `${size.toFixed(size >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 };
 
-const getFileName = (sourcePath: string) => sourcePath.split(/[\\/]/).pop() || sourcePath;
+const getFolderLabel = (folder: GroupingWorkspaceFolder | null) => folder?.label ?? 'All media';
+
+const getSelectedDragPayload = (item: GroupingWorkspaceItem, selectedIds: Set<string>) => {
+  if (selectedIds.has(item.id)) {
+    return Array.from(selectedIds);
+  }
+
+  return [item.id];
+};
 
 export const GroupingPage = () => {
   const navigate = useNavigate();
@@ -41,122 +49,122 @@ export const GroupingPage = () => {
   const { sourceSelection, destinationSelection } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
   const groupingSessionState = useGroupingSessionState();
-  const [progressData, setProgressData] = useState<GroupingProgressApiResponse | null>(null);
+  const [workspace, setWorkspace] = useState<GroupingWorkspace | null>(null);
+  const [activeFolderLabel, setActiveFolderLabel] = useState<string>('__all__');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [searchTerm, setSearchTerm] = useState('');
   const [backendError, setBackendError] = useState<string | null>(null);
-  const [isStartingGrouping, setIsStartingGrouping] = useState(false);
-  const [autoRename, setAutoRename] = useState(true);
-  const [strategy, setStrategy] = useState<'date' | 'source-kind'>('date');
-  const pollTimerRef = useRef<number | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [previewItem, setPreviewItem] = useState<GroupingWorkspaceItem | null>(null);
 
-  const backendSessionId = groupingSessionState.backendSessionId;
   const sourcePath = sourceSelection?.path ?? '';
   const destinationPath = destinationSelection?.path ?? '';
-  const canStartGrouping = Boolean(sourcePath && destinationPath && compressionSessionState.backendSessionId);
-  const totalProcessed = progressData ? progressData.completed + progressData.failed : 0;
-  const progressPercent = useMemo(() => {
-    if (!progressData?.total) {
-      return 0;
-    }
+  const canOpenWorkspace = Boolean(sourcePath && destinationPath && compressionSessionState.backendSessionId);
 
-    return Math.min(100, Math.round((totalProcessed / progressData.total) * 100));
-  }, [progressData, totalProcessed]);
-
-  useEffect(() => {
-    return () => {
-      if (pollTimerRef.current) {
-        window.clearTimeout(pollTimerRef.current);
-      }
-    };
-  }, []);
+  const refreshWorkspace = useCallback(
+    async (sessionId: string) => {
+      const nextWorkspace = await getGroupingWorkspaceRequest(sessionId);
+      setWorkspace(nextWorkspace);
+      setBackendError(null);
+      return nextWorkspace;
+    },
+    []
+  );
 
   useEffect(() => {
-    if (!backendSessionId) {
-      return;
-    }
-
     let isActive = true;
 
-    const refresh = async () => {
+    const load = async () => {
+      if (!canOpenWorkspace || !compressionSessionState.backendSessionId) {
+        return;
+      }
+
+      setIsLoading(true);
+
       try {
-        const [session, progress] = await Promise.all([
-          getGroupingSessionRequest(backendSessionId),
-          getGroupingProgressRequest(backendSessionId)
-        ]);
+        const nextWorkspace = groupingSessionState.backendSessionId
+          ? await getGroupingWorkspaceRequest(groupingSessionState.backendSessionId)
+          : await createGroupingWorkspaceRequest({
+              sourceDir: sourcePath,
+              outputDir: destinationPath,
+              compressionSessionId: compressionSessionState.backendSessionId
+            });
 
         if (!isActive) {
           return;
         }
 
-        setProgressData(progress);
+        setWorkspace(nextWorkspace);
         setBackendError(null);
 
-        if (session.session.status === 'completed') {
-          completeGroupingSession();
-          return;
-        }
-
-        if (session.session.status === 'paused') {
-          pauseGroupingSession();
-          return;
-        }
-
-        if (session.session.status === 'failed' || session.session.status === 'cancelled') {
-          failGroupingSession(`Grouping session ended with status: ${session.session.status}`);
+        if (!groupingSessionState.backendSessionId) {
+          startGroupingSession({
+            backendSessionId: nextWorkspace.sessionId,
+            outputRootLabel: nextWorkspace.outputDir
+          });
         }
       } catch (error) {
         if (!isActive) {
           return;
         }
 
-        setBackendError(error instanceof Error ? error.message : 'Could not refresh grouping session.');
+        const message = error instanceof Error ? error.message : 'Could not open the grouping workspace.';
+        setBackendError(message);
+        failGroupingSession(message);
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
       }
     };
 
-    void refresh();
+    void load();
 
     return () => {
       isActive = false;
     };
-  }, [backendSessionId]);
+  }, [
+    canOpenWorkspace,
+    compressionSessionState.backendSessionId,
+    destinationPath,
+    groupingSessionState.backendSessionId,
+    sourcePath
+  ]);
 
-  const scheduleProgressPoll = (sessionId: string) => {
-    const poll = async () => {
-      try {
-        const progress = await getGroupingProgressRequest(sessionId);
-        setProgressData(progress);
-        setBackendError(null);
+  const activeFolder = useMemo(() => {
+    if (!workspace || activeFolderLabel === '__all__') {
+      return null;
+    }
 
-        if (progress.status === 'completed') {
-          completeGroupingSession();
-          setIsStartingGrouping(false);
-          return;
-        }
+    return workspace.folders.find((folder) => folder.label === activeFolderLabel) ?? null;
+  }, [activeFolderLabel, workspace]);
 
-        if (progress.status === 'failed' || progress.status === 'cancelled') {
-          failGroupingSession(`Grouping session ended with status: ${progress.status}`);
-          setIsStartingGrouping(false);
-          return;
-        }
+  const visibleItems = useMemo(() => {
+    if (!workspace) {
+      return [];
+    }
 
-        if (progress.status === 'paused') {
-          pauseGroupingSession();
-          setIsStartingGrouping(false);
-          return;
-        }
+    const normalizedSearch = searchTerm.trim().toLowerCase();
 
-        pollTimerRef.current = window.setTimeout(() => {
-          void poll();
-        }, 1500);
-      } catch (error) {
-        setBackendError(error instanceof Error ? error.message : 'Failed to poll grouping progress.');
-        pollTimerRef.current = window.setTimeout(() => {
-          void poll();
-        }, 2500);
-      }
-    };
+    return workspace.items.filter((item) => {
+      const matchesFolder = activeFolderLabel === '__all__' || item.targetGroupLabel === activeFolderLabel;
+      const matchesSearch =
+        !normalizedSearch ||
+        item.fileName.toLowerCase().includes(normalizedSearch) ||
+        item.relativePath.toLowerCase().includes(normalizedSearch);
 
-    void poll();
-  };
+      return matchesFolder && matchesSearch;
+    });
+  }, [activeFolderLabel, searchTerm, workspace]);
+
+  const selectedItems = useMemo(() => {
+    if (!workspace) {
+      return [];
+    }
+
+    return workspace.items.filter((item) => selectedIds.has(item.id));
+  }, [selectedIds, workspace]);
 
   const handleBack = () => {
     const from = (location.state as { from?: string } | null)?.from;
@@ -169,220 +177,342 @@ export const GroupingPage = () => {
     navigate('/compression');
   };
 
-  const handleStartGrouping = async () => {
-    if (!canStartGrouping || !compressionSessionState.backendSessionId) {
-      setBackendError('Grouping needs a completed backend compression session and selected source/destination folders.');
-      return;
-    }
+  const handleCreateFolder = async () => {
+    if (!workspace) return;
 
-    setBackendError(null);
-    setIsStartingGrouping(true);
+    const label = window.prompt('Folder name');
+    if (!label?.trim()) return;
 
     try {
-      const started = await startGroupingSessionRequest({
-        sourceDir: sourcePath,
-        outputDir: destinationPath,
-        compressionSessionId: compressionSessionState.backendSessionId,
-        strategy,
-        autoRename
-      });
-
-      startGroupingSession({
-        backendSessionId: started.session.id,
-        outputRootLabel: started.manifest?.outputRoot ?? destinationPath
-      });
-
-      scheduleProgressPoll(started.session.id);
+      await createGroupingFolderRequest(workspace.sessionId, label);
+      await refreshWorkspace(workspace.sessionId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not start grouping session.';
-      failGroupingSession(message);
+      setBackendError(error instanceof Error ? error.message : 'Could not create folder.');
+    }
+  };
+
+  const handleRenameFolder = async (folder: GroupingWorkspaceFolder) => {
+    if (!workspace) return;
+
+    const label = window.prompt('New folder name', folder.label);
+    if (!label?.trim() || label === folder.label) return;
+
+    try {
+      await renameGroupingFolderRequest(workspace.sessionId, folder.id, label);
+      setActiveFolderLabel(label);
+      await refreshWorkspace(workspace.sessionId);
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : 'Could not rename folder.');
+    }
+  };
+
+  const handleDeleteFolder = async (folder: GroupingWorkspaceFolder) => {
+    if (!workspace) return;
+
+    try {
+      await deleteGroupingFolderRequest(workspace.sessionId, folder.id);
+      setActiveFolderLabel('__all__');
+      await refreshWorkspace(workspace.sessionId);
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : 'Could not delete folder.');
+    }
+  };
+
+  const moveItemsToFolder = async (itemIds: string[], targetGroupLabel: string) => {
+    if (!workspace || itemIds.length === 0) return;
+
+    try {
+      const nextWorkspace = await assignGroupingItemsRequest(workspace.sessionId, itemIds, targetGroupLabel);
+      setWorkspace(nextWorkspace);
+      setSelectedIds(new Set());
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : 'Could not move media.');
+    }
+  };
+
+  const handleMoveSelected = async (targetGroupLabel: string) => {
+    await moveItemsToFolder(Array.from(selectedIds), targetGroupLabel);
+  };
+
+  const handleItemClick = (item: GroupingWorkspaceItem, event: MouseEvent) => {
+    setSelectedIds((current) => {
+      const next = new Set(event.shiftKey || event.ctrlKey || event.metaKey ? current : []);
+
+      if (next.has(item.id)) {
+        next.delete(item.id);
+      } else {
+        next.add(item.id);
+      }
+
+      return next;
+    });
+  };
+
+  const handleCreateTemplate = async () => {
+    const name = window.prompt('Template name');
+    if (!name?.trim()) return;
+
+    const pattern = window.prompt('Folder pattern. Supported tokens: {year}, {date}', name);
+    if (!pattern?.trim()) return;
+
+    try {
+      const response = await createGroupingTemplateRequest({ name, pattern, enabled: true });
+      setWorkspace((current) => (current ? { ...current, templates: response.templates } : current));
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : 'Could not create template.');
+    }
+  };
+
+  const handleToggleTemplate = async (template: GroupingFolderTemplate) => {
+    try {
+      const response = await updateGroupingTemplateRequest(template.id, { enabled: !template.enabled });
+      setWorkspace((current) => (current ? { ...current, templates: response.templates } : current));
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : 'Could not update template.');
+    }
+  };
+
+  const handleDeleteTemplate = async (template: GroupingFolderTemplate) => {
+    try {
+      await deleteGroupingTemplateRequest(template.id);
+      setWorkspace((current) =>
+        current ? { ...current, templates: current.templates.filter((candidate) => candidate.id !== template.id) } : current
+      );
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : 'Could not delete template.');
+    }
+  };
+
+  const handleCreateFolderFromTemplate = async (template: GroupingFolderTemplate) => {
+    if (!workspace) return;
+
+    try {
+      await createGroupingFolderFromTemplateRequest(workspace.sessionId, template.id);
+      await refreshWorkspace(workspace.sessionId);
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : 'Could not create folder from template.');
+    }
+  };
+
+  const handleApply = async () => {
+    if (!workspace) return;
+
+    setIsApplying(true);
+
+    try {
+      const result = await applyGroupingWorkspaceRequest(workspace.sessionId);
+
+      if (result.status === 'completed') {
+        completeGroupingSession();
+      } else {
+        failGroupingSession(`${result.failedItems} files could not be organized.`);
+      }
+
+      setBackendError(null);
+      await refreshWorkspace(workspace.sessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not apply organization.';
       setBackendError(message);
-      setIsStartingGrouping(false);
+      failGroupingSession(message);
+    } finally {
+      setIsApplying(false);
     }
   };
 
-  const handlePauseGrouping = async () => {
-    if (!backendSessionId) {
-      return;
-    }
-
-    try {
-      await pauseGroupingSessionRequest(backendSessionId);
-      pauseGroupingSession();
-      setBackendError(null);
-    } catch (error) {
-      setBackendError(error instanceof Error ? error.message : 'Could not pause grouping session.');
-    }
-  };
-
-  const handleResumeGrouping = async () => {
-    if (!backendSessionId) {
-      return;
-    }
-
-    try {
-      await resumeGroupingSessionRequest(backendSessionId);
-      resumeGroupingSession();
-      setBackendError(null);
-      scheduleProgressPoll(backendSessionId);
-    } catch (error) {
-      setBackendError(error instanceof Error ? error.message : 'Could not resume grouping session.');
-    }
-  };
-
-  const isGroupingRunning = groupingSessionState.status === 'running' || isStartingGrouping;
-  const isGroupingPaused = groupingSessionState.status === 'paused';
+  const mediaUrl = previewItem && workspace ? buildGroupingMediaUrl(workspace.sessionId, previewItem.id) : null;
 
   return (
-    <div className="page-stack">
-      <div className="page-header">
-        <h2 className="page-title">Review the final structure</h2>
-        <p className="page-subtitle">
-          Review how compressed media will be grouped before the final organization step.
-        </p>
-      </div>
-
-      <div className="page-card">
-        <p className="page-section-title">Grouping session</p>
-        <p className="page-summary-note">
-          Status: <strong>{formatStatus(groupingSessionState.status)}</strong>
-          {groupingSessionState.outputRootLabel ? ` - Output: ${groupingSessionState.outputRootLabel}` : ''}
-        </p>
-        {!canStartGrouping && (
-          <p className="error">
-            Grouping is available after backend compression completes and source/destination folders are still selected.
+    <div className="grouping-workspace page-stack">
+      <div className="page-header grouping-header">
+        <div>
+          <h2 className="page-title">Organize destination</h2>
+          <p className="page-subtitle">
+            {workspace ? `${workspace.items.length} files in ${workspace.outputDir}` : 'Preparing the final media workspace.'}
           </p>
-        )}
-        {backendError && <p className="error">{backendError}</p>}
-      </div>
-
-      <div className="page-grid-2">
-        <div className="page-card">
-          <p className="page-section-title">Grouping rules</p>
-          <div className="page-option-list">
-            <label className="page-option">
-              <input type="radio" name="grouping-strategy" checked={strategy === 'date'} onChange={() => setStrategy('date')} />
-              <span className="page-option-label">
-                <strong>Date folders</strong> using capture date when available
-              </span>
-            </label>
-            <label className="page-option">
-              <input type="radio" name="grouping-strategy" checked={strategy === 'source-kind'} onChange={() => setStrategy('source-kind')} />
-              <span className="page-option-label">
-                <strong>Source kind folders</strong> using camera, WhatsApp, screenshot, or unknown
-              </span>
-            </label>
-          </div>
         </div>
-
-        <div className="page-card">
-          <p className="page-section-title">Folder naming</p>
-          <label className="page-option">
-            <input type="checkbox" checked={autoRename} onChange={(event) => setAutoRename(event.target.checked)} />
-            <span className="page-option-label">
-              <strong>Auto-rename folders with consistent naming pattern</strong>
-            </span>
-          </label>
-          <p className="page-summary-note">Pattern: YYYY.MM - Event Name</p>
+        <div className="grouping-header-actions">
+          <button className="btn btn-secondary" type="button" onClick={handleBack}>
+            Back
+          </button>
+          <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying}>
+            {isApplying ? 'Applying...' : 'Apply organization'}
+          </button>
         </div>
       </div>
 
-      {progressData && (
-        <div className="page-card compression-progress-card">
-          <p className="page-section-title">Grouping progress</p>
-          <div className="compression-progress-stats">
-            <div className="progress-stat">
-              <span className="progress-label">Total:</span>
-              <span className="progress-value">{progressData.total} files</span>
-            </div>
-            <div className="progress-stat">
-              <span className="progress-label">Completed:</span>
-              <span className="progress-value" style={{ color: '#10b981' }}>{progressData.completed}</span>
-            </div>
-            <div className="progress-stat">
-              <span className="progress-label">Failed:</span>
-              <span className="progress-value" style={{ color: progressData.failed > 0 ? '#ef4444' : '#6b7280' }}>{progressData.failed}</span>
-            </div>
-          </div>
-
-          <div className="compression-progress-bar">
-            <div className="compression-progress-fill" style={{ width: `${progressPercent}%` }} />
-          </div>
-          <p className="page-summary-note">{totalProcessed}/{progressData.total} items processed</p>
-        </div>
+      {!canOpenWorkspace && (
+        <p className="error">Grouping is available after compression completes and source/destination folders are selected.</p>
       )}
+      {backendError && <p className="error">{backendError}</p>}
 
-      {progressData && progressData.groups.length > 0 && (
-        <div className="page-card">
-          <p className="page-section-title">Proposed folder structure</p>
-          <ul className="page-folder-list">
-            {progressData.groups.map((folder) => (
-              <li key={folder.label} className="page-folder-row">
-                <div className="page-folder-card">
-                  <span aria-hidden="true" style={{ fontSize: '14px' }}>Folder</span>
-                  <div className="page-folder-meta">
-                    <p className="page-folder-title">{folder.label}</p>
-                    <p className="page-folder-subtitle">
-                      {folder.total} files - {folder.completed} completed - {folder.failed} failed
-                    </p>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {progressData && (
-        <div className="page-card">
-          <p className="page-section-title">Processed items</p>
-          {progressData.processedItems.length > 0 ? (
-            <div className="compression-logs-list">
-              {progressData.processedItems.map((item) => (
-                <div key={item.id} className={`compression-log-item compression-log-${item.status}`}>
-                  <span className="compression-log-status">{item.status === 'completed' ? 'OK' : item.status.toUpperCase()}</span>
-                  <span className="compression-log-name">
-                    {getFileName(item.sourcePath)}
-                    {item.targetGroupLabel ? ` -> ${item.targetGroupLabel}` : ''}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="page-summary-note">No grouped items have been processed yet.</p>
-          )}
-        </div>
-      )}
-
-      <div className="page-footer-actions">
-        <button className="btn btn-secondary" type="button" onClick={handleBack}>
-          Back
+      <div className="grouping-toolbar">
+        <input
+          className="grouping-search"
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="Search media"
+          type="search"
+        />
+        <button className="btn btn-secondary" type="button" onClick={() => void handleCreateFolder()} disabled={!workspace}>
+          New folder
         </button>
-        {isGroupingPaused ? (
-          <button className="btn btn-primary" type="button" onClick={() => void handleResumeGrouping()}>
-            Resume Grouping
-          </button>
-        ) : (
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={() => void handleStartGrouping()}
-            disabled={isGroupingRunning || groupingSessionState.status === 'completed' || !canStartGrouping}
-          >
-            {isGroupingRunning ? 'Grouping running...' : groupingSessionState.status === 'completed' ? 'Grouping completed' : 'Start Grouping Session'}
-          </button>
-        )}
-        {isGroupingRunning && (
-          <button className="btn btn-secondary" type="button" onClick={() => void handlePauseGrouping()}>
-            Pause
-          </button>
-        )}
-        {groupingSessionState.status === 'failed' && (
-          <button className="btn btn-ghost" type="button" onClick={() => resetGroupingSession()}>
-            Try Again
-          </button>
-        )}
+        <select
+          className="grouping-select"
+          value=""
+          onChange={(event) => {
+            if (event.target.value) {
+              void handleMoveSelected(event.target.value);
+            }
+          }}
+          disabled={!workspace || selectedIds.size === 0}
+        >
+          <option value="">Move selected</option>
+          {workspace?.folders.map((folder) => (
+            <option key={folder.id} value={folder.label}>
+              {folder.label}
+            </option>
+          ))}
+        </select>
+        <span className="grouping-selection-count">{selectedItems.length} selected</span>
       </div>
+
+      <div className="grouping-layout">
+        <aside className="grouping-sidebar">
+          <button
+            className={`grouping-folder-button ${activeFolderLabel === '__all__' ? 'is-active' : ''}`}
+            type="button"
+            onClick={() => setActiveFolderLabel('__all__')}
+          >
+            <span>{getFolderLabel(null)}</span>
+            <strong>{workspace?.items.length ?? 0}</strong>
+          </button>
+
+          <div className="grouping-folder-list">
+            {workspace?.folders.map((folder) => (
+              <div
+                key={folder.id}
+                className={`grouping-folder-drop ${activeFolderLabel === folder.label ? 'is-active' : ''}`}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const ids = event.dataTransfer.getData('application/json');
+                  if (ids) {
+                    void moveItemsToFolder(JSON.parse(ids) as string[], folder.label);
+                  }
+                }}
+              >
+                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel(folder.label)}>
+                  <span>{folder.label}</span>
+                  <strong>{folder.itemCount}</strong>
+                </button>
+                <div className="grouping-folder-actions">
+                  <button type="button" onClick={() => void handleRenameFolder(folder)} title="Rename folder">
+                    Rename
+                  </button>
+                  <button type="button" onClick={() => void handleDeleteFolder(folder)} disabled={folder.itemCount > 0} title="Delete folder">
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grouping-templates">
+            <div className="grouping-section-head">
+              <p className="page-section-title">Templates</p>
+              <button type="button" onClick={() => void handleCreateTemplate()}>
+                Add
+              </button>
+            </div>
+            {workspace?.templates.length ? (
+              workspace.templates.map((template) => (
+                <div key={template.id} className="grouping-template-row">
+                  <button type="button" onClick={() => void handleCreateFolderFromTemplate(template)} disabled={!template.enabled}>
+                    {template.name}
+                  </button>
+                  <button type="button" onClick={() => void handleToggleTemplate(template)}>
+                    {template.enabled ? 'On' : 'Off'}
+                  </button>
+                  <button type="button" onClick={() => void handleDeleteTemplate(template)}>
+                    Delete
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p className="page-summary-note">No templates yet.</p>
+            )}
+          </div>
+        </aside>
+
+        <section className="grouping-main">
+          <div className="grouping-main-head">
+            <div>
+              <p className="page-section-title">{getFolderLabel(activeFolder)}</p>
+              <p className="page-summary-note">{visibleItems.length} visible files</p>
+            </div>
+            <button className="btn btn-ghost" type="button" onClick={() => setSelectedIds(new Set(visibleItems.map((item) => item.id)))}>
+              Select visible
+            </button>
+          </div>
+
+          {isLoading ? (
+            <p className="empty-note">Loading workspace...</p>
+          ) : (
+            <div className="grouping-media-grid">
+              {visibleItems.map((item) => {
+                const isSelected = selectedIds.has(item.id);
+                const itemMediaUrl = workspace ? buildGroupingMediaUrl(workspace.sessionId, item.id) : '';
+
+                return (
+                  <article
+                    key={item.id}
+                    className={`grouping-media-card ${isSelected ? 'is-selected' : ''}`}
+                    draggable
+                    onClick={(event) => handleItemClick(item, event)}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('application/json', JSON.stringify(getSelectedDragPayload(item, selectedIds)));
+                      event.dataTransfer.effectAllowed = 'move';
+                    }}
+                  >
+                    <button className="grouping-media-preview" type="button" onDoubleClick={() => setPreviewItem(item)}>
+                      {item.mediaType === 'image' ? (
+                        <img src={itemMediaUrl} alt={item.fileName} loading="lazy" />
+                      ) : item.mediaType === 'video' ? (
+                        <video src={itemMediaUrl} muted preload="metadata" />
+                      ) : (
+                        <span>{item.fileName.split('.').pop()?.toUpperCase() ?? 'FILE'}</span>
+                      )}
+                    </button>
+                    <div className="grouping-media-meta">
+                      <strong title={item.fileName}>{item.fileName}</strong>
+                      <span>{item.captureDate ?? 'No date'} - {formatBytes(item.sizeBytes)}</span>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {previewItem && mediaUrl && (
+        <div className="grouping-modal" role="dialog" aria-modal="true">
+          <div className="grouping-modal-panel">
+            <div className="grouping-modal-head">
+              <strong>{previewItem.fileName}</strong>
+              <button className="btn btn-secondary" type="button" onClick={() => setPreviewItem(null)}>
+                Close
+              </button>
+            </div>
+            {previewItem.mediaType === 'image' ? (
+              <img className="grouping-modal-media" src={mediaUrl} alt={previewItem.fileName} />
+            ) : (
+              <video className="grouping-modal-media" src={mediaUrl} controls autoPlay />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

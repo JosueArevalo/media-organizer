@@ -17,12 +17,9 @@ const ensureDirectory = (directoryPath: string) => {
   fs.mkdirSync(directoryPath, { recursive: true });
 };
 
-const buildGroupingSessionOutputRoot = (outputDir: string, timestamp: string) => {
-  const safeTimestamp = timestamp.replace(/[:.]/g, '-');
-  return path.join(outputDir, `grouping-${safeTimestamp}`);
-};
+const buildGroupingSessionOutputRoot = (outputDir: string, _timestamp: string) => outputDir;
 
-const buildGroupingManifestPath = (outputRoot: string) => path.join(outputRoot, 'grouping-manifest.json');
+const buildGroupingManifestPath = (outputRoot: string) => path.join(outputRoot, '.media-organizer', 'grouping-manifest.json');
 
 const toSessionRecord = (row: {
   id: string;
@@ -146,6 +143,7 @@ export const startGroupingSession = (request: GroupingSessionRequest): GroupingS
   };
 
   ensureDirectory(outputRoot);
+  ensureDirectory(path.dirname(manifestPath));
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
   const session = upsertSession(request, sessionId, timestamp);

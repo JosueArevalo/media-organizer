@@ -1,46 +1,46 @@
-export type GroupingSessionRequest = {
-  name?: string;
+export type GroupingFolderKind = 'proposed' | 'manual' | 'template';
+
+export type GroupingWorkspaceFolder = {
+  id: string;
+  label: string;
+  kind: GroupingFolderKind;
+  itemCount: number;
+};
+
+export type GroupingWorkspaceItem = {
+  id: string;
+  sourcePath: string;
+  relativePath: string;
+  outputPath: string;
+  fileName: string;
+  mediaType: 'image' | 'video' | 'unknown';
+  sizeBytes: number;
+  captureDate: string | null;
+  targetGroupLabel: string | null;
+};
+
+export type GroupingFolderTemplate = {
+  id: string;
+  name: string;
+  pattern: string;
+  enabled: boolean;
+};
+
+export type GroupingWorkspace = {
+  sessionId: string;
   sourceDir: string;
   outputDir: string;
-  compressionSessionId?: string | null;
-  strategy?: 'date' | 'source-kind';
-  autoRename?: boolean;
+  compressionSessionId: string | null;
+  folders: GroupingWorkspaceFolder[];
+  items: GroupingWorkspaceItem[];
+  templates: GroupingFolderTemplate[];
 };
 
-export type GroupingSessionApiResponse = {
-  session: {
-    id: string;
-    status: 'draft' | 'scanned' | 'ready' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
-    sourceDir: string;
-    outputDir: string;
-  };
-  checkpoint: {
-    stage: 'scan' | 'classify' | 'compress' | 'group' | 'organize';
-    payloadJson: string | null;
-  } | null;
-  manifest?: {
-    outputRoot: string;
-  };
-};
-
-export type GroupingProgressApiResponse = {
+export type GroupingApplyResponse = {
   sessionId: string;
-  status: string;
-  total: number;
-  completed: number;
-  failed: number;
-  groups: Array<{
-    label: string;
-    total: number;
-    completed: number;
-    failed: number;
-  }>;
-  processedItems: Array<{
-    id: string;
-    sourcePath: string;
-    targetGroupLabel: string | null;
-    status: 'completed' | 'failed' | 'skipped';
-  }>;
+  status: 'completed' | 'failed';
+  movedItems: number;
+  failedItems: number;
 };
 
 const readErrorBody = async (response: Response) => {
@@ -48,58 +48,96 @@ const readErrorBody = async (response: Response) => {
   return body || response.statusText;
 };
 
-export const startGroupingSessionRequest = async (payload: GroupingSessionRequest): Promise<GroupingSessionApiResponse> => {
-  const response = await fetch('/api/grouping/start', {
+const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(url, init);
+
+  if (!response.ok) {
+    throw new Error(`${response.status}: ${await readErrorBody(response)}`);
+  }
+
+  return (await response.json()) as T;
+};
+
+export const createGroupingWorkspaceRequest = async (payload: {
+  name?: string;
+  sourceDir: string;
+  outputDir: string;
+  compressionSessionId: string;
+}) =>
+  requestJson<GroupingWorkspace>('/api/grouping/workspace', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
 
-  if (!response.ok) {
-    throw new Error(`Could not start grouping session (${response.status}): ${await readErrorBody(response)}`);
-  }
+export const getGroupingWorkspaceRequest = async (sessionId: string) =>
+  requestJson<GroupingWorkspace>(`/api/grouping/${sessionId}/workspace`);
 
-  return (await response.json()) as GroupingSessionApiResponse;
-};
+export const createGroupingFolderRequest = async (sessionId: string, label: string) =>
+  requestJson<GroupingWorkspaceFolder>(`/api/grouping/${sessionId}/folders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label })
+  });
 
-export const getGroupingSessionRequest = async (sessionId: string): Promise<GroupingSessionApiResponse> => {
-  const response = await fetch(`/api/grouping/${sessionId}`);
+export const createGroupingFolderFromTemplateRequest = async (sessionId: string, templateId: string) =>
+  requestJson<GroupingWorkspaceFolder>(`/api/grouping/${sessionId}/folders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ templateId })
+  });
 
-  if (!response.ok) {
-    throw new Error(`Could not fetch grouping session (${response.status}): ${await readErrorBody(response)}`);
-  }
+export const renameGroupingFolderRequest = async (sessionId: string, folderId: string, label: string) =>
+  requestJson<GroupingWorkspaceFolder>(`/api/grouping/${sessionId}/folders/${folderId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label })
+  });
 
-  return (await response.json()) as GroupingSessionApiResponse;
-};
-
-export const getGroupingProgressRequest = async (sessionId: string): Promise<GroupingProgressApiResponse> => {
-  const response = await fetch(`/api/grouping/${sessionId}/progress`);
-
-  if (!response.ok) {
-    throw new Error(`Could not fetch grouping progress (${response.status}): ${await readErrorBody(response)}`);
-  }
-
-  return (await response.json()) as GroupingProgressApiResponse;
-};
-
-export const pauseGroupingSessionRequest = async (sessionId: string): Promise<GroupingSessionApiResponse> => {
-  const response = await fetch(`/api/grouping/${sessionId}/pause`, { method: 'POST' });
+export const deleteGroupingFolderRequest = async (sessionId: string, folderId: string) => {
+  const response = await fetch(`/api/grouping/${sessionId}/folders/${folderId}`, { method: 'DELETE' });
 
   if (!response.ok) {
-    throw new Error(`Could not pause grouping session (${response.status}): ${await readErrorBody(response)}`);
+    throw new Error(`Could not delete folder (${response.status}): ${await readErrorBody(response)}`);
   }
-
-  return (await response.json()) as GroupingSessionApiResponse;
 };
 
-export const resumeGroupingSessionRequest = async (sessionId: string): Promise<GroupingSessionApiResponse> => {
-  const response = await fetch(`/api/grouping/${sessionId}/resume`, { method: 'POST' });
+export const assignGroupingItemsRequest = async (sessionId: string, itemIds: string[], targetGroupLabel: string) =>
+  requestJson<GroupingWorkspace>(`/api/grouping/${sessionId}/items/assign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemIds, targetGroupLabel })
+  });
+
+export const applyGroupingWorkspaceRequest = async (sessionId: string) =>
+  requestJson<GroupingApplyResponse>(`/api/grouping/${sessionId}/apply`, { method: 'POST' });
+
+export const listGroupingTemplatesRequest = async () =>
+  requestJson<{ templates: GroupingFolderTemplate[] }>('/api/grouping/templates');
+
+export const createGroupingTemplateRequest = async (payload: { name: string; pattern: string; enabled?: boolean }) =>
+  requestJson<{ templates: GroupingFolderTemplate[] }>('/api/grouping/templates', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+export const updateGroupingTemplateRequest = async (
+  templateId: string,
+  payload: Partial<{ name: string; pattern: string; enabled: boolean }>
+) =>
+  requestJson<{ templates: GroupingFolderTemplate[] }>(`/api/grouping/templates/${templateId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+export const deleteGroupingTemplateRequest = async (templateId: string) => {
+  const response = await fetch(`/api/grouping/templates/${templateId}`, { method: 'DELETE' });
 
   if (!response.ok) {
-    throw new Error(`Could not resume grouping session (${response.status}): ${await readErrorBody(response)}`);
+    throw new Error(`Could not delete template (${response.status}): ${await readErrorBody(response)}`);
   }
-
-  return (await response.json()) as GroupingSessionApiResponse;
 };
+
+export const buildGroupingMediaUrl = (sessionId: string, itemId: string) => `/api/grouping/${sessionId}/items/${itemId}/media`;
