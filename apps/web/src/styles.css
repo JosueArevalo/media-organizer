@@ -691,6 +691,25 @@ body {
   transform: none;
 }
 
+.folder-picker-message {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.folder-picker-message-error {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.folder-picker-message-info {
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
 .folder-picker-hint {
   display: grid;
   gap: 8px;

@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
   clearFolderSelection,
+  clearSourceSelectionScope,
+  clearSourceTreeSnapshot,
   getDefaultFolderSelections,
   loadFolderSelections,
   saveFolderSelection,
   type FolderSelectionSnapshot,
+  type FolderSelectionSource,
   type FolderSlot
 } from '../services/folder-selection.store';
 
@@ -41,14 +44,14 @@ export const useFolderSelections = () => {
     };
   }, []);
 
-  const updateFolderPath = async (slot: FolderSlot, path: string) => {
+  const saveFolderPath = async (slot: FolderSlot, path: string, source: FolderSelectionSource, name?: string) => {
     const nextPath = path.trim();
 
     if (!nextPath) {
       return;
     }
 
-    const nextName = getFolderNameFromPath(nextPath);
+    const nextName = name?.trim() || getFolderNameFromPath(nextPath);
     const currentSelection = selections[slot];
 
     if (!currentSelection) {
@@ -57,7 +60,7 @@ export const useFolderSelections = () => {
         name: nextName,
         path: nextPath,
         updatedAt: Date.now(),
-        source: 'fallback',
+        source,
         persisted: true
       } as FolderSelectionSnapshot;
 
@@ -72,6 +75,11 @@ export const useFolderSelections = () => {
         source: newSelection.source
       });
 
+      if (slot === 'source') {
+        clearSourceTreeSnapshot('source');
+        clearSourceSelectionScope();
+      }
+
       return;
     }
 
@@ -79,6 +87,7 @@ export const useFolderSelections = () => {
       ...currentSelection,
       name: nextName,
       path: nextPath,
+      source,
       updatedAt: Date.now()
     };
 
@@ -90,8 +99,17 @@ export const useFolderSelections = () => {
     await saveFolderSelection(slot, {
       name: nextName,
       path: nextPath,
-      source: currentSelection.source
+      source
     });
+
+    if (slot === 'source') {
+      clearSourceTreeSnapshot('source');
+      clearSourceSelectionScope();
+    }
+  };
+
+  const updateFolderPath = async (slot: FolderSlot, path: string) => {
+    await saveFolderPath(slot, path, 'fallback');
   };
 
   const clearFolder = async (slot: FolderSlot) => {
@@ -109,6 +127,10 @@ export const useFolderSelections = () => {
     isLoading,
     updateSourceFolderPath: (path: string) => updateFolderPath('source', path),
     updateDestinationFolderPath: (path: string) => updateFolderPath('destination', path),
+    selectSourceFolderPath: (selection: { name: string; path: string; source: FolderSelectionSource }) =>
+      saveFolderPath('source', selection.path, selection.source, selection.name),
+    selectDestinationFolderPath: (selection: { name: string; path: string; source: FolderSelectionSource }) =>
+      saveFolderPath('destination', selection.path, selection.source, selection.name),
     clearSourceFolder: () => clearFolder('source'),
     clearDestinationFolder: () => clearFolder('destination')
   };

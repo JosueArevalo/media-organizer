@@ -7,6 +7,7 @@ import {
 import { loadFolderSelections } from '../services/folder-selection.store';
 import { resetAllPersistentAppState } from '../services/app-maintenance.store';
 import { resetCompressionSession } from '../services/compression-job.store';
+import { pickFileRequest } from '../services/system-picker.service';
 import '../styles/SettingsPage.css';
 
 type ToolStatus = 'ready' | 'missing' | 'unknown';
@@ -84,59 +85,41 @@ const SettingsPage = () => {
     });
   };
 
-  const resolveToolPath = async (candidate: string) => {
-    const response = await fetch('/api/system/maintenance/resolve-command', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ command: candidate })
-    });
+  const handleBrowse = async (tool: 'image' | 'video') => {
+    try {
+      const isWindows = navigator.platform.toLowerCase().includes('win');
+      const currentPath = tool === 'image' ? settings.imageToolCommand : settings.videoToolCommand;
+      const result = await pickFileRequest({
+        title: tool === 'image' ? 'Choose cjpeg-static executable' : 'Choose HandBrakeCLI executable',
+        initialPath: currentPath,
+        filters: isWindows
+          ? [{ name: 'Executable files', extensions: ['exe'] }]
+          : undefined
+      });
 
-    if (!response.ok) {
-      return null;
-    }
-
-    const payload = (await response.json()) as { resolvedPath?: string | null };
-    return payload.resolvedPath ?? null;
-  };
-
-  const handleBrowse = (tool: 'image' | 'video') => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.exe';
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        const fileWithPath = file as File & { path?: string };
-        const rawPath = (typeof fileWithPath.path === 'string' && fileWithPath.path.trim().length > 0)
-          ? fileWithPath.path.trim()
-          : file.name;
-
-        const resolvedPath = await resolveToolPath(rawPath);
-        const nextPath = resolvedPath ?? rawPath;
-
-        handlePathChange(tool, nextPath);
-
-        if (resolvedPath) {
-          setToolPathMessage({
-            type: 'success',
-            text: `Resolved full path: ${resolvedPath}`
-          });
-        } else if (!rawPath.includes('\\') && !rawPath.includes('/')) {
-          setToolPathMessage({
-            type: 'error',
-            text: 'Browser returned only the file name. Paste an absolute path manually if this command is not in PATH.'
-          });
-        } else {
-          setToolPathMessage({
-            type: 'success',
-            text: `Selected path: ${nextPath}`
-          });
-        }
+      if (result.status === 'cancelled') {
+        return;
       }
-    };
-    input.click();
+
+      if (result.status === 'unsupported') {
+        setToolPathMessage({
+          type: 'error',
+          text: result.message
+        });
+        return;
+      }
+
+      handlePathChange(tool, result.path);
+      setToolPathMessage({
+        type: 'success',
+        text: `Selected path: ${result.path}. Press Save Encoder Paths to apply it.`
+      });
+    } catch (error) {
+      setToolPathMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Could not open the file picker.'
+      });
+    }
   };
 
   const handleSave = async () => {
@@ -283,6 +266,13 @@ const SettingsPage = () => {
                   onChange={(e) => handlePathChange('image', e.target.value)}
                   placeholder="C:\\Program Files\\mozjpeg\\cjpeg-static.exe"
                 />
+                <button
+                  className="path-btn"
+                  onClick={() => void handleBrowse('image')}
+                  type="button"
+                >
+                  Browse
+                </button>
                 {settings.imageToolCommand && (
                   <button
                     className="path-btn path-btn-clear"
@@ -311,6 +301,13 @@ const SettingsPage = () => {
                   onChange={(e) => handlePathChange('video', e.target.value)}
                   placeholder="C:\\Program Files\\HandBrake\\HandBrakeCLI.exe"
                 />
+                <button
+                  className="path-btn"
+                  onClick={() => void handleBrowse('video')}
+                  type="button"
+                >
+                  Browse
+                </button>
                 {settings.videoToolCommand && (
                   <button
                     className="path-btn path-btn-clear"

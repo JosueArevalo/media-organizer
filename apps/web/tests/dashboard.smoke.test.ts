@@ -44,6 +44,38 @@ const startDevServer = async () => {
   return childProcess;
 };
 
+const stopDevServer = async (devServer: ReturnType<typeof spawn>) => {
+  const waitForExit = new Promise<void>((resolve) => {
+    if (devServer.exitCode !== null || devServer.killed) {
+      resolve();
+      return;
+    }
+
+    devServer.once('exit', () => resolve());
+  });
+
+  if (platform === 'win32' && devServer.pid) {
+    await new Promise<void>((resolve) => {
+      const killer = spawn('taskkill.exe', ['/pid', String(devServer.pid), '/t', '/f'], {
+        stdio: 'ignore'
+      });
+
+      killer.on('exit', () => resolve());
+      killer.on('error', () => resolve());
+    });
+    devServer.kill('SIGTERM');
+    devServer.stdout?.destroy();
+    devServer.stderr?.destroy();
+    await Promise.race([waitForExit, delay(1000)]);
+    return;
+  }
+
+  devServer.kill('SIGTERM');
+  devServer.stdout?.destroy();
+  devServer.stderr?.destroy();
+  await Promise.race([waitForExit, delay(1000)]);
+};
+
 test('dashboard route loads and the client module compiles', async () => {
   const devServer = await startDevServer();
 
@@ -72,6 +104,6 @@ test('dashboard route loads and the client module compiles', async () => {
       );
     }
   } finally {
-    devServer.kill('SIGTERM');
+    await stopDevServer(devServer);
   }
 });
