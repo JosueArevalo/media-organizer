@@ -1750,7 +1750,7 @@ body {
 
 .grouping-layout {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -1765,16 +1765,22 @@ body {
 .grouping-sidebar {
   padding: 12px;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
   position: sticky;
   top: 20px;
+  max-height: calc(100vh - 40px);
+  min-height: 0;
 }
 
 .grouping-folder-list {
   display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 8px;
-  max-height: 420px;
   overflow: auto;
+  min-height: 260px;
+  padding-right: 4px;
 }
 
 .grouping-folder-drop {
@@ -1782,6 +1788,7 @@ body {
   border-radius: 8px;
   background: var(--surface);
   overflow: hidden;
+  min-height: 76px;
 }
 
 .grouping-folder-drop.is-active {
@@ -1791,35 +1798,55 @@ body {
 
 .grouping-folder-button {
   width: 100%;
+  min-height: 44px;
   border: 0;
   background: transparent;
   color: var(--text);
-  padding: 10px;
+  padding: 10px 12px;
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   text-align: left;
   cursor: pointer;
   font-size: 13px;
+  line-height: 1.3;
 }
 
 .grouping-folder-button.is-active {
   border: 1px solid var(--accent);
   border-radius: 8px;
   background: var(--accent-light);
+  min-height: 48px;
 }
 
 .grouping-folder-button span {
+  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.grouping-folder-button strong {
+  min-width: 28px;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  padding: 2px 8px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+  flex-shrink: 0;
 }
 
 .grouping-folder-actions,
 .grouping-template-row {
   display: flex;
   gap: 6px;
-  padding: 0 8px 8px;
+  padding: 0 10px 10px;
+  min-height: 30px;
 }
 
 .grouping-folder-actions button,
