@@ -341,7 +341,7 @@ const isLikelyAbsolutePath = (value: string) => {
 export const CompressionPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sourceSelection, destinationSelection } = useFolderSelections();
+  const { sourceSelection, destinationSelection, isLoading: areFolderSelectionsLoading } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
   const [imagePreset, setImagePreset] = useState<ImagePresetId>('balanced');
   const [customQuality, setCustomQuality] = useState<number>(72);
@@ -351,6 +351,7 @@ export const CompressionPage = () => {
   const [mediaStatsState, setMediaStatsState] = useState<MediaStatsState>({ status: 'idle', data: null, error: null });
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isStartingCompression, setIsStartingCompression] = useState(false);
+  const [isEncoderSettingsLoading, setIsEncoderSettingsLoading] = useState(true);
   const [encoderSettings, setEncoderSettings] = useState<EncoderSettingsSnapshot>({
     imageToolCommand: '',
     videoToolCommand: '',
@@ -373,9 +374,23 @@ export const CompressionPage = () => {
   const selectedVideoProfileLabel = videoPreset;
 
   useEffect(() => {
-    loadEncoderSettings().then((settings) => {
-      setEncoderSettings(settings);
-    });
+    let isActive = true;
+
+    loadEncoderSettings()
+      .then((settings) => {
+        if (isActive) {
+          setEncoderSettings(settings);
+        }
+      })
+      .finally(() => {
+        if (isActive) {
+          setIsEncoderSettingsLoading(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -561,11 +576,41 @@ export const CompressionPage = () => {
   const destinationPath = destinationSelection?.path ?? '';
   const hasConfiguredEncoders = Boolean(encoderSettings.imageToolCommand.trim() && encoderSettings.videoToolCommand.trim());
   const hasAvailableVideoPresets = videoPresets.length > 0;
+  const hasSelectedFolders = Boolean(sourceSelection && destinationSelection);
+  const hasAbsolutePaths = isLikelyAbsolutePath(sourcePath) && isLikelyAbsolutePath(destinationPath);
+  const isCompressionSetupLoading =
+    areFolderSelectionsLoading ||
+    isEncoderSettingsLoading ||
+    videoPresetsState.status === 'loading';
   const canStartRealCompression =
-    isLikelyAbsolutePath(sourcePath) &&
-    isLikelyAbsolutePath(destinationPath) &&
+    !isCompressionSetupLoading &&
+    hasSelectedFolders &&
+    hasAbsolutePaths &&
     hasConfiguredEncoders &&
     hasAvailableVideoPresets;
+  const compressionSetupMessage = (() => {
+    if (isCompressionSetupLoading) {
+      return 'Loading compression setup...';
+    }
+
+    if (!hasSelectedFolders) {
+      return 'Select Source and Destination folders in Import before starting compression.';
+    }
+
+    if (!hasConfiguredEncoders) {
+      return 'Configure and save both encoder paths in Settings before starting compression.';
+    }
+
+    if (!hasAbsolutePaths) {
+      return 'Real backend compression needs absolute filesystem paths for Source and Destination.';
+    }
+
+    if (!hasAvailableVideoPresets) {
+      return 'Load a valid HandBrake preset before starting compression. Check video encoder settings if this persists.';
+    }
+
+    return null;
+  })();
   const estimatedTotalMediaCount = mediaStatsState.status === 'ready'
     ? mediaStatsState.data.imageCount + mediaStatsState.data.videoCount
     : 0;
@@ -704,11 +749,9 @@ export const CompressionPage = () => {
         <p className="page-summary-note">
           Outputs will be written under the selected Destination folder{destinationPath ? ` (${destinationPath})` : ''}.
         </p>
-        {!canStartRealCompression && (
-          <p className="error">
-            {!hasConfiguredEncoders
-              ? 'Compression is blocked until both encoder paths are configured and saved in Settings.'
-              : 'Real backend compression needs absolute filesystem paths for Source and Destination.'}
+        {!canStartRealCompression && compressionSetupMessage && (
+          <p className="page-summary-note">
+            {compressionSetupMessage}
           </p>
         )}
         {backendError && (
@@ -957,7 +1000,13 @@ export const CompressionPage = () => {
           onClick={() => void handleStartCompression()}
           disabled={isCompressionRunning || isCompressionComplete || !canStartRealCompression}
         >
-          {isCompressionRunning ? 'Compression running...' : isCompressionComplete ? 'Compression completed' : 'Start Compression Session'}
+          {isCompressionRunning
+            ? 'Compression running...'
+            : isCompressionComplete
+              ? 'Compression completed'
+              : isCompressionSetupLoading
+                ? 'Loading setup...'
+                : 'Start Compression Session'}
         </button>
         <button className="btn btn-ghost" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })} disabled={!isCompressionComplete}>
           Continue to Grouping →
