@@ -1,6 +1,8 @@
 import { FolderPickerCard } from '../components/FolderPickerCard';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useNavigate } from 'react-router-dom';
+import { pickDirectoryRequest } from '../services/system-picker.service';
+import type { FolderSlot } from '../services/folder-selection.store';
 
 export const ImportPage = () => {
   const navigate = useNavigate();
@@ -10,6 +12,8 @@ export const ImportPage = () => {
     isLoading,
     updateSourceFolderPath,
     updateDestinationFolderPath,
+    selectSourceFolderPath,
+    selectDestinationFolderPath,
     clearSourceFolder,
     clearDestinationFolder
   } = useFolderSelections();
@@ -25,6 +29,34 @@ export const ImportPage = () => {
     }
 
     navigate('/selection');
+  };
+
+  const handleBrowseFolder = async (slot: FolderSlot) => {
+    const currentSelection = slot === 'source' ? sourceSelection : destinationSelection;
+    const result = await pickDirectoryRequest({
+      title: slot === 'source' ? 'Choose source folder' : 'Choose destination folder',
+      initialPath: currentSelection?.path ?? undefined
+    });
+
+    if (result.status !== 'selected') {
+      return result;
+    }
+
+    if (slot === 'source') {
+      await selectSourceFolderPath({
+        name: result.name,
+        path: result.path,
+        source: 'native'
+      });
+    } else {
+      await selectDestinationFolderPath({
+        name: result.name,
+        path: result.path,
+        source: 'native'
+      });
+    }
+
+    return { status: 'selected' as const };
   };
 
   return (
@@ -44,6 +76,7 @@ export const ImportPage = () => {
           selection={sourceSelection}
           isLoading={isLoading}
           onPathChange={updateSourceFolderPath}
+          onBrowse={() => handleBrowseFolder('source')}
           onClear={clearSourceFolder}
         />
 
@@ -54,6 +87,7 @@ export const ImportPage = () => {
           selection={destinationSelection}
           isLoading={isLoading}
           onPathChange={updateDestinationFolderPath}
+          onBrowse={() => handleBrowseFolder('destination')}
           onClear={clearDestinationFolder}
         />
       </div>

@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import type { FolderSelectionSnapshot } from '../services/folder-selection.store';
 
+export type FolderBrowseResult =
+  | { status: 'selected' }
+  | { status: 'cancelled' }
+  | { status: 'unsupported'; message: string }
+  | { status: 'error'; message: string };
+
 type FolderPickerCardProps = {
   icon: string;
   title: string;
@@ -8,6 +14,7 @@ type FolderPickerCardProps = {
   selection: FolderSelectionSnapshot | null;
   isLoading: boolean;
   onPathChange: (path: string) => void;
+  onBrowse: () => Promise<FolderBrowseResult>;
   onClear: () => void;
 };
 
@@ -24,9 +31,12 @@ export const FolderPickerCard = ({
   selection,
   isLoading,
   onPathChange,
+  onBrowse,
   onClear
 }: FolderPickerCardProps) => {
   const [inputValue, setInputValue] = useState(selection?.path ?? '');
+  const [isBrowsing, setIsBrowsing] = useState(false);
+  const [browseMessage, setBrowseMessage] = useState<{ type: 'error' | 'info'; text: string } | null>(null);
 
   useEffect(() => {
     setInputValue(selection?.path ?? '');
@@ -34,17 +44,42 @@ export const FolderPickerCard = ({
 
   const handleInputChange = (val: string) => {
     setInputValue(val);
+    setBrowseMessage(null);
+
     if (val.trim()) {
       onPathChange(val);
     } else {
-      // User cleared the input manually, clear the selection
       onClear();
     }
   };
 
   const handleClear = () => {
     setInputValue('');
+    setBrowseMessage(null);
     onClear();
+  };
+
+  const handleBrowse = async () => {
+    setIsBrowsing(true);
+    setBrowseMessage(null);
+
+    try {
+      const result = await onBrowse();
+
+      if (result.status === 'unsupported' || result.status === 'error') {
+        setBrowseMessage({
+          type: 'error',
+          text: result.message
+        });
+      }
+    } catch (error) {
+      setBrowseMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Could not open the folder picker.'
+      });
+    } finally {
+      setIsBrowsing(false);
+    }
   };
 
   return (
@@ -82,18 +117,35 @@ export const FolderPickerCard = ({
                     aria-label="Clear folder selection"
                     onClick={handleClear}
                   >
-                    ✕
+                    x
                   </button>
                 )}
               </div>
             </label>
 
+            <div className="folder-picker-actions">
+              <button
+                className="btn btn-secondary folder-picker-button"
+                type="button"
+                onClick={() => void handleBrowse()}
+                disabled={isBrowsing}
+              >
+                {isBrowsing ? 'Opening picker...' : `Choose ${title.toLowerCase()}`}
+              </button>
+            </div>
+
             {selection ? (
               <p className="folder-picker-meta">
-                Saved {formatTimestamp(selection.updatedAt)} {selection.persisted ? '• persisted locally' : ''}
+                Saved {formatTimestamp(selection.updatedAt)} {selection.persisted ? '- persisted locally' : ''}
               </p>
             ) : (
               <p className="folder-picker-meta">You can paste a full absolute path and it will be saved.</p>
+            )}
+
+            {browseMessage && (
+              <p className={`folder-picker-message folder-picker-message-${browseMessage.type}`}>
+                {browseMessage.text}
+              </p>
             )}
           </>
         )}

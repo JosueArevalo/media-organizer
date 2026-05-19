@@ -32,6 +32,7 @@ import {
 import { scanSourceTreeByPath } from './pipeline/source/sourceTreeScan.service.js';
 import { resolveToolCommand } from './pipeline/compression/toolCommandResolver.js';
 import { listHandBrakePresets } from './pipeline/compression/handbrakePresets.service.js';
+import { isAllowedPickerOrigin, pickDirectory, pickFile, type SystemPickerFilter } from './system/systemPicker.service.js';
 
 const port = Number(process.env.PORT ?? 4000);
 
@@ -136,6 +137,28 @@ const readRequestJson = async (req: import('node:http').IncomingMessage): Promis
   }
 
   return JSON.parse(raw) as unknown;
+};
+
+const isPickerFilter = (filter: unknown): filter is SystemPickerFilter => {
+  if (!filter || typeof filter !== 'object') {
+    return false;
+  }
+
+  const candidate = filter as { name?: unknown; extensions?: unknown };
+  return (
+    typeof candidate.name === 'string' &&
+    Array.isArray(candidate.extensions) &&
+    candidate.extensions.every((extension) => typeof extension === 'string')
+  );
+};
+
+const sendPickerResult = (res: import('node:http').ServerResponse, result: Awaited<ReturnType<typeof pickDirectory>>) => {
+  if (result.status === 'unsupported') {
+    sendJson(res, 501, result);
+    return;
+  }
+
+  sendJson(res, 200, result);
 };
 
 const clearDirectoryContents = async (directoryPath: string) => {
@@ -602,6 +625,69 @@ const server = createServer((req, res) => {
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not scan source path.'
+        });
+      }
+    })();
+
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/system/picker/directory' && req.method === 'POST') {
+    void (async () => {
+      try {
+        if (!isAllowedPickerOrigin(req.headers.origin)) {
+          sendJson(res, 403, {
+            status: 'forbidden',
+            message: 'Native pickers are only available to the local app.'
+          });
+          return;
+        }
+
+        const body = (await readRequestJson(req)) as { title?: unknown; initialPath?: unknown } | null;
+        const result = await pickDirectory({
+          title: typeof body?.title === 'string' ? body.title : undefined,
+          initialPath: typeof body?.initialPath === 'string' ? body.initialPath : undefined
+        });
+
+        sendPickerResult(res, result);
+      } catch (error) {
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not open folder picker.'
+        });
+      }
+    })();
+
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/system/picker/file' && req.method === 'POST') {
+    void (async () => {
+      try {
+        if (!isAllowedPickerOrigin(req.headers.origin)) {
+          sendJson(res, 403, {
+            status: 'forbidden',
+            message: 'Native pickers are only available to the local app.'
+          });
+          return;
+        }
+
+        const body = (await readRequestJson(req)) as {
+          title?: unknown;
+          initialPath?: unknown;
+          filters?: unknown;
+        } | null;
+        const result = await pickFile({
+          title: typeof body?.title === 'string' ? body.title : undefined,
+          initialPath: typeof body?.initialPath === 'string' ? body.initialPath : undefined,
+          filters: Array.isArray(body?.filters) ? body.filters.filter(isPickerFilter) : undefined
+        });
+
+        sendPickerResult(res, result);
+      } catch (error) {
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not open file picker.'
         });
       }
     })();
