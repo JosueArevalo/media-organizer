@@ -11,6 +11,11 @@
   background: var(--bg-secondary);
 }
 
+:root:not([data-theme='dark']) .settings-header {
+  background: #f1f3f5;
+  border-bottom-color: #dfe4ec;
+}
+
 .settings-header h1 {
   font-size: 24px;
   margin-bottom: 4px;
@@ -37,9 +42,14 @@
   margin-bottom: 24px;
 }
 
+:root:not([data-theme='dark']) .settings-card {
+  border-color: #dce2ea;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
 .settings-card-encoders {
-  border-color: rgba(90, 194, 143, 0.35);
-  background: linear-gradient(180deg, rgba(90, 194, 143, 0.08), var(--surface));
+  border-color: rgba(47, 143, 101, 0.28);
+  background: linear-gradient(180deg, var(--accent-light), var(--surface));
 }
 
 .settings-card-encoder-block {
@@ -99,6 +109,10 @@
   font-size: 12px;
 }
 
+:root:not([data-theme='dark']) .path-input {
+  border-color: #dfe4ec;
+}
+
 .path-input:focus {
   outline: none;
   border-color: var(--accent);
@@ -115,6 +129,11 @@
   font-size: 12px;
   font-weight: 500;
   transition: all 0.2s;
+}
+
+:root:not([data-theme='dark']) .path-btn {
+  background: #eef1f4;
+  color: var(--accent-deep);
 }
 
 .path-btn:hover {
@@ -143,8 +162,8 @@
 
 .status-ready {
   background: var(--accent-light);
-  color: var(--accent);
-  border-color: var(--accent-light);
+  color: var(--accent-deep);
+  border-color: rgba(47, 143, 101, 0.24);
 }
 
 .status-missing {
@@ -171,8 +190,8 @@
 
 .message-success {
   background: var(--accent-light);
-  color: var(--accent);
-  border-color: var(--accent-light);
+  color: var(--accent-deep);
+  border-color: rgba(47, 143, 101, 0.24);
 }
 
 .message-error {
@@ -189,6 +208,10 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-muted);
+}
+
+:root:not([data-theme='dark']) .maintenance-group {
+  border-color: #dfe4ec;
 }
 
 .maintenance-group + .maintenance-group {
