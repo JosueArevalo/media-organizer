@@ -241,7 +241,7 @@ export const DashboardPage = () => {
                     type="button"
                     onClick={() => setExpandedExecutionId(isExpanded ? null : execution.id)}
                   >
-                    <span>
+                    <span className="dashboard-execution-copy">
                       <span className="job-title">{getExecutionTitle(execution)}</span>
                       <span className="job-meta">
                         {formatDateTime(execution.finishedAt ?? execution.updatedAt)} - {execution.totalItems} {t('dashboard.files')}
