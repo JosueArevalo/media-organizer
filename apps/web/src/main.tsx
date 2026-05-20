@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { en } from './i18n/locales/en';
 import './styles.css';
 
 type ErrorBoundaryProps = {
@@ -56,9 +57,9 @@ class AppRuntimeErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorB
             padding: '20px'
           }}
         >
-          <h1 style={{ margin: '0 0 8px', fontSize: '20px' }}>UI runtime failed</h1>
+          <h1 style={{ margin: '0 0 8px', fontSize: '20px' }}>{en['app.error.runtimeTitle']}</h1>
           <p style={{ margin: '0 0 14px', color: '#94a3b8', lineHeight: 1.5 }}>
-            The application crashed while rendering. Check the browser console for the full stack trace.
+            {en['app.error.runtimeBody']}
           </p>
           <pre
             style={{
@@ -109,9 +110,9 @@ const renderBootstrapError = (error: unknown) => {
         background: #171d26;
         padding: 20px;
       ">
-        <h1 style="margin: 0 0 8px; font-size: 20px;">UI bootstrap failed</h1>
+        <h1 style="margin: 0 0 8px; font-size: 20px;">${en['app.error.bootstrapTitle']}</h1>
         <p style="margin: 0 0 14px; color: #94a3b8; line-height: 1.5;">
-          The application could not render correctly. Please refresh the page and check the browser console for details.
+          ${en['app.error.bootstrapBody']}
         </p>
         <pre style="
           margin: 0;

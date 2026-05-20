@@ -8,11 +8,13 @@ import { loadFolderSelections } from '../services/folder-selection.store';
 import { resetAllPersistentAppState } from '../services/app-maintenance.store';
 import { resetCompressionSession } from '../services/compression-job.store';
 import { pickFileRequest } from '../services/system-picker.service';
+import { useTranslation } from '../i18n';
 import '../styles/SettingsPage.css';
 
 type ToolStatus = 'ready' | 'missing' | 'unknown';
 
 const SettingsPage = () => {
+  const { t } = useTranslation();
   const [settings, setSettings] = useState<EncoderSettingsSnapshot>({
     imageToolCommand: '',
     videoToolCommand: '',
@@ -81,7 +83,7 @@ const SettingsPage = () => {
     handlePathChange(tool, '');
     setToolPathMessage({
       type: 'success',
-      text: `${tool === 'image' ? 'cjpeg-static.exe' : 'HandBrakeCLI.exe'} path cleared locally. Press Save Encoder Paths to apply it.`
+      text: t('settings.pathCleared', { tool: tool === 'image' ? 'cjpeg-static.exe' : 'HandBrakeCLI.exe' })
     });
   };
 
@@ -90,10 +92,10 @@ const SettingsPage = () => {
       const isWindows = navigator.platform.toLowerCase().includes('win');
       const currentPath = tool === 'image' ? settings.imageToolCommand : settings.videoToolCommand;
       const result = await pickFileRequest({
-        title: tool === 'image' ? 'Choose cjpeg-static executable' : 'Choose HandBrakeCLI executable',
+        title: tool === 'image' ? t('settings.chooseImageExecutable') : t('settings.chooseVideoExecutable'),
         initialPath: currentPath,
         filters: isWindows
-          ? [{ name: 'Executable files', extensions: ['exe'] }]
+          ? [{ name: t('settings.executableFiles'), extensions: ['exe'] }]
           : undefined
       });
 
@@ -112,12 +114,12 @@ const SettingsPage = () => {
       handlePathChange(tool, result.path);
       setToolPathMessage({
         type: 'success',
-        text: `Selected path: ${result.path}. Press Save Encoder Paths to apply it.`
+        text: t('settings.selectedPath', { path: result.path })
       });
     } catch (error) {
       setToolPathMessage({
         type: 'error',
-        text: error instanceof Error ? error.message : 'Could not open the file picker.'
+        text: error instanceof Error ? error.message : t('settings.filePickerError')
       });
     }
   };
@@ -137,14 +139,14 @@ const SettingsPage = () => {
       setSaveMessage({
         type: 'success',
         text: settings.imageToolCommand && settings.videoToolCommand
-          ? 'Encoder settings saved successfully.'
-          : 'Encoder settings saved. Compression will remain blocked until both paths are configured.'
+          ? t('settings.saved')
+          : t('settings.savedBlocked')
       });
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error) {
       setSaveMessage({
         type: 'error',
-        text: `Failed to save settings: ${error instanceof Error ? error.message : 'Unknown error'}`
+        text: t('settings.saveFailed', { message: error instanceof Error ? error.message : t('settings.unknownError') })
       });
     } finally {
       setIsSaving(false);
@@ -172,12 +174,12 @@ const SettingsPage = () => {
 
       setMaintenanceMessage({
         type: 'success',
-        text: 'Reset completed. Cleared: Source/Destination selections, source tree cache, scope cache, compression session snapshot, theme, IndexedDB folder cache, and backend session history. Encoder paths were preserved.'
+        text: t('settings.resetCompleted')
       });
     } catch (error) {
       setMaintenanceMessage({
         type: 'error',
-        text: `Could not reset runtime state: ${error instanceof Error ? error.message : 'Unknown error'}`
+        text: t('settings.resetFailed', { message: error instanceof Error ? error.message : t('settings.unknownError') })
       });
     } finally {
       setIsResettingState(false);
@@ -188,13 +190,13 @@ const SettingsPage = () => {
     if (!destinationPath) {
       setMaintenanceMessage({
         type: 'error',
-        text: 'No destination folder is configured. Go to Import and select a destination first.'
+        text: t('settings.noDestination')
       });
       return;
     }
 
     const confirmed = window.confirm(
-      `This will remove all files and subfolders inside Destination.\n\nDestination:\n${destinationPath}\n\nContinue?`
+      t('settings.clearConfirm', { destinationPath })
     );
 
     if (!confirmed) {
@@ -226,12 +228,12 @@ const SettingsPage = () => {
 
       setMaintenanceMessage({
         type: 'success',
-        text: `Destination cleaned (${result.deletedEntries ?? 0} entries removed). Compression state was reset.`
+        text: t('settings.destinationCleaned', { count: result.deletedEntries ?? 0 })
       });
     } catch (error) {
       setMaintenanceMessage({
         type: 'error',
-        text: `Could not clear destination: ${error instanceof Error ? error.message : 'Unknown error'}`
+        text: t('settings.clearDestinationFailed', { message: error instanceof Error ? error.message : t('settings.unknownError') })
       });
     } finally {
       setIsClearingDestination(false);
@@ -241,23 +243,23 @@ const SettingsPage = () => {
   return (
     <div className="settings-page">
       <div className="settings-header">
-        <h1>External Tools Configuration</h1>
-        <p>Configure the paths to image and video compression tools on your system.</p>
+        <h1>{t('settings.title')}</h1>
+        <p>{t('settings.subtitle')}</p>
       </div>
 
       <div className="settings-content">
         <div className="settings-card settings-card-encoders">
-          <div className="card-title">Encoder Tools</div>
+          <div className="card-title">{t('settings.encoderTools')}</div>
           <div className="card-subtitle">
-            Configure the external tools used by compression. Save only applies to these paths.
+            {t('settings.encoderSubtitle')}
           </div>
 
           <div className="settings-card-encoder-block">
-            <div className="card-title card-title-compact">📸 Image Compression (mozjpeg)</div>
-            <div className="card-subtitle">Required for JPEG optimization using cjpeg</div>
+            <div className="card-title card-title-compact">📸 {t('settings.imageCompression')}</div>
+            <div className="card-subtitle">{t('settings.imageSubtitle')}</div>
 
             <div className="form-group">
-              <label className="form-label">cjpeg-static.exe path</label>
+              <label className="form-label">{t('settings.imagePathLabel')}</label>
               <div className="path-input-group">
                 <input
                   type="text"
@@ -271,14 +273,14 @@ const SettingsPage = () => {
                   onClick={() => void handleBrowse('image')}
                   type="button"
                 >
-                  Browse
+                  {t('settings.browse')}
                 </button>
                 {settings.imageToolCommand && (
                   <button
                     className="path-btn path-btn-clear"
                     onClick={() => handleClearPath('image')}
                     type="button"
-                    aria-label="Clear image encoder path"
+                    aria-label={t('settings.clearImageAria')}
                   >
                     ✕
                   </button>
@@ -288,11 +290,11 @@ const SettingsPage = () => {
           </div>
 
           <div className="settings-card-encoder-block">
-            <div className="card-title card-title-compact">🎬 Video Compression (HandBrake)</div>
-            <div className="card-subtitle">Required for video re-encoding</div>
+            <div className="card-title card-title-compact">🎬 {t('settings.videoCompression')}</div>
+            <div className="card-subtitle">{t('settings.videoSubtitle')}</div>
 
             <div className="form-group">
-              <label className="form-label">HandBrakeCLI.exe path</label>
+              <label className="form-label">{t('settings.videoPathLabel')}</label>
               <div className="path-input-group">
                 <input
                   type="text"
@@ -306,14 +308,14 @@ const SettingsPage = () => {
                   onClick={() => void handleBrowse('video')}
                   type="button"
                 >
-                  Browse
+                  {t('settings.browse')}
                 </button>
                 {settings.videoToolCommand && (
                   <button
                     className="path-btn path-btn-clear"
                     onClick={() => handleClearPath('video')}
                     type="button"
-                    aria-label="Clear video encoder path"
+                    aria-label={t('settings.clearVideoAria')}
                   >
                     ✕
                   </button>
@@ -324,7 +326,7 @@ const SettingsPage = () => {
 
           <div className="encoder-actions-footer">
             <p className="encoder-actions-note">
-              Changes stay local to this screen until you save them.
+              {t('settings.changesLocal')}
             </p>
             <button
               className="btn btn-primary"
@@ -332,18 +334,18 @@ const SettingsPage = () => {
               disabled={isSaving || !hasPendingEncoderChanges}
               type="button"
             >
-              {isSaving ? 'Saving...' : 'Save Encoder Paths'}
+              {isSaving ? t('settings.saving') : t('settings.saveEncoderPaths')}
             </button>
           </div>
         </div>
 
         <div className="settings-card">
-          <div className="card-title">Maintenance</div>
-          <div className="card-subtitle">Recover from stale UI state and clean generated outputs safely.</div>
+          <div className="card-title">{t('settings.maintenance')}</div>
+          <div className="card-subtitle">{t('settings.maintenanceSubtitle')}</div>
 
           <div className="maintenance-group">
             <p className="maintenance-note">
-              Reset runtime state clears app cache for compression status and source-scope snapshots.
+              {t('settings.resetNote')}
             </p>
             <button
               className="btn btn-secondary"
@@ -351,22 +353,22 @@ const SettingsPage = () => {
               onClick={handleResetRuntimeState}
               disabled={isResettingState || isClearingDestination}
             >
-              {isResettingState ? 'Resetting...' : 'Reset Runtime State'}
+              {isResettingState ? t('settings.resetting') : t('settings.resetRuntime')}
             </button>
           </div>
 
           <div className="maintenance-group maintenance-danger">
             <p className="maintenance-note">
-              Destination cleanup removes everything inside the current Destination folder but never touches Source.
+              {t('settings.destinationCleanupNote')}
             </p>
-            <p className="maintenance-path">Destination: {destinationPath || 'Not configured'}</p>
+            <p className="maintenance-path">{t('settings.destinationPath', { path: destinationPath || t('settings.notConfigured') })}</p>
             <button
               className="btn btn-danger"
               type="button"
               onClick={() => void handleClearDestination()}
               disabled={isClearingDestination || isResettingState || !destinationPath}
             >
-              {isClearingDestination ? 'Clearing Destination...' : 'Clear Destination Contents'}
+              {isClearingDestination ? t('settings.clearingDestination') : t('settings.clearDestination')}
             </button>
           </div>
         </div>

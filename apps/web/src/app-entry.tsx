@@ -1,3 +1,10 @@
 import App from './App';
+import { I18nProvider } from './i18n';
 
-export default App;
+const AppEntry = () => (
+  <I18nProvider>
+    <App />
+  </I18nProvider>
+);
+
+export default AppEntry;

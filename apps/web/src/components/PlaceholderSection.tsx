@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useTranslation } from '../i18n';
 
 type PlaceholderSectionProps = {
   title: string;
@@ -15,9 +16,11 @@ export const PlaceholderSection = ({
   secondaryActionLabel,
   backTo = '/dashboard'
 }: PlaceholderSectionProps) => {
+  const { t } = useTranslation();
+
   return (
     <section className="panel">
-      <p className="panel-kicker">Scaffold</p>
+      <p className="panel-kicker">{t('placeholder.scaffold')}</p>
       <h2 className="panel-title">{title}</h2>
       <p className="panel-description">{description}</p>
 
@@ -29,12 +32,12 @@ export const PlaceholderSection = ({
           {secondaryActionLabel}
         </button>
         <Link to={backTo} className="btn btn-ghost">
-          Back to dashboard
+          {t('placeholder.backToDashboard')}
         </Link>
       </div>
 
       <div className="empty-note">
-        This page is intentionally empty for now. Next iterations can wire this to real backend APIs.
+        {t('placeholder.empty')}
       </div>
     </section>
   );

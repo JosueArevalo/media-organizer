@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { FolderSelectionSnapshot } from '../services/folder-selection.store';
+import { useTranslation } from '../i18n';
 
 export type FolderBrowseResult =
   | { status: 'selected' }
@@ -34,6 +35,7 @@ export const FolderPickerCard = ({
   onBrowse,
   onClear
 }: FolderPickerCardProps) => {
+  const { t } = useTranslation();
   const [inputValue, setInputValue] = useState(selection?.path ?? '');
   const [isBrowsing, setIsBrowsing] = useState(false);
   const [browseMessage, setBrowseMessage] = useState<{ type: 'error' | 'info'; text: string } | null>(null);
@@ -75,7 +77,7 @@ export const FolderPickerCard = ({
     } catch (error) {
       setBrowseMessage({
         type: 'error',
-        text: error instanceof Error ? error.message : 'Could not open the folder picker.'
+        text: error instanceof Error ? error.message : t('folder.pickerError')
       });
     } finally {
       setIsBrowsing(false);
@@ -93,28 +95,28 @@ export const FolderPickerCard = ({
       <div className="folder-picker-selection" aria-live="polite">
         {isLoading ? (
           <>
-            <p className="folder-picker-value">Checking saved folder...</p>
-            <p className="folder-picker-meta">Loading your previous selection.</p>
+            <p className="folder-picker-value">{t('folder.loadingValue')}</p>
+            <p className="folder-picker-meta">{t('folder.loadingMeta')}</p>
           </>
         ) : (
           <>
-            <p className="folder-picker-value">{selection ? selection.name : 'No folder selected yet'}</p>
+            <p className="folder-picker-value">{selection ? selection.name : t('folder.noneSelected')}</p>
 
             <label className="folder-picker-path-field">
-              <span className="folder-picker-path-label">Path editable inline</span>
+              <span className="folder-picker-path-label">{t('folder.pathLabel')}</span>
               <div className="folder-picker-input-group">
                 <input
                   className="folder-picker-path-input"
                   type="text"
                   value={inputValue}
                   onChange={(event) => handleInputChange(event.target.value)}
-                  placeholder="Paste absolute path here"
+                  placeholder={t('folder.pathPlaceholder')}
                 />
                 {selection && (
                   <button
                     className="folder-picker-clear-btn"
                     type="button"
-                    aria-label="Clear folder selection"
+                    aria-label={t('folder.clearAria')}
                     onClick={handleClear}
                   >
                     x
@@ -130,16 +132,19 @@ export const FolderPickerCard = ({
                 onClick={() => void handleBrowse()}
                 disabled={isBrowsing}
               >
-                {isBrowsing ? 'Opening picker...' : `Choose ${title.toLowerCase()}`}
+                {isBrowsing ? t('folder.openingPicker') : t('folder.choose', { title: title.toLowerCase() })}
               </button>
             </div>
 
             {selection ? (
               <p className="folder-picker-meta">
-                Saved {formatTimestamp(selection.updatedAt)} {selection.persisted ? '- persisted locally' : ''}
+                {t('folder.saved', {
+                  date: formatTimestamp(selection.updatedAt),
+                  persisted: selection.persisted ? t('folder.persisted') : ''
+                })}
               </p>
             ) : (
-              <p className="folder-picker-meta">You can paste a full absolute path and it will be saved.</p>
+              <p className="folder-picker-meta">{t('folder.pathHint')}</p>
             )}
 
             {browseMessage && (

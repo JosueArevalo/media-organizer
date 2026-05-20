@@ -302,6 +302,52 @@ body {
   border-top: 1px solid var(--line);
 }
 
+.language-selector {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+.language-selector .settings-btn {
+  width: 100%;
+}
+
+.language-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--soft-shadow);
+  padding: 6px;
+}
+
+.language-menu-item {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px;
+  text-align: left;
+}
+
+.language-menu-item:hover,
+.language-menu-item.is-active {
+  background: var(--accent-light);
+  color: var(--text);
+}
+
 .settings-btn {
   flex: 1;
   padding: 8px 12px;

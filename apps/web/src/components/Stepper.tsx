@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
+import { useTranslation } from '../i18n';
 
 export type StepConfig = {
   id: string;
@@ -16,9 +17,10 @@ type StepperProps = {
 
 export const Stepper = ({ steps }: StepperProps) => {
   const location = useLocation();
+  const { t } = useTranslation();
 
   return (
-    <nav className="stepper" aria-label="Workflow steps">
+    <nav className="stepper" aria-label={t('workflow.ariaLabel')}>
       {steps.map((step, index) => {
         const isActive = location.pathname === step.path;
         const className = `step step-${step.state} ${isActive ? 'step-active-page' : ''}`;
@@ -44,7 +46,7 @@ export const Stepper = ({ steps }: StepperProps) => {
         return (
           <div key={step.id}>
             {step.state === 'locked' ? (
-              <div className={className} aria-disabled="true" title="Complete previous steps to unlock">
+              <div className={className} aria-disabled="true" title={t('workflow.lockedTitle')}>
                 {content}
               </div>
             ) : (
