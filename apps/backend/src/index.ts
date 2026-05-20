@@ -22,6 +22,7 @@ import {
   createGroupingTemplate,
   createGroupingWorkspace,
   deleteGroupingFolder,
+  deleteGroupingItems,
   deleteGroupingTemplate,
   getGroupingMediaPath,
   getGroupingWorkspace,
@@ -522,6 +523,28 @@ const server = createServer((req, res) => {
           sendJson(res, 500, {
             status: 'error',
             message: error instanceof Error ? error.message : 'Could not assign items.'
+          });
+        }
+      })();
+
+      return;
+    }
+
+    if (req.method === 'POST' && subPath === 'items' && subId === 'delete') {
+      void (async () => {
+        try {
+          const body = (await readRequestJson(req)) as { itemIds?: string[] } | null;
+
+          if (!Array.isArray(body?.itemIds)) {
+            sendJson(res, 400, { status: 'invalid_request', message: 'itemIds is required.' });
+            return;
+          }
+
+          sendJson(res, 200, deleteGroupingItems(sessionId, body.itemIds));
+        } catch (error) {
+          sendJson(res, 500, {
+            status: 'error',
+            message: error instanceof Error ? error.message : 'Could not delete items.'
           });
         }
       })();
