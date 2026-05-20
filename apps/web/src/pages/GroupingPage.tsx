@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
+import { useTranslation } from '../i18n';
 import { completeGroupingSession, failGroupingSession, startGroupingSession } from '../services/grouping-job.store';
 import {
   applyGroupingWorkspaceRequest,
@@ -33,8 +34,6 @@ const formatBytes = (value: number) => {
   return `${size.toFixed(size >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 };
 
-const getFolderLabel = (folder: GroupingWorkspaceFolder | null) => folder?.label ?? 'All media';
-
 const getSelectedDragPayload = (item: GroupingWorkspaceItem, selectedIds: Set<string>) => {
   if (selectedIds.has(item.id)) {
     return Array.from(selectedIds);
@@ -44,6 +43,7 @@ const getSelectedDragPayload = (item: GroupingWorkspaceItem, selectedIds: Set<st
 };
 
 export const GroupingPage = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const { sourceSelection, destinationSelection } = useFolderSelections();
@@ -109,7 +109,7 @@ export const GroupingPage = () => {
           return;
         }
 
-        const message = error instanceof Error ? error.message : 'Could not open the grouping workspace.';
+        const message = error instanceof Error ? error.message : t('grouping.openError');
         setBackendError(message);
         failGroupingSession(message);
       } finally {
@@ -180,21 +180,21 @@ export const GroupingPage = () => {
   const handleCreateFolder = async () => {
     if (!workspace) return;
 
-    const label = window.prompt('Folder name');
+    const label = window.prompt(t('grouping.folderNamePrompt'));
     if (!label?.trim()) return;
 
     try {
       await createGroupingFolderRequest(workspace.sessionId, label);
       await refreshWorkspace(workspace.sessionId);
     } catch (error) {
-      setBackendError(error instanceof Error ? error.message : 'Could not create folder.');
+      setBackendError(error instanceof Error ? error.message : t('grouping.createFolderError'));
     }
   };
 
   const handleRenameFolder = async (folder: GroupingWorkspaceFolder) => {
     if (!workspace) return;
 
-    const label = window.prompt('New folder name', folder.label);
+    const label = window.prompt(t('grouping.newFolderNamePrompt'), folder.label);
     if (!label?.trim() || label === folder.label) return;
 
     try {
@@ -202,7 +202,7 @@ export const GroupingPage = () => {
       setActiveFolderLabel(label);
       await refreshWorkspace(workspace.sessionId);
     } catch (error) {
-      setBackendError(error instanceof Error ? error.message : 'Could not rename folder.');
+      setBackendError(error instanceof Error ? error.message : t('grouping.renameFolderError'));
     }
   };
 
@@ -214,7 +214,7 @@ export const GroupingPage = () => {
       setActiveFolderLabel('__all__');
       await refreshWorkspace(workspace.sessionId);
     } catch (error) {
-      setBackendError(error instanceof Error ? error.message : 'Could not delete folder.');
+      setBackendError(error instanceof Error ? error.message : t('grouping.deleteFolderError'));
     }
   };
 
@@ -227,7 +227,7 @@ export const GroupingPage = () => {
       setSelectedIds(new Set());
       setBackendError(null);
     } catch (error) {
-      setBackendError(error instanceof Error ? error.message : 'Could not move media.');
+      setBackendError(error instanceof Error ? error.message : t('grouping.moveMediaError'));
     }
   };
 
@@ -250,17 +250,17 @@ export const GroupingPage = () => {
   };
 
   const handleCreateTemplate = async () => {
-    const name = window.prompt('Template name');
+    const name = window.prompt(t('grouping.templateNamePrompt'));
     if (!name?.trim()) return;
 
-    const pattern = window.prompt('Folder pattern. Supported tokens: {year}, {date}', name);
+    const pattern = window.prompt(t('grouping.templatePatternPrompt'), name);
     if (!pattern?.trim()) return;
 
     try {
       const response = await createGroupingTemplateRequest({ name, pattern, enabled: true });
       setWorkspace((current) => (current ? { ...current, templates: response.templates } : current));
     } catch (error) {
-      setBackendError(error instanceof Error ? error.message : 'Could not create template.');
+      setBackendError(error instanceof Error ? error.message : t('grouping.createTemplateError'));
     }
   };
 
@@ -269,7 +269,7 @@ export const GroupingPage = () => {
       const response = await updateGroupingTemplateRequest(template.id, { enabled: !template.enabled });
       setWorkspace((current) => (current ? { ...current, templates: response.templates } : current));
     } catch (error) {
-      setBackendError(error instanceof Error ? error.message : 'Could not update template.');
+      setBackendError(error instanceof Error ? error.message : t('grouping.updateTemplateError'));
     }
   };
 
@@ -280,7 +280,7 @@ export const GroupingPage = () => {
         current ? { ...current, templates: current.templates.filter((candidate) => candidate.id !== template.id) } : current
       );
     } catch (error) {
-      setBackendError(error instanceof Error ? error.message : 'Could not delete template.');
+      setBackendError(error instanceof Error ? error.message : t('grouping.deleteTemplateError'));
     }
   };
 
@@ -291,7 +291,7 @@ export const GroupingPage = () => {
       await createGroupingFolderFromTemplateRequest(workspace.sessionId, template.id);
       await refreshWorkspace(workspace.sessionId);
     } catch (error) {
-      setBackendError(error instanceof Error ? error.message : 'Could not create folder from template.');
+      setBackendError(error instanceof Error ? error.message : t('grouping.createFromTemplateError'));
     }
   };
 
@@ -306,13 +306,13 @@ export const GroupingPage = () => {
       if (result.status === 'completed') {
         completeGroupingSession();
       } else {
-        failGroupingSession(`${result.failedItems} files could not be organized.`);
+        failGroupingSession(t('grouping.failedApply', { count: result.failedItems }));
       }
 
       setBackendError(null);
       await refreshWorkspace(workspace.sessionId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not apply organization.';
+      const message = error instanceof Error ? error.message : t('grouping.applyError');
       setBackendError(message);
       failGroupingSession(message);
     } finally {
@@ -326,23 +326,25 @@ export const GroupingPage = () => {
     <div className="grouping-workspace page-stack">
       <div className="page-header grouping-header">
         <div>
-          <h2 className="page-title">Organize destination</h2>
+          <h2 className="page-title">{t('grouping.title')}</h2>
           <p className="page-subtitle">
-            {workspace ? `${workspace.items.length} files in ${workspace.outputDir}` : 'Preparing the final media workspace.'}
+            {workspace
+              ? t('grouping.subtitle', { count: workspace.items.length, path: workspace.outputDir })
+              : t('grouping.preparing')}
           </p>
         </div>
         <div className="grouping-header-actions">
           <button className="btn btn-secondary" type="button" onClick={handleBack}>
-            Back
+            {t('grouping.back')}
           </button>
           <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying}>
-            {isApplying ? 'Applying...' : 'Apply organization'}
+            {isApplying ? t('grouping.applying') : t('grouping.apply')}
           </button>
         </div>
       </div>
 
       {!canOpenWorkspace && (
-        <p className="error">Grouping is available after compression completes and source/destination folders are selected.</p>
+        <p className="error">{t('grouping.unavailable')}</p>
       )}
       {backendError && <p className="error">{backendError}</p>}
 
@@ -351,11 +353,11 @@ export const GroupingPage = () => {
           className="grouping-search"
           value={searchTerm}
           onChange={(event) => setSearchTerm(event.target.value)}
-          placeholder="Search media"
+          placeholder={t('grouping.searchPlaceholder')}
           type="search"
         />
         <button className="btn btn-secondary" type="button" onClick={() => void handleCreateFolder()} disabled={!workspace}>
-          New folder
+          {t('grouping.newFolder')}
         </button>
         <select
           className="grouping-select"
@@ -367,14 +369,14 @@ export const GroupingPage = () => {
           }}
           disabled={!workspace || selectedIds.size === 0}
         >
-          <option value="">Move selected</option>
+          <option value="">{t('grouping.moveSelected')}</option>
           {workspace?.folders.map((folder) => (
             <option key={folder.id} value={folder.label}>
               {folder.label}
             </option>
           ))}
         </select>
-        <span className="grouping-selection-count">{selectedItems.length} selected</span>
+        <span className="grouping-selection-count">{t('grouping.selected', { count: selectedItems.length })}</span>
       </div>
 
       <div className="grouping-layout">
@@ -384,7 +386,7 @@ export const GroupingPage = () => {
             type="button"
             onClick={() => setActiveFolderLabel('__all__')}
           >
-            <span>{getFolderLabel(null)}</span>
+            <span>{t('grouping.allMedia')}</span>
             <strong>{workspace?.items.length ?? 0}</strong>
           </button>
 
@@ -407,11 +409,11 @@ export const GroupingPage = () => {
                   <strong>{folder.itemCount}</strong>
                 </button>
                 <div className="grouping-folder-actions">
-                  <button type="button" onClick={() => void handleRenameFolder(folder)} title="Rename folder">
-                    Rename
+                  <button type="button" onClick={() => void handleRenameFolder(folder)} title={t('grouping.renameTitle')}>
+                    {t('grouping.rename')}
                   </button>
-                  <button type="button" onClick={() => void handleDeleteFolder(folder)} disabled={folder.itemCount > 0} title="Delete folder">
-                    Delete
+                  <button type="button" onClick={() => void handleDeleteFolder(folder)} disabled={folder.itemCount > 0} title={t('grouping.deleteTitle')}>
+                    {t('grouping.delete')}
                   </button>
                 </div>
               </div>
@@ -420,9 +422,9 @@ export const GroupingPage = () => {
 
           <div className="grouping-templates">
             <div className="grouping-section-head">
-              <p className="page-section-title">Templates</p>
+              <p className="page-section-title">{t('grouping.templates')}</p>
               <button type="button" onClick={() => void handleCreateTemplate()}>
-                Add
+                {t('grouping.add')}
               </button>
             </div>
             {workspace?.templates.length ? (
@@ -432,15 +434,15 @@ export const GroupingPage = () => {
                     {template.name}
                   </button>
                   <button type="button" onClick={() => void handleToggleTemplate(template)}>
-                    {template.enabled ? 'On' : 'Off'}
+                    {template.enabled ? t('grouping.on') : t('grouping.off')}
                   </button>
                   <button type="button" onClick={() => void handleDeleteTemplate(template)}>
-                    Delete
+                    {t('grouping.delete')}
                   </button>
                 </div>
               ))
             ) : (
-              <p className="page-summary-note">No templates yet.</p>
+              <p className="page-summary-note">{t('grouping.noTemplates')}</p>
             )}
           </div>
         </aside>
@@ -448,16 +450,16 @@ export const GroupingPage = () => {
         <section className="grouping-main">
           <div className="grouping-main-head">
             <div>
-              <p className="page-section-title">{getFolderLabel(activeFolder)}</p>
-              <p className="page-summary-note">{visibleItems.length} visible files</p>
+              <p className="page-section-title">{activeFolder?.label ?? t('grouping.allMedia')}</p>
+              <p className="page-summary-note">{t('grouping.visibleFiles', { count: visibleItems.length })}</p>
             </div>
             <button className="btn btn-ghost" type="button" onClick={() => setSelectedIds(new Set(visibleItems.map((item) => item.id)))}>
-              Select visible
+              {t('grouping.selectVisible')}
             </button>
           </div>
 
           {isLoading ? (
-            <p className="empty-note">Loading workspace...</p>
+            <p className="empty-note">{t('grouping.loadingWorkspace')}</p>
           ) : (
             <div className="grouping-media-grid">
               {visibleItems.map((item) => {
@@ -486,7 +488,7 @@ export const GroupingPage = () => {
                     </button>
                     <div className="grouping-media-meta">
                       <strong title={item.fileName}>{item.fileName}</strong>
-                      <span>{item.captureDate ?? 'No date'} - {formatBytes(item.sizeBytes)}</span>
+                      <span>{item.captureDate ?? t('grouping.noDate')} - {formatBytes(item.sizeBytes)}</span>
                     </div>
                   </article>
                 );
@@ -502,7 +504,7 @@ export const GroupingPage = () => {
             <div className="grouping-modal-head">
               <strong>{previewItem.fileName}</strong>
               <button className="btn btn-secondary" type="button" onClick={() => setPreviewItem(null)}>
-                Close
+                {t('grouping.close')}
               </button>
             </div>
             {previewItem.mediaType === 'image' ? (

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFolderSelections } from '../hooks/useFolderSelections';
+import { useTranslation } from '../i18n';
 import {
   loadFolderSelectionHandle,
   saveSourceSelectionScope,
@@ -80,28 +81,28 @@ const formatPath = (path: string) => path.split('\\').join('/');
 
 const getFileType = (fileName: string, mimeType = '') => {
   if (mimeType.startsWith('image/')) {
-    return 'Image';
+    return 'image';
   }
 
   if (mimeType.startsWith('video/')) {
-    return 'Video';
+    return 'video';
   }
 
   const extension = fileName.split('.').pop()?.toLowerCase() ?? '';
 
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif'].includes(extension)) {
-    return 'Image';
+    return 'image';
   }
 
   if (['mp4', 'mov', 'm4v', 'avi', 'mkv'].includes(extension)) {
-    return 'Video';
+    return 'video';
   }
 
   if (['pdf', 'doc', 'docx', 'txt'].includes(extension)) {
-    return 'Document';
+    return 'document';
   }
 
-  return 'File';
+  return 'file';
 };
 
 const normalizeSnapshotEntry = (entry: SourceTreeNode): SourceEntry => {
@@ -401,6 +402,7 @@ const applyPreset = (root: ScannedDirectory, preset: ScopePreset) => {
 };
 
 export const SelectionPage = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { sourceSelection, destinationSelection } = useFolderSelections();
   const [scanState, setScanState] = useState<ScanState>({ status: 'idle', root: null, error: null });
@@ -438,7 +440,7 @@ export const SelectionPage = () => {
         }
 
         if (!tree) {
-          throw new Error('No source tree is available yet. Re-select the source folder from Import to inspect its contents.');
+          throw new Error(t('selection.noTreeError'));
         }
 
         if (!isActive) {
@@ -458,7 +460,7 @@ export const SelectionPage = () => {
           return;
         }
 
-        const message = error instanceof Error ? error.message : 'Could not scan the selected source folder.';
+        const message = error instanceof Error ? error.message : t('selection.scanError');
         setScanState({ status: 'error', root: null, error: message });
       }
     };
@@ -517,6 +519,23 @@ export const SelectionPage = () => {
   const selectedFiles = summary?.includedFiles ?? 0;
   const sizeRatio = totalBytes > 0 ? (selectedBytes / totalBytes) * 100 : 0;
   const fileRatio = totalFiles > 0 ? (selectedFiles / totalFiles) * 100 : 0;
+  const getFileTypeLabel = (fileType: string) => {
+    const normalized = fileType.toLowerCase();
+
+    if (normalized.includes('image')) {
+      return t('selection.fileType.image');
+    }
+
+    if (normalized.includes('video')) {
+      return t('selection.fileType.video');
+    }
+
+    if (normalized.includes('document')) {
+      return t('selection.fileType.document');
+    }
+
+    return t('selection.fileType.file');
+  };
 
   const handlePreset = (preset: ScopePreset) => {
     setActivePreset(preset);
@@ -605,63 +624,55 @@ export const SelectionPage = () => {
   return (
     <div className="page-stack selection-page">
       <div className="page-header">
-        <h2 className="page-title">Select what gets compressed</h2>
-        <p className="page-subtitle">
-          This panel shows the real source tree that was selected in Import. You can exclude whole directories or fine-tune individual
-          files, with a list-first view so size and origin stay visible.
-        </p>
+        <h2 className="page-title">{t('selection.title')}</h2>
+        <p className="page-subtitle">{t('selection.subtitle')}</p>
       </div>
 
       <div className="selection-top-grid">
         <article className="page-card elevated selection-hero-card">
-          <p className="page-section-title">Source context</p>
+          <p className="page-section-title">{t('selection.sourceContext')}</p>
           <div className="selection-hero-row">
             <div>
-              <p className="selection-hero-label">Source folder</p>
-              <p className="selection-hero-value">{sourceSelection?.name ?? 'Not selected yet'}</p>
+              <p className="selection-hero-label">{t('selection.sourceFolder')}</p>
+              <p className="selection-hero-value">{sourceSelection?.name ?? t('selection.notSelected')}</p>
             </div>
             <div>
-              <p className="selection-hero-label">Destination</p>
-              <p className="selection-hero-value">{destinationSelection?.name ?? 'Not selected yet'}</p>
+              <p className="selection-hero-label">{t('selection.destination')}</p>
+              <p className="selection-hero-value">{destinationSelection?.name ?? t('selection.notSelected')}</p>
             </div>
           </div>
-          <p className="page-summary-note">
-            The source scan is loaded from a stored directory handle when available, or from backend path-based scanning when using
-            manual absolute paths.
-          </p>
+          <p className="page-summary-note">{t('selection.sourceScanNote')}</p>
         </article>
 
         <article className="page-card elevated selection-hero-card">
-          <p className="page-section-title">Scope presets</p>
+          <p className="page-section-title">{t('selection.scopePresets')}</p>
           <div className="page-pill-row">
             <button className={`selection-pill ${activePreset === 'all' ? 'is-active' : ''}`} type="button" onClick={() => handlePreset('all')}>
-              Keep everything
+              {t('selection.preset.keepEverything')}
             </button>
             <button
               className={`selection-pill ${activePreset === 'whatsapp' ? 'is-active' : ''}`}
               type="button"
               onClick={() => handlePreset('whatsapp')}
             >
-              Exclude WhatsApp + screenshots
+              {t('selection.preset.excludeWhatsapp')}
             </button>
             <button
               className={`selection-pill ${activePreset === 'camera' ? 'is-active' : ''}`}
               type="button"
               onClick={() => handlePreset('camera')}
             >
-              Camera focused
+              {t('selection.preset.cameraFocused')}
             </button>
             <button
               className={`selection-pill ${activePreset === 'custom' ? 'is-active' : ''}`}
               type="button"
               onClick={() => setActivePreset('custom')}
             >
-              Custom
+              {t('selection.preset.custom')}
             </button>
           </div>
-          <p className="page-summary-note">
-            Presets are only a starting point. The user can still toggle specific folders or files afterwards.
-          </p>
+          <p className="page-summary-note">{t('selection.presetsNote')}</p>
         </article>
       </div>
 
@@ -669,23 +680,23 @@ export const SelectionPage = () => {
         <section className="selection-main-column">
           <div className="page-card selection-toolbar">
             <div>
-              <p className="page-section-title">Selection mode</p>
-              <p className="page-summary-note">Directory mode is lighter. File mode shows the full real tree from the source folder.</p>
+              <p className="page-section-title">{t('selection.modeTitle')}</p>
+              <p className="page-summary-note">{t('selection.modeNote')}</p>
             </div>
-            <div className="selection-mode-toggle" role="tablist" aria-label="Selection mode">
+            <div className="selection-mode-toggle" role="tablist" aria-label={t('selection.modeAria')}>
               <button
                 className={`selection-mode-btn ${mode === 'files' ? 'is-active' : ''}`}
                 type="button"
                 onClick={() => setMode('files')}
               >
-                Files
+                {t('selection.files')}
               </button>
               <button
                 className={`selection-mode-btn ${mode === 'directories' ? 'is-active' : ''}`}
                 type="button"
                 onClick={() => setMode('directories')}
               >
-                Directories
+                {t('selection.directories')}
               </button>
             </div>
           </div>
@@ -693,25 +704,28 @@ export const SelectionPage = () => {
           <article className="page-card elevated selection-tree-card">
             <div className="selection-tree-header">
               <div>
-                <p className="page-section-title">Source tree</p>
+                <p className="page-section-title">{t('selection.sourceTree')}</p>
                 <p className="page-summary-note">
-                  Showing {mode === 'files' ? 'directories and files' : 'directories only'} from {sourceSelection?.name ?? 'the selected source'}.
+                  {t('selection.showingTree', {
+                    mode: mode === 'files' ? t('selection.mode.filesAndDirectories') : t('selection.mode.directoriesOnly'),
+                    source: sourceSelection?.name ?? t('selection.selectedSource')
+                  })}
                 </p>
               </div>
               <div className="selection-tree-key">
-                <span className="page-chip">Folder</span>
-                <span className="page-chip">File</span>
-                <span className="page-chip">Size</span>
+                <span className="page-chip">{t('selection.folder')}</span>
+                <span className="page-chip">{t('selection.file')}</span>
+                <span className="page-chip">{t('selection.size')}</span>
               </div>
             </div>
 
-            {scanState.status === 'loading' && <p className="empty-note">Scanning the real directory tree...</p>}
+            {scanState.status === 'loading' && <p className="empty-note">{t('selection.scanning')}</p>}
 
             {scanState.status === 'error' && <p className="error">{scanState.error}</p>}
 
-            {scanState.status === 'idle' && <p className="empty-note">Choose a source folder in Import to inspect its contents here.</p>}
+            {scanState.status === 'idle' && <p className="empty-note">{t('selection.idle')}</p>}
 
-            {scanState.status === 'ready' && rows.length === 0 && <p className="empty-note">No entries found in the selected source folder.</p>}
+            {scanState.status === 'ready' && rows.length === 0 && <p className="empty-note">{t('selection.empty')}</p>}
 
             {scanState.status === 'ready' && rows.length > 0 && (
               <ul className="selection-tree-list">
@@ -731,7 +745,7 @@ export const SelectionPage = () => {
                             <button
                               className="selection-tree-toggle"
                               type="button"
-                              aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${row.entry.name}`}
+                              aria-label={t(isExpanded ? 'selection.collapse' : 'selection.expand', { name: row.entry.name })}
                               onClick={() => toggleDirectoryExpansion(row.entry.path)}
                             >
                               {isExpanded ? '-' : '+'}
@@ -749,15 +763,15 @@ export const SelectionPage = () => {
                             <div className="selection-tree-copy">
                               <div className="selection-row-head">
                                 <strong>{row.entry.name}</strong>
-                                <span className="page-chip">Folder</span>
-                                {row.isExcluded && <span className="page-chip selection-state-chip">Excluded</span>}
+                                <span className="page-chip">{t('selection.folder')}</span>
+                                {row.isExcluded && <span className="page-chip selection-state-chip">{t('selection.excluded')}</span>}
                               </div>
                               <p className="selection-row-note">{formatPath(row.entry.path)}</p>
                             </div>
                           </label>
                         </div>
                         <div className="selection-tree-meta">
-                          <span>{row.entry.fileCount} files</span>
+                          <span>{t('selection.fileCount', { count: row.entry.fileCount })}</span>
                           <span>{formatBytes(row.entry.sizeBytes)}</span>
                         </div>
                       </li>
@@ -779,15 +793,15 @@ export const SelectionPage = () => {
                         <div className="selection-tree-copy">
                           <div className="selection-row-head">
                             <strong>{row.entry.name}</strong>
-                            <span className="page-chip">{row.entry.fileType}</span>
-                            {row.isExcluded && <span className="page-chip selection-state-chip">Excluded</span>}
+                            <span className="page-chip">{getFileTypeLabel(row.entry.fileType)}</span>
+                            {row.isExcluded && <span className="page-chip selection-state-chip">{t('selection.excluded')}</span>}
                           </div>
                           <p className="selection-row-note">{formatPath(row.entry.path)}</p>
                         </div>
                       </label>
                       <div className="selection-tree-meta">
                         <span>{formatBytes(row.entry.sizeBytes)}</span>
-                        <span>{row.parentExcluded ? 'Excluded by parent' : 'File-level toggle'}</span>
+                        <span>{row.parentExcluded ? t('selection.excludedByParent') : t('selection.fileLevelToggle')}</span>
                       </div>
                     </li>
                   );
@@ -799,11 +813,11 @@ export const SelectionPage = () => {
 
         <aside className="selection-side-column">
           <article className="page-card elevated selection-summary-card selection-status-card">
-            <p className="page-section-title">Selection status</p>
-            <p className="page-summary-note">Minimal status view focused on the two key ratios.</p>
+            <p className="page-section-title">{t('selection.statusTitle')}</p>
+            <p className="page-summary-note">{t('selection.statusNote')}</p>
 
             <div className="selection-ratio-card">
-              <p className="selection-hero-label">Size selected / total</p>
+              <p className="selection-hero-label">{t('selection.sizeRatio')}</p>
               <p className="selection-ratio-value">
                 {formatBytes(selectedBytes)} / {formatBytes(totalBytes)}
               </p>
@@ -813,7 +827,7 @@ export const SelectionPage = () => {
             </div>
 
             <div className="selection-ratio-card">
-              <p className="selection-hero-label">Files selected / total</p>
+              <p className="selection-hero-label">{t('selection.filesRatio')}</p>
               <p className="selection-ratio-value">
                 {selectedFiles} / {totalFiles}
               </p>
@@ -822,21 +836,21 @@ export const SelectionPage = () => {
               </div>
             </div>
 
-            {!summary && <p className="page-summary-note">Scan the source tree to populate the status ratios.</p>}
+            {!summary && <p className="page-summary-note">{t('selection.scanToPopulate')}</p>}
           </article>
         </aside>
       </div>
 
       <div className="page-footer-actions">
         <button className="btn btn-secondary" type="button" onClick={() => navigate('/import')}>
-          ← Back
+          {t('selection.back')}
         </button>
         <button
           className="btn btn-primary"
           type="button"
           onClick={() => navigate('/compression', { state: { from: '/selection' } })}
         >
-          Continue to Compression →
+          {t('selection.continue')}
         </button>
       </div>
     </div>

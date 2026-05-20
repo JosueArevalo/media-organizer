@@ -1,10 +1,12 @@
+import { useNavigate } from 'react-router-dom';
 import { FolderPickerCard } from '../components/FolderPickerCard';
 import { useFolderSelections } from '../hooks/useFolderSelections';
-import { useNavigate } from 'react-router-dom';
+import { useTranslation } from '../i18n';
 import { pickDirectoryRequest } from '../services/system-picker.service';
 import type { FolderSlot } from '../services/folder-selection.store';
 
 export const ImportPage = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const {
     sourceSelection,
@@ -34,7 +36,7 @@ export const ImportPage = () => {
   const handleBrowseFolder = async (slot: FolderSlot) => {
     const currentSelection = slot === 'source' ? sourceSelection : destinationSelection;
     const result = await pickDirectoryRequest({
-      title: slot === 'source' ? 'Choose source folder' : 'Choose destination folder',
+      title: slot === 'source' ? t('import.chooseSourceDialog') : t('import.chooseDestinationDialog'),
       initialPath: currentSelection?.path ?? undefined
     });
 
@@ -62,17 +64,15 @@ export const ImportPage = () => {
   return (
     <div className="page-stack">
       <div className="page-header">
-        <h2 className="page-title">Set up the source and destination</h2>
-        <p className="page-subtitle">
-          Pick the folder that contains your media and the destination that will receive the organized output.
-        </p>
+        <h2 className="page-title">{t('import.title')}</h2>
+        <p className="page-subtitle">{t('import.subtitle')}</p>
       </div>
 
       <div className="page-grid-2">
         <FolderPickerCard
           icon="📁"
-          title="Source folder"
-          description="Where your photos and videos are"
+          title={t('import.source.title')}
+          description={t('import.source.description')}
           selection={sourceSelection}
           isLoading={isLoading}
           onPathChange={updateSourceFolderPath}
@@ -82,8 +82,8 @@ export const ImportPage = () => {
 
         <FolderPickerCard
           icon="📂"
-          title="Destination folder"
-          description="Where to save organized files"
+          title={t('import.destination.title')}
+          description={t('import.destination.description')}
           selection={destinationSelection}
           isLoading={isLoading}
           onPathChange={updateDestinationFolderPath}
@@ -94,7 +94,7 @@ export const ImportPage = () => {
 
       <div className="page-footer-actions">
         <button className="btn btn-primary" type="button" onClick={handleContinue} disabled={!canContinue}>
-          Continue to Selection →
+          {t('import.continue')}
         </button>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { StatCard } from '../components/StatCard';
+import { useTranslation } from '../i18n';
 import {
   getBackendHealth,
   getDashboardStats,
@@ -11,6 +12,7 @@ import {
 } from '../services/dashboard.service';
 
 export const DashboardPage = () => {
+  const { t } = useTranslation();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [jobs, setJobs] = useState<RecentJob[]>([]);
   const [health, setHealth] = useState<BackendHealth | null>(null);
@@ -31,48 +33,45 @@ export const DashboardPage = () => {
   return (
     <div className="dashboard-grid">
       <section className="panel panel-highlight">
-        <p className="panel-kicker">Status</p>
-        <h2 className="panel-title">Welcome back</h2>
-        <p className="panel-description">
-          Here's an overview of your media organization system. You can start a new workflow or check current progress from the Compression page.
-        </p>
+        <p className="panel-kicker">{t('dashboard.status')}</p>
+        <h2 className="panel-title">{t('dashboard.welcome')}</h2>
+        <p className="panel-description">{t('dashboard.description')}</p>
         <div className="action-row">
           <Link to="/import" className="btn btn-primary">
-            🚀 Start new workflow
+            🚀 {t('dashboard.startWorkflow')}
           </Link>
         </div>
       </section>
 
-      <section className="stats-grid" aria-label="Mocked stats">
+      <section className="stats-grid" aria-label={t('dashboard.stats.aria')}>
         <StatCard
-          title="Media scanned"
+          title={t('dashboard.stats.mediaScanned')}
           value={stats ? `${stats.totalItems}` : '...'}
-          hint="Mock source from dashboard service"
+          hint={t('dashboard.stats.mediaScannedHint')}
         />
         <StatCard
-          title="Photos"
+          title={t('dashboard.stats.photos')}
           value={stats ? `${stats.photos}` : '...'}
-          hint="Includes camera + screenshots"
+          hint={t('dashboard.stats.photosHint')}
         />
         <StatCard
-          title="Videos"
+          title={t('dashboard.stats.videos')}
           value={stats ? `${stats.videos}` : '...'}
-          hint="Candidate items for HandBrake"
+          hint={t('dashboard.stats.videosHint')}
         />
         <StatCard
-          title="Estimated savings"
+          title={t('dashboard.stats.savings')}
           value={stats ? `${stats.estimatedSavingsMb} MB` : '...'}
-          hint="Potential compression win"
+          hint={t('dashboard.stats.savingsHint')}
         />
       </section>
 
       <section className="panel">
         <div className="panel-row">
           <div>
-            <p className="panel-kicker">Recent jobs</p>
-            <h3 className="panel-title small">Resume points (mocked)</h3>
+            <p className="panel-kicker">{t('dashboard.recentJobs')}</p>
+            <h3 className="panel-title small">{t('dashboard.resumePoints')}</h3>
           </div>
-          {/* Jobs page removed — controls available in Compression page */}
         </div>
 
         <ul className="job-list">
@@ -84,7 +83,7 @@ export const DashboardPage = () => {
               </div>
               <div className="job-right">
                 <p className="job-meta">{job.updatedAt}</p>
-                <div className="progress-bar" aria-label={`Progress ${job.progress}%`}>
+                <div className="progress-bar" aria-label={t('dashboard.progressLabel', { progress: job.progress })}>
                   <span style={{ width: `${job.progress}%` }} />
                 </div>
               </div>
@@ -94,34 +93,34 @@ export const DashboardPage = () => {
       </section>
 
       <section className="panel">
-        <p className="panel-kicker">Live backend signal</p>
-        <h3 className="panel-title small">Health probe</h3>
+        <p className="panel-kicker">{t('dashboard.backendSignal')}</p>
+        <h3 className="panel-title small">{t('dashboard.healthProbe')}</h3>
 
-        {healthError && <p className="error">Backend error: {healthError}</p>}
+        {healthError && <p className="error">{t('dashboard.backendError', { message: healthError })}</p>}
 
-        {!health && !healthError && <p className="muted">Checking backend health...</p>}
+        {!health && !healthError && <p className="muted">{t('dashboard.checkingHealth')}</p>}
 
         {health && (
           <div className="health-grid">
             <p>
-              <strong>Service</strong>
+              <strong>{t('dashboard.service')}</strong>
               <br />
               {health.service}
             </p>
             <p>
-              <strong>Status</strong>
+              <strong>{t('dashboard.healthStatus')}</strong>
               <br />
               {health.status}
             </p>
             <p>
-              <strong>Time</strong>
+              <strong>{t('dashboard.time')}</strong>
               <br />
               {health.time}
             </p>
             <p>
-              <strong>Migrations</strong>
+              <strong>{t('dashboard.migrations')}</strong>
               <br />
-              {health.appliedMigrations.length > 0 ? health.appliedMigrations.join(', ') : 'none in this run'}
+              {health.appliedMigrations.length > 0 ? health.appliedMigrations.join(', ') : t('dashboard.noMigrations')}
             </p>
           </div>
         )}

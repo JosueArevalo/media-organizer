@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
+import { useTranslation, type TranslationKey } from '../i18n';
 import {
   loadSourceSelectionScope,
   loadFolderSelectionHandle,
@@ -49,10 +50,10 @@ type MediaStatsState =
   | { status: 'ready'; data: MediaStats; error: null }
   | { status: 'error'; data: null; error: string };
 
-const IMAGE_PRESETS: Array<{ id: Exclude<ImagePresetId, 'custom'>; label: string; quality: number; note: string }> = [
-  { id: 'balanced', label: 'Balanced', quality: 80, note: 'Great default for mixed galleries' },
-  { id: 'high', label: 'High', quality: 90, note: 'Higher quality, lighter compression' },
-  { id: 'aggressive', label: 'Aggressive', quality: 70, note: 'Smaller files with stronger compression' }
+const IMAGE_PRESETS: Array<{ id: Exclude<ImagePresetId, 'custom'>; labelKey: TranslationKey; quality: number; noteKey: TranslationKey }> = [
+  { id: 'balanced', labelKey: 'compression.preset.balanced', quality: 80, noteKey: 'compression.preset.balancedNote' },
+  { id: 'high', labelKey: 'compression.preset.high', quality: 90, noteKey: 'compression.preset.highNote' },
+  { id: 'aggressive', labelKey: 'compression.preset.aggressive', quality: 70, noteKey: 'compression.preset.aggressiveNote' }
 ];
 
 const clampQuality = (value: number) => {
@@ -339,6 +340,7 @@ const isLikelyAbsolutePath = (value: string) => {
 };
 
 export const CompressionPage = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const { sourceSelection, destinationSelection, isLoading: areFolderSelectionsLoading } = useFolderSelections();
@@ -370,7 +372,11 @@ export const CompressionPage = () => {
 
   const activePreset = IMAGE_PRESETS.find((preset) => preset.id === imagePreset);
   const effectiveImageQuality = imagePreset === 'custom' ? customQuality : (activePreset?.quality ?? 80);
-  const selectedImageProfileLabel = imagePreset === 'custom' ? 'Custom' : (activePreset?.label ?? 'Balanced');
+  const selectedImageProfileLabel = imagePreset === 'custom'
+    ? t('compression.preset.custom')
+    : activePreset
+      ? t(activePreset.labelKey)
+      : t('compression.preset.balanced');
   const selectedVideoProfileLabel = videoPreset;
 
   useEffect(() => {
@@ -431,7 +437,7 @@ export const CompressionPage = () => {
         setVideoPresets([]);
         setVideoPresetsState({
           status: 'error',
-          error: error instanceof Error ? error.message : 'Could not load HandBrake presets.'
+          error: error instanceof Error ? error.message : t('compression.presetsError')
         });
       });
 
@@ -469,7 +475,7 @@ export const CompressionPage = () => {
         }
 
         if (!nextStats) {
-          throw new Error('No source tree data is available yet. Go back to Import and reselect the source folder.');
+          throw new Error(t('compression.noStatsError'));
         }
 
         if (!isActive) {
@@ -482,7 +488,7 @@ export const CompressionPage = () => {
           return;
         }
 
-        const message = error instanceof Error ? error.message : 'Could not load source media stats.';
+        const message = error instanceof Error ? error.message : t('compression.statsError');
         setMediaStatsState({ status: 'error', data: null, error: message });
       }
     };
@@ -520,8 +526,8 @@ export const CompressionPage = () => {
         if (status === 'failed' || status === 'cancelled') {
           const errorDetails = extractCompressionErrorDetails(session.checkpoint?.payloadJson ?? null);
           const message = errorDetails.failedCount > 0
-            ? `${errorDetails.completedCount} items completed, ${errorDetails.failedCount} items failed`
-            : `Compression session ended with status: ${status}`;
+            ? t('compression.failedItemsSummary', { completed: errorDetails.completedCount, failed: errorDetails.failedCount })
+            : t('compression.sessionEnded', { status });
 
           failCompressionSession(message);
           setBackendError(message);
@@ -534,7 +540,7 @@ export const CompressionPage = () => {
 
         resetCompressionSession();
         setIsStartingCompression(false);
-        setBackendError('Detected stale compression state and reset it. You can start a new compression session now.');
+        setBackendError(t('compression.staleReset'));
       }
     };
 
@@ -590,23 +596,23 @@ export const CompressionPage = () => {
     hasAvailableVideoPresets;
   const compressionSetupMessage = (() => {
     if (isCompressionSetupLoading) {
-      return 'Loading compression setup...';
+      return t('compression.loadingSetup');
     }
 
     if (!hasSelectedFolders) {
-      return 'Select Source and Destination folders in Import before starting compression.';
+      return t('compression.selectFolders');
     }
 
     if (!hasConfiguredEncoders) {
-      return 'Configure and save both encoder paths in Settings before starting compression.';
+      return t('compression.configureEncoders');
     }
 
     if (!hasAbsolutePaths) {
-      return 'Real backend compression needs absolute filesystem paths for Source and Destination.';
+      return t('compression.absolutePaths');
     }
 
     if (!hasAvailableVideoPresets) {
-      return 'Load a valid HandBrake preset before starting compression. Check video encoder settings if this persists.';
+      return t('compression.loadPreset');
     }
 
     return null;
@@ -623,10 +629,10 @@ export const CompressionPage = () => {
     if (!canStartRealCompression) {
       setBackendError(
         !hasConfiguredEncoders
-          ? 'Configure and save both encoder paths in Settings before starting compression.'
+          ? t('compression.configureEncoders')
           : !hasAvailableVideoPresets
-            ? 'Load a valid HandBrake preset before starting compression. Check video encoder settings if this persists.'
-          : 'Real compression requires absolute source and destination paths. Use fallback path mode in Import for now.'
+            ? t('compression.loadPreset')
+          : t('compression.realPathRequired')
       );
       return;
     }
@@ -682,24 +688,24 @@ export const CompressionPage = () => {
             // Fallback to session endpoint for error details
             const session = await getCompressionSessionRequest(started.session.id);
             const errorDetails = extractCompressionErrorDetails(session.checkpoint?.payloadJson ?? null);
-            let errorMessage = `Compression session ended with status: ${status}`;
+            let errorMessage = t('compression.sessionEnded', { status });
 
             if (errorDetails.failedCount > 0) {
-              errorMessage = `${errorDetails.completedCount} items completed, ${errorDetails.failedCount} items failed`;
+              errorMessage = t('compression.failedItemsSummary', { completed: errorDetails.completedCount, failed: errorDetails.failedCount });
 
               if (errorDetails.failedItems.length > 0) {
                 const failedReasons = errorDetails.failedItems
                   .slice(0, 3)
                   .map((item) => {
-                    const reason = item.error || 'Unknown error';
+                    const reason = item.error || t('compression.unknownError');
                     return `• ${item.source.split('/').pop() || item.source}: ${reason}`;
                   })
                   .join('\n');
 
-                errorMessage += `\n\nFailed items:\n${failedReasons}`;
+                errorMessage += `\n\n${t('compression.failedItems')}\n${failedReasons}`;
 
                 if (errorDetails.failedItems.length > 3) {
-                  errorMessage += `\n... and ${errorDetails.failedItems.length - 3} more`;
+                  errorMessage += `\n${t('compression.moreFailed', { count: errorDetails.failedItems.length - 3 })}`;
                 }
               }
             }
@@ -714,7 +720,7 @@ export const CompressionPage = () => {
             void poll();
           }, 1000);
         } catch (error) {
-          const message = error instanceof Error ? error.message : 'Failed to poll progress';
+          const message = error instanceof Error ? error.message : t('compression.pollError');
           console.error('[CompressionPage] polling error:', message);
           
           completionTimerRef.current = window.setTimeout(() => {
@@ -725,7 +731,7 @@ export const CompressionPage = () => {
 
       await poll();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not start compression session.';
+      const message = error instanceof Error ? error.message : t('compression.startError');
       failCompressionSession(message);
       setBackendError(message);
       setIsStartingCompression(false);
@@ -738,16 +744,14 @@ export const CompressionPage = () => {
   return (
     <div className="page-stack">
       <div className="page-header">
-        <h2 className="page-title">Optimize your media</h2>
-        <p className="page-subtitle">
-          Choose compression settings for images and videos, then launch the compression session from here. Grouping unlocks after processing completes.
-        </p>
+        <h2 className="page-title">{t('compression.title')}</h2>
+        <p className="page-subtitle">{t('compression.subtitle')}</p>
       </div>
 
       <div className="page-card">
-        <p className="page-section-title">Compression session</p>
+        <p className="page-section-title">{t('compression.session')}</p>
         <p className="page-summary-note">
-          Outputs will be written under the selected Destination folder{destinationPath ? ` (${destinationPath})` : ''}.
+          {t('compression.outputs', { destination: destinationPath ? ` (${destinationPath})` : '' })}
         </p>
         {!canStartRealCompression && compressionSetupMessage && (
           <p className="page-summary-note">
@@ -759,18 +763,20 @@ export const CompressionPage = () => {
             {backendError}
           </pre>
         )}
-        {compressionSessionState.status === 'idle' && <p className="page-summary-note">No compression session has been started yet.</p>}
-        {compressionSessionState.status === 'running' && <p className="page-summary-note">Compression is running. Grouping stays locked until it finishes.</p>}
-        {compressionSessionState.status === 'completed' && <p className="page-summary-note">Compression is complete. You can continue to grouping.</p>}
+        {compressionSessionState.status === 'idle' && <p className="page-summary-note">{t('compression.idle')}</p>}
+        {compressionSessionState.status === 'running' && <p className="page-summary-note">{t('compression.running')}</p>}
+        {compressionSessionState.status === 'completed' && <p className="page-summary-note">{t('compression.complete')}</p>}
         {compressionSessionState.status === 'failed' && (
           <div className="compression-error-section">
-            <p className="error">Compression failed: {compressionSessionState.errorMessage ?? 'Check backend logs and tool installation.'}</p>
+            <p className="error">
+              {t('compression.failed', { message: compressionSessionState.errorMessage ?? t('compression.failedFallback') })}
+            </p>
             <button
               className="btn btn-secondary"
               type="button"
               onClick={() => resetCompressionSession()}
             >
-              ↻ Try Again
+              ↻ {t('compression.tryAgain')}
             </button>
           </div>
         )}
@@ -778,24 +784,24 @@ export const CompressionPage = () => {
 
       {isCompressionRunning && progressData && (
         <div className="page-card compression-progress-card">
-          <p className="page-section-title">Compression Progress</p>
+          <p className="page-section-title">{t('compression.progressTitle')}</p>
           {progressData.total === 0 && estimatedTotalMediaCount > 0 && (
             <p className="page-summary-note">
-              Preparing {estimatedTotalMediaCount} files for compression...
+              {t('compression.preparingFiles', { count: estimatedTotalMediaCount })}
             </p>
           )}
           
           <div className="compression-progress-stats">
             <div className="progress-stat">
-              <span className="progress-label">Total:</span>
-              <span className="progress-value">{progressData.total > 0 ? progressData.total : estimatedTotalMediaCount} files</span>
+              <span className="progress-label">{t('compression.total')}</span>
+              <span className="progress-value">{progressData.total > 0 ? progressData.total : estimatedTotalMediaCount} {t('compression.files')}</span>
             </div>
             <div className="progress-stat">
-              <span className="progress-label">Completed:</span>
+              <span className="progress-label">{t('compression.completed')}</span>
               <span className="progress-value" style={{ color: '#10b981' }}>{progressData.completed}</span>
             </div>
             <div className="progress-stat">
-              <span className="progress-label">Failed:</span>
+              <span className="progress-label">{t('compression.failedLabel')}</span>
               <span className="progress-value" style={{ color: progressData.failed > 0 ? '#ef4444' : '#6b7280' }}>{progressData.failed}</span>
             </div>
           </div>
@@ -810,22 +816,24 @@ export const CompressionPage = () => {
           {progressData.total === 0 ? (
             progressData.status === 'completed' ? (
               <p className="page-summary-note" style={{ color: '#ef4444', fontWeight: 500 }}>
-                ⚠️ No files found for compression. Check that your source folder contains image/video files and they're not all excluded.
+                ⚠️ {t('compression.noFiles')}
               </p>
             ) : (
               <p className="page-summary-note">
-                Gathering files to compress{estimatedTotalMediaCount > 0 ? ` (${estimatedTotalMediaCount} detected)` : ''}...
+                {t('compression.gatheringFiles', {
+                  detected: estimatedTotalMediaCount > 0 ? t('compression.detected', { count: estimatedTotalMediaCount }) : ''
+                })}
               </p>
             )
           ) : (
             <p className="page-summary-note">
-              {progressData.completed}/{progressData.total} items processed
+              {t('compression.itemsProcessed', { completed: progressData.completed, total: progressData.total })}
             </p>
           )}
 
           {progressData.currentlyProcessing.length > 0 && (
             <div className="compression-currently-processing">
-              <p className="compression-processing-label">Processing:</p>
+              <p className="compression-processing-label">{t('compression.processing')}</p>
               <div className="compression-processing-list">
                 {progressData.currentlyProcessing.slice(0, 2).map((item) => (
                   <div key={item.id} className="compression-processing-item">
@@ -842,7 +850,7 @@ export const CompressionPage = () => {
               type="button"
               onClick={() => setLogsExpanded(!logsExpanded)}
             >
-              {logsExpanded ? '▼' : '▶'} Detailed Logs ({progressData.completed + progressData.failed} items)
+              {t('compression.detailedLogs', { icon: logsExpanded ? '▼' : '▶', count: progressData.completed + progressData.failed })}
             </button>
             
             {logsExpanded && (
@@ -859,7 +867,7 @@ export const CompressionPage = () => {
                     </div>
                   ))
                 ) : (
-                  <p className="page-summary-note">No items processed yet</p>
+                  <p className="page-summary-note">{t('compression.noItemsProcessed')}</p>
                 )}
               </div>
             )}
@@ -869,8 +877,8 @@ export const CompressionPage = () => {
 
       <div className="page-grid-2">
         <div className="page-card">
-          <h3 className="page-section-title">📸 Image compression</h3>
-          <p className="page-summary-note">mozjpeg quality (`cjpeg -quality`)</p>
+          <h3 className="page-section-title">📸 {t('compression.imageTitle')}</h3>
+          <p className="page-summary-note">{t('compression.imageNote')}</p>
 
           <div className="page-option-list">
             {IMAGE_PRESETS.map((preset) => (
@@ -882,7 +890,7 @@ export const CompressionPage = () => {
                   onChange={() => setImagePreset(preset.id)}
                 />
                 <span className="page-option-label">
-                  <strong>{preset.label}</strong> ({preset.quality}% quality) - {preset.note}
+                  <strong>{t(preset.labelKey)}</strong> {t('compression.qualityText', { quality: preset.quality, note: t(preset.noteKey) })}
                 </span>
               </label>
             ))}
@@ -890,14 +898,14 @@ export const CompressionPage = () => {
             <label className="page-option">
               <input type="radio" name="image" checked={imagePreset === 'custom'} onChange={() => setImagePreset('custom')} />
               <span className="page-option-label">
-                <strong>Custom</strong> (set your own quality)
+                <strong>{t('compression.preset.custom')}</strong> {t('compression.customQualityText')}
               </span>
             </label>
 
             {imagePreset === 'custom' && (
               <label className="compression-custom-quality" htmlFor="image-quality-custom">
                 <span className="page-option-label">
-                  <strong>Custom quality</strong> (0-100)
+                  <strong>{t('compression.customQuality')}</strong> {t('compression.customQualityRange')}
                 </span>
                 <input
                   id="image-quality-custom"
@@ -909,23 +917,23 @@ export const CompressionPage = () => {
                   value={customQuality}
                   onChange={(event) => setCustomQuality(clampQuality(Number(event.target.value)))}
                 />
-                <span className="page-summary-note">Example command: `cjpeg -quality {customQuality} -progressive -optimize ...`</span>
+                <span className="page-summary-note">{t('compression.exampleCommand', { quality: customQuality })}</span>
               </label>
             )}
           </div>
         </div>
 
         <div className="page-card">
-          <h3 className="page-section-title">🎬 Video compression</h3>
-          <p className="page-summary-note">HandBrake presets</p>
+          <h3 className="page-section-title">🎬 {t('compression.videoTitle')}</h3>
+          <p className="page-summary-note">{t('compression.videoNote')}</p>
 
           <div className="page-option-list">
             {videoPresetsState.status === 'idle' && (
-              <p className="page-summary-note">Configure and save the HandBrake command in Settings to load available presets.</p>
+              <p className="page-summary-note">{t('compression.configureHandBrake')}</p>
             )}
 
             {videoPresetsState.status === 'loading' && (
-              <p className="page-summary-note">Loading HandBrake presets...</p>
+              <p className="page-summary-note">{t('compression.loadingPresets')}</p>
             )}
 
             {videoPresetsState.status === 'error' && (
@@ -935,7 +943,7 @@ export const CompressionPage = () => {
             {videoPresetsState.status === 'ready' && hasAvailableVideoPresets && (
               <label className="compression-video-preset" htmlFor="video-preset-select">
                 <span className="page-option-label">
-                  <strong>Preset</strong> (uses HandBrake preset names directly)
+                  <strong>{t('compression.presetLabel')}</strong> {t('compression.presetHelp')}
                 </span>
                 <select
                   id="video-preset-select"
@@ -969,21 +977,30 @@ export const CompressionPage = () => {
       </div>
 
       <div className="page-card">
-        <p className="page-summary-label">Summary</p>
-        {mediaStatsState.status === 'loading' && <p className="page-summary-note">Reading real media stats from the selected source...</p>}
+        <p className="page-summary-label">{t('compression.summary')}</p>
+        {mediaStatsState.status === 'loading' && <p className="page-summary-note">{t('compression.readingStats')}</p>}
         {mediaStatsState.status === 'error' && <p className="error">{mediaStatsState.error}</p>}
-        {mediaStatsState.status === 'idle' && <p className="page-summary-note">Select a source folder in Import to see real summary metrics.</p>}
+        {mediaStatsState.status === 'idle' && <p className="page-summary-note">{t('compression.selectSourceForMetrics')}</p>}
         <div className="page-summary">
           {mediaStatsState.status === 'ready' && (
             <>
               <p>
-                📸 {mediaStatsState.data.imageCount} photos will be compressed with {selectedImageProfileLabel} profile (quality {effectiveImageQuality}, est. {formatBytes(imageEstimatedSavedBytes)} saved)
+                📸 {t('compression.imageSummary', {
+                  count: mediaStatsState.data.imageCount,
+                  profile: selectedImageProfileLabel,
+                  quality: effectiveImageQuality,
+                  saved: formatBytes(imageEstimatedSavedBytes)
+                })}
               </p>
               <p>
-                🎬 {mediaStatsState.data.videoCount} videos will be compressed with {selectedVideoProfileLabel} preset (est. {formatBytes(videoEstimatedSavedBytes)} saved)
+                🎬 {t('compression.videoSummary', {
+                  count: mediaStatsState.data.videoCount,
+                  profile: selectedVideoProfileLabel,
+                  saved: formatBytes(videoEstimatedSavedBytes)
+                })}
               </p>
               <p className="page-summary-note">
-                Estimates are heuristic and will be refined when pipeline execution metrics are connected.
+                {t('compression.estimatesNote')}
               </p>
             </>
           )}
@@ -992,7 +1009,7 @@ export const CompressionPage = () => {
 
       <div className="page-footer-actions">
         <button className="btn btn-secondary" type="button" onClick={handleBack}>
-          ← Back
+          {t('compression.back')}
         </button>
         <button
           className="btn btn-primary"
@@ -1001,15 +1018,15 @@ export const CompressionPage = () => {
           disabled={isCompressionRunning || isCompressionComplete || !canStartRealCompression}
         >
           {isCompressionRunning
-            ? 'Compression running...'
+            ? t('compression.runningButton')
             : isCompressionComplete
-              ? 'Compression completed'
+              ? t('compression.completedButton')
               : isCompressionSetupLoading
-                ? 'Loading setup...'
-                : 'Start Compression Session'}
+                ? t('compression.loadingSetupButton')
+                : t('compression.startButton')}
         </button>
         <button className="btn btn-ghost" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })} disabled={!isCompressionComplete}>
-          Continue to Grouping →
+          {t('compression.continueGrouping')}
         </button>
       </div>
     </div>

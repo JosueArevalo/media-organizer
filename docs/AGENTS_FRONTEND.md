@@ -24,6 +24,13 @@ services/ -> API calls
 - Keep active compression controls in the Compression page; do not introduce a separate Sessions screen
 - Make active compression state visible in the Compression page
 
+### Internationalization
+
+- Do not add new hardcoded visible UI copy in React components.
+- Use `apps/web/src/i18n` translation keys for labels, buttons, headings, helper text, placeholders, prompts, and app-owned status messages.
+- To add a language, create a locale dictionary file, register it in the i18n metadata, and keep the same key set as English.
+- Keep technical values and dynamic data outside dictionaries when they are not UI copy, including executable names, paths, user-provided names, backend/tool errors, and HandBrake preset names.
+
 ---
 
 ### Anti-patterns

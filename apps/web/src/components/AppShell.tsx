@@ -1,37 +1,31 @@
+import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Stepper, type StepConfig } from './Stepper';
 import { useTheme } from '../hooks/useTheme';
 import { useImportStepCompletion } from '../hooks/useImportStepCompletion';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
+import { useTranslation } from '../i18n';
 
 const workflowStepBlueprint = [
   {
     id: 'import',
     number: 1,
-    label: 'Import',
-    description: 'Choose source & destination',
     path: '/import'
   },
   {
     id: 'selection',
     number: 2,
-    label: 'Selection',
-    description: 'Include and exclude scope',
     path: '/selection'
   },
   {
     id: 'compression',
     number: 3,
-    label: 'Compression',
-    description: 'Set quality and size',
     path: '/compression'
   },
   {
     id: 'grouping',
     number: 4,
-    label: 'Grouping',
-    description: 'Organize the output',
     path: '/grouping'
   }
 ] as const;
@@ -39,14 +33,18 @@ const workflowStepBlueprint = [
 const AppShell = () => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const { currentLanguage, languages, locale, setLocale, t } = useTranslation();
+  const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const isImportStepComplete = useImportStepCompletion();
   const { sourceSelection, destinationSelection } = useFolderSelections();
   const isSelectionComplete = isImportStepComplete && Boolean(sourceSelection && destinationSelection);
   const compressionSessionState = useCompressionSessionState();
   const isCompressionComplete = compressionSessionState.status === 'completed';
 
-  const workflowSteps: StepConfig[] = workflowStepBlueprint.map((step, index) => ({
+  const workflowSteps: StepConfig[] = workflowStepBlueprint.map((step) => ({
     ...step,
+    label: t(`workflow.${step.id}.label`),
+    description: t(`workflow.${step.id}.description`),
     state: (() => {
       if (step.id === 'import') {
         return isImportStepComplete ? 'completed' : 'pending';
@@ -60,14 +58,12 @@ const AppShell = () => {
         return isCompressionComplete ? 'completed' : isSelectionComplete ? 'pending' : 'locked';
       }
 
-      // grouping
       return isCompressionComplete ? 'pending' : 'locked';
     })()
   }));
 
   const currentIndex = workflowStepBlueprint.findIndex((s) => s.path === location.pathname);
 
-  // If the user is on a later step, mark earlier unlocked steps as completed
   if (currentIndex > 0) {
     for (let i = 0; i < currentIndex; i++) {
       const step = workflowSteps[i];
@@ -84,71 +80,90 @@ const AppShell = () => {
   const currentStep = workflowSteps.find((s) => s.path === location.pathname);
   const isDashboard = location.pathname === '/dashboard';
   const headerTitles: Record<string, string> = {
-    import: 'Prepare your source folders',
-    selection: 'Select what gets compressed',
-    compression: 'Tune compression settings and launch the session',
-    grouping: 'Review the final structure'
+    import: t('shell.header.import'),
+    selection: t('shell.header.selection'),
+    compression: t('shell.header.compression'),
+    grouping: t('shell.header.grouping')
   };
 
   return (
     <div className="app-shell-zen">
-      {/* Left sidebar */}
       <aside className="sidebar-zen">
-        {/* Logo */}
         <div className="sidebar-header">
-          <p className="brand-name brand-name-primary">Media Organizer</p>
+          <p className="brand-name brand-name-primary">{t('app.brand')}</p>
         </div>
 
-        {/* Workflow stepper */}
         <section className="sidebar-section">
-          <p className="sidebar-label">Process</p>
+          <p className="sidebar-label">{t('shell.process')}</p>
           <Stepper steps={workflowSteps} />
         </section>
 
-        {/* Quick access */}
         <section className="sidebar-section sidebar-quick-access">
-          <p className="sidebar-label">Quick Access</p>
+          <p className="sidebar-label">{t('shell.quickAccess')}</p>
           <Link to="/dashboard" className={`quick-link ${isDashboard ? 'active' : ''}`}>
-            📊 Dashboard
+            📊 {t('shell.dashboard')}
           </Link>
           <Link to="/settings" className={`quick-link ${location.pathname === '/settings' ? 'active' : ''}`}>
-            🔧 Settings
+            🔧 {t('shell.settings')}
           </Link>
         </section>
 
-        {/* Settings footer */}
         <div className="sidebar-footer">
-          <button className="settings-btn language-btn" type="button" title="Toggle language (EN/ES)">
-            EN
-          </button>
+          <div className="language-selector">
+            <button
+              className="settings-btn language-btn"
+              type="button"
+              title={t('language.selector.title')}
+              aria-label={t('language.selector.label')}
+              aria-haspopup="menu"
+              aria-expanded={isLanguageMenuOpen}
+              onClick={() => setIsLanguageMenuOpen((current) => !current)}
+            >
+              <span aria-hidden="true">{currentLanguage.flag}</span>
+              <span>{currentLanguage.shortLabel}</span>
+            </button>
+            {isLanguageMenuOpen && (
+              <div className="language-menu" role="menu" aria-label={t('language.selector.label')}>
+                {languages.map((language) => (
+                  <button
+                    key={language.locale}
+                    className={`language-menu-item ${locale === language.locale ? 'is-active' : ''}`}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={locale === language.locale}
+                    onClick={() => {
+                      setLocale(language.locale);
+                      setIsLanguageMenuOpen(false);
+                    }}
+                  >
+                    <span aria-hidden="true">{language.flag}</span>
+                    <span>{language.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             className="settings-btn theme-btn"
             type="button"
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={theme === 'dark' ? t('theme.switchToLight') : t('theme.switchToDark')}
+            aria-label={theme === 'dark' ? t('theme.switchToLight') : t('theme.switchToDark')}
             aria-pressed={theme === 'dark'}
             onClick={toggleTheme}
           >
-            {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+            {theme === 'dark' ? `☀️ ${t('theme.light')}` : `🌙 ${t('theme.dark')}`}
           </button>
         </div>
       </aside>
 
-      {/* Main content */}
       <div className="main-zen">
-        {/* Header with context */}
         <header className="header-zen">
           <div>
-            {currentStep && (
-              <>
-                <p className="header-title">{headerTitles[currentStep.id] ?? `${currentStep.label} your media`}</p>
-              </>
-            )}
-            {isDashboard && <p className="header-title">Control panel</p>}
+            {currentStep && <p className="header-title">{headerTitles[currentStep.id] ?? `${currentStep.label} your media`}</p>}
+            {isDashboard && <p className="header-title">{t('shell.header.dashboard')}</p>}
           </div>
         </header>
 
-        {/* Content area */}
         <main className="content-zen">
           <Outlet />
         </main>
