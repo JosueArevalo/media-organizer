@@ -40,6 +40,7 @@ export type GroupingApplyResponse = {
   sessionId: string;
   status: 'completed' | 'failed';
   movedItems: number;
+  deletedItems?: number;
   failedItems: number;
 };
 
@@ -107,6 +108,13 @@ export const assignGroupingItemsRequest = async (sessionId: string, itemIds: str
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ itemIds, targetGroupLabel })
+  });
+
+export const deleteGroupingItemsRequest = async (sessionId: string, itemIds: string[]) =>
+  requestJson<GroupingWorkspace>(`/api/grouping/${sessionId}/items/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemIds })
   });
 
 export const applyGroupingWorkspaceRequest = async (sessionId: string) =>

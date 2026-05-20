@@ -14,6 +14,7 @@ import {
   createGroupingTemplateRequest,
   createGroupingWorkspaceRequest,
   deleteGroupingFolderRequest,
+  deleteGroupingItemsRequest,
   deleteGroupingTemplateRequest,
   getGroupingWorkspaceRequest,
   renameGroupingFolderRequest,
@@ -235,6 +236,25 @@ export const GroupingPage = () => {
     await moveItemsToFolder(Array.from(selectedIds), targetGroupLabel);
   };
 
+  const handleDeleteSelected = async () => {
+    if (!workspace || selectedIds.size === 0) return;
+
+    const confirmed = window.confirm(t('grouping.deleteSelectedConfirm'));
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const nextWorkspace = await deleteGroupingItemsRequest(workspace.sessionId, Array.from(selectedIds));
+      setWorkspace(nextWorkspace);
+      setSelectedIds(new Set());
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : t('grouping.deleteSelectedError'));
+    }
+  };
+
   const handleItemClick = (item: GroupingWorkspaceItem, event: MouseEvent) => {
     setSelectedIds((current) => {
       const next = new Set(event.shiftKey || event.ctrlKey || event.metaKey ? current : []);
@@ -359,24 +379,6 @@ export const GroupingPage = () => {
         <button className="btn btn-secondary" type="button" onClick={() => void handleCreateFolder()} disabled={!workspace}>
           {t('grouping.newFolder')}
         </button>
-        <select
-          className="grouping-select"
-          value=""
-          onChange={(event) => {
-            if (event.target.value) {
-              void handleMoveSelected(event.target.value);
-            }
-          }}
-          disabled={!workspace || selectedIds.size === 0}
-        >
-          <option value="">{t('grouping.moveSelected')}</option>
-          {workspace?.folders.map((folder) => (
-            <option key={folder.id} value={folder.label}>
-              {folder.label}
-            </option>
-          ))}
-        </select>
-        <span className="grouping-selection-count">{t('grouping.selected', { count: selectedItems.length })}</span>
       </div>
 
       <div className="grouping-layout">
@@ -448,6 +450,36 @@ export const GroupingPage = () => {
         </aside>
 
         <section className="grouping-main">
+          {selectedItems.length > 0 && (
+            <div className="grouping-selection-bar">
+              <strong>{t('grouping.selected', { count: selectedItems.length })}</strong>
+              <select
+                className="grouping-select"
+                value=""
+                onChange={(event) => {
+                  if (event.target.value) {
+                    void handleMoveSelected(event.target.value);
+                  }
+                }}
+                disabled={!workspace}
+              >
+                <option value="">{t('grouping.moveSelected')}</option>
+                {workspace?.folders.map((folder) => (
+                  <option key={folder.id} value={folder.label}>
+                    {folder.label}
+                  </option>
+                ))}
+              </select>
+              <button className="btn btn-danger-secondary" type="button" onClick={() => void handleDeleteSelected()}>
+                {t('grouping.delete')}
+              </button>
+              <span className="grouping-selection-divider" aria-hidden="true" />
+              <button className="btn btn-secondary" type="button" onClick={() => setSelectedIds(new Set())}>
+                {t('grouping.clearSelection')}
+              </button>
+            </div>
+          )}
+
           <div className="grouping-main-head">
             <div>
               <p className="page-section-title">{activeFolder?.label ?? t('grouping.allMedia')}</p>

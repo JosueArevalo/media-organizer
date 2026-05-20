@@ -153,6 +153,44 @@ test('folders can be created, renamed, assigned, deleted when empty, and applied
   assert.ok(afterApply?.items.every((item) => item.relativePath.startsWith(`Party${path.sep}`)));
 });
 
+test('deleteGroupingItems hides selected items and apply removes only destination copies', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['keep.jpg', 'delete.jpg']);
+  const db = getDb();
+  const { applyGroupingWorkspace, createGroupingWorkspace, deleteGroupingItems, getGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  const deletedItem = items.find((item) => item.relativePath === 'delete.jpg');
+  const keptItem = items.find((item) => item.relativePath === 'keep.jpg');
+
+  assert.ok(deletedItem);
+  assert.ok(keptItem);
+
+  const afterDelete = deleteGroupingItems(workspace.sessionId, [deletedItem.itemId]);
+
+  assert.equal(afterDelete?.items.some((item) => item.id === deletedItem.itemId), false);
+
+  const decision = db
+    .prepare('SELECT selected_for_output FROM item_decisions WHERE session_id = ? AND item_id = ?')
+    .get(compressionSessionId, deletedItem.itemId) as { selected_for_output: number };
+
+  assert.equal(decision.selected_for_output, 0);
+
+  const result = applyGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(result?.status, 'completed');
+  assert.equal(result?.deletedItems, 1);
+  assert.equal(fs.existsSync(path.join(outputDir, 'delete.jpg')), false);
+  assert.equal(fs.existsSync(path.join(sourceDir, 'delete.jpg')), true);
+  assert.equal(fs.existsSync(path.join(sourceDir, 'keep.jpg')), true);
+  assert.equal(fs.existsSync(path.join(outputDir, 'keep.jpg')), false);
+
+  const afterApply = getGroupingWorkspace(workspace.sessionId);
+  assert.equal(afterApply?.items.some((item) => item.id === deletedItem.itemId), false);
+  assert.equal(afterApply?.items.some((item) => item.id === keptItem.itemId), true);
+});
+
 test('applyGroupingWorkspace refuses paths outside the destination folder', async () => {
   const { compressionSessionId, items } = seedCompressionSession(['inside.jpg']);
   const db = getDb();
@@ -160,6 +198,21 @@ test('applyGroupingWorkspace refuses paths outside the destination folder', asyn
 
   const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
 
+  db.prepare('UPDATE media_items SET relative_path = ? WHERE id = ?').run(path.join('..', 'outside.jpg'), items[0].itemId);
+
+  assert.throws(() => applyGroupingWorkspace(workspace.sessionId), /outside the destination folder/);
+});
+
+test('applyGroupingWorkspace refuses to delete excluded items outside the destination folder', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['inside.jpg']);
+  const db = getDb();
+  const { applyGroupingWorkspace, createGroupingWorkspace, deleteGroupingItems } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+
+  deleteGroupingItems(workspace.sessionId, [items[0].itemId]);
   db.prepare('UPDATE media_items SET relative_path = ? WHERE id = ?').run(path.join('..', 'outside.jpg'), items[0].itemId);
 
   assert.throws(() => applyGroupingWorkspace(workspace.sessionId), /outside the destination folder/);

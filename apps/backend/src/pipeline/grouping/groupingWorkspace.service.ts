@@ -197,6 +197,31 @@ const listMediaRows = (sessionId: string): MediaRow[] => {
     .all(sessionId) as MediaRow[];
 };
 
+const listDeletedMediaRows = (sessionId: string): MediaRow[] => {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+        SELECT
+          mi.id,
+          mi.source_path,
+          mi.relative_path,
+          mi.media_type,
+          mi.size_bytes,
+          mi.capture_time,
+          decision.target_group_label
+        FROM media_items mi
+        INNER JOIN item_decisions decision
+          ON decision.session_id = mi.session_id
+          AND decision.item_id = mi.id
+        WHERE mi.session_id = ?
+          AND decision.selected_for_output = 0
+        ORDER BY mi.relative_path ASC
+      `
+    )
+    .all(sessionId) as MediaRow[];
+};
+
 const getFolderRows = (sessionId: string) => {
   const db = getDb();
   return db
@@ -432,7 +457,15 @@ export const deleteGroupingFolder = (sessionId: string, folderId: string) => {
 
   const sourceSessionId = getCompressionSourceSessionId(sessionId) ?? sessionId;
   const usage = db
-    .prepare('SELECT COUNT(*) AS total FROM item_decisions WHERE session_id = ? AND target_group_label = ?')
+    .prepare(
+      `
+        SELECT COUNT(*) AS total
+        FROM item_decisions
+        WHERE session_id = ?
+          AND target_group_label = ?
+          AND selected_for_output = 1
+      `
+    )
     .get(sourceSessionId, folder.label) as { total: number };
 
   if (usage.total > 0) {
@@ -451,6 +484,59 @@ export const assignGroupingItems = (sessionId: string, itemIds: string[], target
 
   for (const itemId of itemIds) {
     upsertDecisionLabel(sourceSessionId, itemId, safeLabel, true);
+  }
+
+  return getGroupingWorkspace(sessionId);
+};
+
+export const deleteGroupingItems = (sessionId: string, itemIds: string[]) => {
+  runMigrations();
+
+  if (itemIds.length === 0) {
+    return getGroupingWorkspace(sessionId);
+  }
+
+  const db = getDb();
+  const timestamp = nowIso();
+  const sourceSessionId = getCompressionSourceSessionId(sessionId) ?? sessionId;
+  const uniqueItemIds = Array.from(new Set(itemIds));
+
+  db.exec('BEGIN TRANSACTION');
+
+  try {
+    for (const itemId of uniqueItemIds) {
+      const item = db
+        .prepare('SELECT id FROM media_items WHERE session_id = ? AND id = ?')
+        .get(sourceSessionId, itemId) as { id: string } | undefined;
+
+      if (!item) {
+        continue;
+      }
+
+      db.prepare(
+        `
+          INSERT INTO item_decisions (
+            id,
+            session_id,
+            item_id,
+            selected_for_compression,
+            selected_for_output,
+            target_group_label,
+            user_overridden,
+            updated_at
+          ) VALUES (?, ?, ?, 0, 0, NULL, 1, ?)
+          ON CONFLICT(session_id, item_id) DO UPDATE SET
+            selected_for_output = 0,
+            user_overridden = 1,
+            updated_at = excluded.updated_at
+        `
+      ).run(randomUUID(), sourceSessionId, itemId, timestamp);
+    }
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
 
   return getGroupingWorkspace(sessionId);
@@ -588,7 +674,34 @@ export const applyGroupingWorkspace = (sessionId: string) => {
 
   const timestamp = nowIso();
   const moved: Array<{ itemId: string; from: string; to: string }> = [];
+  const deleted: Array<{ itemId: string; path: string }> = [];
   const sourceSessionId = workspace.compressionSessionId ?? sessionId;
+  const deletedRows = listDeletedMediaRows(sourceSessionId);
+
+  for (const row of deletedRows) {
+    const deletedPath = getOutputPath(workspace.outputDir, row.relative_path);
+
+    if (!isPathInside(workspace.outputDir, deletedPath)) {
+      throw new Error('Refusing to delete media outside the destination folder.');
+    }
+
+    if (fs.existsSync(deletedPath)) {
+      fs.rmSync(deletedPath, { force: true });
+      deleted.push({ itemId: row.id, path: deletedPath });
+    }
+
+    db.prepare(
+      `
+        INSERT INTO item_stage_status (id, session_id, item_id, stage, status, attempt_count, last_error, updated_at)
+        VALUES (?, ?, ?, 'group', 'skipped', 1, NULL, ?)
+        ON CONFLICT(session_id, item_id, stage) DO UPDATE SET
+          status = excluded.status,
+          attempt_count = item_stage_status.attempt_count + 1,
+          last_error = excluded.last_error,
+          updated_at = excluded.updated_at
+      `
+    ).run(randomUUID(), sessionId, row.id, timestamp);
+  }
 
   for (const item of workspace.items) {
     const label = item.targetGroupLabel ? sanitizeFolderLabel(item.targetGroupLabel) : 'Sin fecha';
@@ -674,6 +787,7 @@ export const applyGroupingWorkspace = (sessionId: string) => {
       },
       summary: {
         movedItems: moved.length,
+        deletedItems: deleted.length,
         failedItems: failed.total
       }
     }),
@@ -685,6 +799,7 @@ export const applyGroupingWorkspace = (sessionId: string) => {
     sessionId,
     status: failed.total > 0 ? 'failed' : 'completed',
     movedItems: moved.length,
+    deletedItems: deleted.length,
     failedItems: failed.total,
     sourceSessionId
   };
