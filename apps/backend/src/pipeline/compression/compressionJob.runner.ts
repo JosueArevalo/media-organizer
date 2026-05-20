@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { getDb } from '../../state/db.js';
 import type { MediaType } from '../../state/dto/state.types.js';
+import { upsertExecutionHistory } from '../../dashboard/dashboard.service.js';
 import { buildImageCompressionCommand, buildVideoCompressionCommand } from './compressionCommandBuilder.js';
 import { getCompressionSession } from './compressionJob.service.js';
 
@@ -38,6 +39,7 @@ type CompressionManifestData = {
   outputRoot: string;
   manifest: {
     sourceDir: string;
+    outputDir?: string;
     imageOutputDir: string;
     videoOutputDir: string;
     imageQuality: number;
@@ -46,6 +48,7 @@ type CompressionManifestData = {
     imageToolCommand: string;
     videoToolCommand: string;
     selectionScope?: SelectionScope;
+    createdAt?: string;
   };
 };
 
@@ -171,6 +174,39 @@ const parseManifestFromCheckpoint = (payloadJson: string | null) => {
     return null;
   }
 };
+
+const getSessionBasics = (sessionId: string) => {
+  const db = getDb();
+  return db
+    .prepare('SELECT name, source_dir, output_dir, created_at FROM sessions WHERE id = ?')
+    .get(sessionId) as { name: string | null; source_dir: string; output_dir: string; created_at: string } | undefined;
+};
+
+const getPersistedMediaCounts = (sessionId: string) => {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `
+        SELECT
+          SUM(CASE WHEN media_type = 'image' THEN 1 ELSE 0 END) AS image_items,
+          SUM(CASE WHEN media_type = 'video' THEN 1 ELSE 0 END) AS video_items
+        FROM media_items
+        WHERE session_id = ?
+      `
+    )
+    .get(sessionId) as { image_items: number | null; video_items: number | null };
+
+  return {
+    imageItems: row.image_items ?? 0,
+    videoItems: row.video_items ?? 0
+  };
+};
+
+const collectFailedItems = (...payloads: ScriptResultPayload[]) =>
+  payloads
+    .flatMap((payload) => payload.items)
+    .filter((item) => item.status === 'failed')
+    .map((item) => ({ source: item.source, error: item.error ?? null }));
 
 const isUnderExcludedAncestor = (
   absolutePath: string,
@@ -359,6 +395,7 @@ const updateSessionAndCheckpoint = (
   const db = getDb();
   const now = new Date().toISOString();
   const nextStatus = payload.failedCount > 0 ? 'failed' : 'completed';
+  const session = getSessionBasics(sessionId);
 
   db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(nextStatus, now, now, sessionId);
 
@@ -383,6 +420,27 @@ const updateSessionAndCheckpoint = (
     now,
     sessionId
   );
+
+  const mediaCounts = getPersistedMediaCounts(sessionId);
+  upsertExecutionHistory({
+    sessionId,
+    name: session?.name ?? null,
+    sourceDir: session?.source_dir ?? payload.manifest.sourceDir,
+    outputDir: session?.output_dir ?? payload.manifest.outputDir ?? '',
+    outputRoot: payload.outputRoot,
+    status: nextStatus,
+    startedAt: session?.created_at ?? payload.manifest.createdAt ?? now,
+    finishedAt: now,
+    updatedAt: now,
+    totalItems: payload.totalCount,
+    imageItems: mediaCounts.imageItems || payload.image.items.length,
+    videoItems: mediaCounts.videoItems || payload.video.items.length,
+    completedItems: payload.completedCount,
+    failedItems: payload.failedCount,
+    imageProfileLabel: payload.manifest.imageProfileLabel,
+    videoPresetLabel: payload.manifest.videoPresetLabel,
+    errorSummary: collectFailedItems(payload.image, payload.video)
+  });
 };
 
 const updateCompressionProgressCheckpoint = (
@@ -397,6 +455,7 @@ const updateCompressionProgressCheckpoint = (
 ) => {
   const db = getDb();
   const now = new Date().toISOString();
+  const session = getSessionBasics(sessionId);
 
   db.prepare(
     `
@@ -417,6 +476,27 @@ const updateCompressionProgressCheckpoint = (
     now,
     sessionId
   );
+
+  const mediaCounts = getPersistedMediaCounts(sessionId);
+  upsertExecutionHistory({
+    sessionId,
+    name: session?.name ?? null,
+    sourceDir: session?.source_dir ?? payload.manifest.sourceDir,
+    outputDir: session?.output_dir ?? payload.manifest.outputDir ?? '',
+    outputRoot: payload.outputRoot,
+    status: 'running',
+    startedAt: session?.created_at ?? payload.manifest.createdAt ?? now,
+    finishedAt: null,
+    updatedAt: now,
+    totalItems: payload.totalCount,
+    imageItems: mediaCounts.imageItems,
+    videoItems: mediaCounts.videoItems,
+    completedItems: payload.completedCount,
+    failedItems: payload.failedCount,
+    imageProfileLabel: payload.manifest.imageProfileLabel,
+    videoPresetLabel: payload.manifest.videoPresetLabel,
+    errorSummary: []
+  });
 };
 
 const persistCompressionItem = (

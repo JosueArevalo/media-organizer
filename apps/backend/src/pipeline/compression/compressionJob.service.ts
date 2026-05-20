@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../../state/db.js';
 import { runMigrations } from '../../state/migrations/runMigrations.js';
+import { upsertExecutionHistory } from '../../dashboard/dashboard.service.js';
 import type { SessionRecord, SessionCheckpointRecord } from '../../state/dto/state.types.js';
 import {
   buildCompressionImagesOutputDir,
@@ -177,6 +178,26 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
 
   const session = upsertSession(request, sessionId, timestamp);
   const checkpointRow = upsertCompressionCheckpoint(sessionId, outputRoot, manifest, timestamp);
+
+  upsertExecutionHistory({
+    sessionId,
+    name: session.name,
+    sourceDir: session.sourceDir,
+    outputDir: session.outputDir,
+    outputRoot,
+    status: 'running',
+    startedAt: session.createdAt,
+    finishedAt: null,
+    updatedAt: session.updatedAt,
+    totalItems: 0,
+    imageItems: 0,
+    videoItems: 0,
+    completedItems: 0,
+    failedItems: 0,
+    imageProfileLabel: manifest.imageProfileLabel,
+    videoPresetLabel: manifest.videoPresetLabel,
+    errorSummary: []
+  });
 
   const checkpoint: SessionCheckpointRecord = {
     id: checkpointRow.id,
@@ -369,4 +390,81 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
       status: item.status as 'completed' | 'failed'
     }))
   };
+};
+
+export const markCompressionSessionFailed = (sessionId: string, error: Error) => {
+  runMigrations();
+  const db = getDb();
+  const timestamp = nowIso();
+  const snapshot = getCompressionSession(sessionId);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run('failed', timestamp, timestamp, sessionId);
+
+  const checkpointPayload = snapshot.checkpoint?.payloadJson
+    ? (() => {
+        try {
+          return JSON.parse(snapshot.checkpoint?.payloadJson ?? '{}') as {
+            outputRoot?: string;
+            manifest?: {
+              imageProfileLabel?: string;
+              videoPresetLabel?: string;
+            };
+            totalCount?: number;
+            summary?: {
+              completedItems?: number;
+              failedItems?: number;
+            };
+          };
+        } catch {
+          return {};
+        }
+      })()
+    : {};
+
+  if (snapshot.checkpoint) {
+    db.prepare(
+      `
+        UPDATE session_checkpoints
+        SET payload_json = ?, updated_at = ?
+        WHERE session_id = ? AND stage = 'compress'
+      `
+    ).run(
+      JSON.stringify({
+        ...checkpointPayload,
+        summary: {
+          completedItems: checkpointPayload.summary?.completedItems ?? 0,
+          failedItems: Math.max(1, checkpointPayload.summary?.failedItems ?? 0)
+        },
+        fatalError: error.message
+      }),
+      timestamp,
+      sessionId
+    );
+  }
+
+  upsertExecutionHistory({
+    sessionId,
+    name: snapshot.session.name,
+    sourceDir: snapshot.session.sourceDir,
+    outputDir: snapshot.session.outputDir,
+    outputRoot: checkpointPayload.outputRoot ?? null,
+    status: 'failed',
+    startedAt: snapshot.session.createdAt,
+    finishedAt: timestamp,
+    updatedAt: timestamp,
+    totalItems: checkpointPayload.totalCount ?? 0,
+    imageItems: 0,
+    videoItems: 0,
+    completedItems: checkpointPayload.summary?.completedItems ?? 0,
+    failedItems: Math.max(1, checkpointPayload.summary?.failedItems ?? 0),
+    imageProfileLabel: checkpointPayload.manifest?.imageProfileLabel ?? null,
+    videoPresetLabel: checkpointPayload.manifest?.videoPresetLabel ?? null,
+    errorSummary: [{ source: snapshot.session.sourceDir, error: error.message }]
+  });
+
+  return getCompressionSession(sessionId);
 };

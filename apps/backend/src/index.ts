@@ -5,7 +5,8 @@ import path from 'node:path';
 import { readdir, rm, stat } from 'node:fs/promises';
 import { runMigrations } from './state/migrations/runMigrations.js';
 import { getDb, getDbPath } from './state/db.js';
-import { getCompressionSession, startCompressionSession, getCompressionProgress } from './pipeline/compression/compressionJob.service.js';
+import { deleteExecutionHistory, getDashboardSummary, listExecutionHistory } from './dashboard/dashboard.service.js';
+import { getCompressionSession, markCompressionSessionFailed, startCompressionSession, getCompressionProgress } from './pipeline/compression/compressionJob.service.js';
 import { executeCompressionSession } from './pipeline/compression/compressionJob.runner.js';
 import {
   getGroupingProgress,
@@ -196,6 +197,34 @@ const server = createServer((req, res) => {
     return;
   }
 
+  if (requestUrl.pathname === '/api/dashboard/summary' && req.method === 'GET') {
+    sendJson(res, 200, getDashboardSummary());
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/dashboard/executions' && req.method === 'GET') {
+    sendJson(res, 200, { executions: listExecutionHistory() });
+    return;
+  }
+
+  if (requestUrl.pathname.startsWith('/api/dashboard/executions/') && req.method === 'DELETE') {
+    const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
+    const executionId = pathSegments[3];
+
+    if (!executionId) {
+      sendJson(res, 400, { status: 'invalid_request' });
+      return;
+    }
+
+    if (!deleteExecutionHistory(executionId)) {
+      sendJson(res, 404, { status: 'not_found' });
+      return;
+    }
+
+    sendEmpty(res, 204);
+    return;
+  }
+
   if (requestUrl.pathname === '/api/compression/sessions' && req.method === 'POST') {
     void (async () => {
       try {
@@ -238,6 +267,7 @@ const server = createServer((req, res) => {
 
         void executeCompressionSession(result.session.id).catch((error) => {
           console.error(`[backend] compression session ${result.session.id} failed`, error);
+          markCompressionSessionFailed(result.session.id, error instanceof Error ? error : new Error('Compression session failed.'));
         });
 
         sendJson(res, 201, result);
