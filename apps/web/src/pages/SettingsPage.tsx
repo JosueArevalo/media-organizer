@@ -164,7 +164,13 @@ const SettingsPage = () => {
       await resetAllPersistentAppState();
 
       const response = await fetch('/api/system/maintenance/reset-persistent-state', {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          confirmation: 'RESET_STATE'
+        })
       });
 
       if (!response.ok) {
@@ -213,7 +219,8 @@ const SettingsPage = () => {
         },
         body: JSON.stringify({
           destinationPath,
-          sourcePath
+          sourcePath,
+          confirmation: 'CLEAR_DESTINATION'
         })
       });
 
