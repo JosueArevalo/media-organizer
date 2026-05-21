@@ -113,6 +113,18 @@ The backend is responsible for:
 - Service Layer → business logic and orchestration
 - Pipeline Layer → processing steps execution
 
+### Current Route Organization
+
+The backend still uses Node's native `http` server. Routes are being extracted from `apps/backend/src/index.ts` incrementally by domain:
+
+- `dashboard/dashboard.routes.ts` handles dashboard summary and execution history endpoints.
+- `pipeline/compression/compression.routes.ts` handles compression session endpoints.
+- `pipeline/source/sourceTree.routes.ts` handles source-tree scan endpoints.
+- `system/system.routes.ts` handles picker, maintenance and tool endpoints.
+- `index.ts` keeps server creation, local-access guards, health and the still-unextracted grouping routes.
+
+Do not introduce an HTTP framework unless the native router becomes a clear maintenance problem. New route modules should coordinate request/response only and keep domain behavior in services.
+
 ### V1 Workflow
 
 - Receive a source folder and a destination folder from the dashboard
