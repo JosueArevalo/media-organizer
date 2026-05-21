@@ -1,17 +1,46 @@
-export type DashboardStats = {
+export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type DashboardExecution = {
+  id: string;
+  sessionId: string;
+  groupingSessionId: string | null;
+  name: string | null;
+  sourceDir: string;
+  outputDir: string;
+  outputRoot: string | null;
+  status: ExecutionStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  updatedAt: string;
   totalItems: number;
-  photos: number;
-  videos: number;
-  estimatedSavingsMb: number;
-  pendingJobs: number;
+  imageItems: number;
+  videoItems: number;
+  completedItems: number;
+  failedItems: number;
+  imageProfileLabel: string | null;
+  videoPresetLabel: string | null;
+  errorSummary: Array<{ source: string; error: string | null }>;
+  groupingStatus: ExecutionStatus | null;
+  groupingTotalItems: number;
+  groupingCompletedItems: number;
+  groupingFailedItems: number;
 };
 
-export type RecentJob = {
-  id: string;
-  label: string;
-  stage: string;
-  progress: number;
-  updatedAt: string;
+export type DashboardSummary = {
+  currentExecution: DashboardExecution | null;
+  lastExecution: DashboardExecution | null;
+  totals: {
+    executions: number;
+    completedExecutions: number;
+    failedExecutions: number;
+    filesProcessed: number;
+    failedItems: number;
+  };
+  alerts: Array<{
+    id: string;
+    level: 'info' | 'warning' | 'error';
+    message: string;
+  }>;
 };
 
 export type BackendHealth = {
@@ -22,54 +51,34 @@ export type BackendHealth = {
   appliedMigrations: string[];
 };
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-export const getDashboardStats = async (): Promise<DashboardStats> => {
-  await delay(220);
-
-  return {
-    totalItems: 1342,
-    photos: 1180,
-    videos: 162,
-    estimatedSavingsMb: 2840,
-    pendingJobs: 3
-  };
+const readErrorBody = async (response: Response) => {
+  const body = await response.text();
+  return body || response.statusText;
 };
 
-export const getRecentJobs = async (): Promise<RecentJob[]> => {
-  await delay(280);
-
-  return [
-    {
-      id: 'job-2026-04-11',
-      label: 'Spring cleanup from Pixel backup',
-      stage: 'Selection reviewed',
-      progress: 64,
-      updatedAt: '2026-04-11 21:15'
-    },
-    {
-      id: 'job-2026-04-09',
-      label: 'WhatsApp export batch',
-      stage: 'Compression paused',
-      progress: 37,
-      updatedAt: '2026-04-09 19:42'
-    },
-    {
-      id: 'job-2026-04-01',
-      label: 'Family event videos',
-      stage: 'Ready to apply',
-      progress: 92,
-      updatedAt: '2026-04-01 23:04'
-    }
-  ];
-};
-
-export const getBackendHealth = async (): Promise<BackendHealth> => {
-  const response = await fetch('/api/health');
+const requestJson = async <T>(url: string): Promise<T> => {
+  const response = await fetch(url);
 
   if (!response.ok) {
-    throw new Error(`Backend responded with ${response.status}`);
+    throw new Error(`${response.status}: ${await readErrorBody(response)}`);
   }
 
-  return (await response.json()) as BackendHealth;
+  return (await response.json()) as T;
 };
+
+export const getDashboardSummary = async (): Promise<DashboardSummary> => requestJson<DashboardSummary>('/api/dashboard/summary');
+
+export const getDashboardExecutions = async (): Promise<DashboardExecution[]> => {
+  const response = await requestJson<{ executions: DashboardExecution[] }>('/api/dashboard/executions');
+  return response.executions;
+};
+
+export const deleteDashboardExecution = async (executionId: string): Promise<void> => {
+  const response = await fetch(`/api/dashboard/executions/${executionId}`, { method: 'DELETE' });
+
+  if (!response.ok) {
+    throw new Error(`${response.status}: ${await readErrorBody(response)}`);
+  }
+};
+
+export const getBackendHealth = async (): Promise<BackendHealth> => requestJson<BackendHealth>('/api/health');

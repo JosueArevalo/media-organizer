@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../../state/db.js';
 import { runMigrations } from '../../state/migrations/runMigrations.js';
+import { linkGroupingExecution } from '../../dashboard/dashboard.service.js';
 import type { SessionCheckpointRecord, SessionRecord } from '../../state/dto/state.types.js';
 import type {
   GroupingProgressData,
@@ -148,6 +149,10 @@ export const startGroupingSession = (request: GroupingSessionRequest): GroupingS
 
   const session = upsertSession(request, sessionId, timestamp);
   const checkpoint = upsertGroupingCheckpoint(sessionId, outputRoot, manifest, timestamp);
+
+  if (manifest.compressionSessionId) {
+    linkGroupingExecution(manifest.compressionSessionId, sessionId);
+  }
 
   return {
     session,

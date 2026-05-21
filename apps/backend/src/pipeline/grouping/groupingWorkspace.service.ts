@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from '../../state/db.js';
 import { runMigrations } from '../../state/migrations/runMigrations.js';
 import type { MediaType } from '../../state/dto/state.types.js';
+import { updateGroupingExecutionSummary } from '../../dashboard/dashboard.service.js';
 import { startGroupingSession } from './groupingJob.service.js';
 
 type FolderKind = 'proposed' | 'manual' | 'template';
@@ -765,9 +766,13 @@ export const applyGroupingWorkspace = (sessionId: string) => {
   const failed = db
     .prepare("SELECT COUNT(*) AS total FROM item_stage_status WHERE session_id = ? AND stage = 'group' AND status = 'failed'")
     .get(sessionId) as { total: number };
+  const completed = db
+    .prepare("SELECT COUNT(*) AS total FROM item_stage_status WHERE session_id = ? AND stage = 'group' AND status IN ('completed', 'skipped')")
+    .get(sessionId) as { total: number };
+  const nextStatus = failed.total > 0 ? 'failed' : 'completed';
 
   db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(
-    failed.total > 0 ? 'failed' : 'completed',
+    nextStatus,
     timestamp,
     timestamp,
     sessionId
@@ -795,9 +800,19 @@ export const applyGroupingWorkspace = (sessionId: string) => {
     sessionId
   );
 
+  updateGroupingExecutionSummary({
+    compressionSessionId: workspace.compressionSessionId,
+    groupingSessionId: sessionId,
+    status: nextStatus,
+    totalItems: workspace.items.length + deletedRows.length,
+    completedItems: completed.total,
+    failedItems: failed.total,
+    updatedAt: timestamp
+  });
+
   return {
     sessionId,
-    status: failed.total > 0 ? 'failed' : 'completed',
+    status: nextStatus,
     movedItems: moved.length,
     deletedItems: deleted.length,
     failedItems: failed.total,
