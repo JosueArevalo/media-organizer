@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { isAllowedLocalOrigin } from '../http/localAccess.js';
 
 export type SystemPickerFilter = {
   name: string;
@@ -73,18 +74,7 @@ const defaultDeps: PickerDeps = {
   runProcess: defaultRunProcess
 };
 
-export const isAllowedPickerOrigin = (origin: string | undefined) => {
-  if (!origin) {
-    return true;
-  }
-
-  try {
-    const originUrl = new URL(origin);
-    return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(originUrl.hostname);
-  } catch {
-    return false;
-  }
-};
+export const isAllowedPickerOrigin = isAllowedLocalOrigin;
 
 const trimSelectedPath = (value: string) => value.trim().replace(/^"|"$/g, '');
 
@@ -196,13 +186,24 @@ const toKdialogFileFilter = (filters: SystemPickerFilter[] | undefined) => {
 
 const windowsDirectoryScript = `
 Add-Type -AssemblyName System.Windows.Forms
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+$owner.Width = 1
+$owner.Height = 1
+$owner.Opacity = 0
+$owner.Show()
+$owner.Activate()
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = $env:PICKER_TITLE
 $dialog.ShowNewFolderButton = $true
 if ($env:PICKER_INITIAL_PATH -and [System.IO.Directory]::Exists($env:PICKER_INITIAL_PATH)) {
   $dialog.SelectedPath = $env:PICKER_INITIAL_PATH
 }
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+$result = $dialog.ShowDialog($owner)
+$owner.Close()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
   Write-Output $dialog.SelectedPath
   exit 0
@@ -212,6 +213,15 @@ exit 2
 
 const windowsFileScript = `
 Add-Type -AssemblyName System.Windows.Forms
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+$owner.Width = 1
+$owner.Height = 1
+$owner.Opacity = 0
+$owner.Show()
+$owner.Activate()
 $dialog = New-Object System.Windows.Forms.OpenFileDialog
 $dialog.Title = $env:PICKER_TITLE
 $dialog.Filter = $env:PICKER_FILTER
@@ -224,7 +234,9 @@ if ($env:PICKER_INITIAL_PATH) {
     $dialog.InitialDirectory = $env:PICKER_INITIAL_PATH
   }
 }
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+$result = $dialog.ShowDialog($owner)
+$owner.Close()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
   Write-Output $dialog.FileName
   exit 0

@@ -35,6 +35,15 @@ import { scanSourceTreeByPath } from './pipeline/source/sourceTreeScan.service.j
 import { resolveToolCommand } from './pipeline/compression/toolCommandResolver.js';
 import { listHandBrakePresets } from './pipeline/compression/handbrakePresets.service.js';
 import { isAllowedPickerOrigin, pickDirectory, pickFile, type SystemPickerFilter } from './system/systemPicker.service.js';
+import { validateClearDestinationRequest } from './system/maintenance.service.js';
+import {
+  getCorsHeaders,
+  hasDestructiveConfirmation,
+  isAllowedLocalHost,
+  isAllowedLocalOrigin,
+  MAX_JSON_BODY_BYTES,
+  RequestBodyTooLargeError
+} from './http/localAccess.js';
 
 const port = Number(process.env.PORT ?? 4000);
 
@@ -42,21 +51,36 @@ const appliedMigrations = runMigrations();
 
 const sendJson = (res: import('node:http').ServerResponse, status: number, payload: unknown) => {
   res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Range'
+    'Content-Type': 'application/json; charset=utf-8'
   });
   res.end(JSON.stringify(payload));
 };
 
 const sendEmpty = (res: import('node:http').ServerResponse, status: number) => {
-  res.writeHead(status, {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Range'
-  });
+  res.writeHead(status);
   res.end();
+};
+
+const sendCaughtError = (res: import('node:http').ServerResponse, error: unknown, fallbackMessage: string) => {
+  if (error instanceof RequestBodyTooLargeError) {
+    sendJson(res, 413, {
+      status: 'payload_too_large',
+      message: error.message
+    });
+    return;
+  }
+
+  sendJson(res, 500, {
+    status: 'error',
+    message: error instanceof Error ? error.message : fallbackMessage
+  });
+};
+
+const sendForbiddenLocalOnly = (res: import('node:http').ServerResponse) => {
+  sendJson(res, 403, {
+    status: 'forbidden',
+    message: 'This local-first API only accepts requests from localhost.'
+  });
 };
 
 const getMediaContentType = (filePath: string) => {
@@ -81,9 +105,6 @@ const streamMediaFile = (
   const stats = fs.statSync(filePath);
   const range = req.headers.range;
   const headersBase = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Range',
     'Accept-Ranges': 'bytes',
     'Content-Type': getMediaContentType(filePath)
   };
@@ -127,9 +148,17 @@ const streamMediaFile = (
 
 const readRequestJson = async (req: import('node:http').IncomingMessage): Promise<unknown> => {
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
 
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+
+    if (totalBytes > MAX_JSON_BODY_BYTES) {
+      throw new RequestBodyTooLargeError(MAX_JSON_BODY_BYTES);
+    }
+
+    chunks.push(buffer);
   }
 
   const raw = Buffer.concat(chunks).toString('utf8');
@@ -175,16 +204,26 @@ const clearDirectoryContents = async (directoryPath: string) => {
 
 const server = createServer((req, res) => {
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Range'
-    });
+    if (!isAllowedLocalOrigin(req.headers.origin) || !isAllowedLocalHost(req.headers.host)) {
+      sendForbiddenLocalOnly(res);
+      return;
+    }
+
+    res.writeHead(204, getCorsHeaders(req.headers.origin));
     res.end();
     return;
   }
 
   const requestUrl = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+
+  if (!isAllowedLocalHost(req.headers.host) || !isAllowedLocalOrigin(req.headers.origin)) {
+    sendForbiddenLocalOnly(res);
+    return;
+  }
+
+  for (const [header, value] of Object.entries(getCorsHeaders(req.headers.origin))) {
+    res.setHeader(header, value);
+  }
 
   if (requestUrl.pathname === '/api/health' && req.method === 'GET') {
     sendJson(res, 200, {
@@ -272,10 +311,7 @@ const server = createServer((req, res) => {
 
         sendJson(res, 201, result);
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Failed to start compression session.'
-        });
+        sendCaughtError(res, error, 'Failed to start compression session.');
       }
     })();
 
@@ -313,10 +349,7 @@ const server = createServer((req, res) => {
           })
         );
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Could not create grouping workspace.'
-        });
+        sendCaughtError(res, error, 'Could not create grouping workspace.');
       }
     })();
 
@@ -371,10 +404,7 @@ const server = createServer((req, res) => {
 
         sendJson(res, 404, { status: 'not_found' });
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Could not update grouping templates.'
-        });
+        sendCaughtError(res, error, 'Could not update grouping templates.');
       }
     })();
 
@@ -411,10 +441,7 @@ const server = createServer((req, res) => {
 
         sendJson(res, 201, result);
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Failed to start grouping session.'
-        });
+        sendCaughtError(res, error, 'Failed to start grouping session.');
       }
     })();
 
@@ -481,10 +508,7 @@ const server = createServer((req, res) => {
 
           sendJson(res, 201, createGroupingFolder(sessionId, body.label));
         } catch (error) {
-          sendJson(res, 500, {
-            status: 'error',
-            message: error instanceof Error ? error.message : 'Could not create folder.'
-          });
+          sendCaughtError(res, error, 'Could not create folder.');
         }
       })();
 
@@ -510,10 +534,7 @@ const server = createServer((req, res) => {
 
           sendJson(res, 200, folder);
         } catch (error) {
-          sendJson(res, 500, {
-            status: 'error',
-            message: error instanceof Error ? error.message : 'Could not rename folder.'
-          });
+          sendCaughtError(res, error, 'Could not rename folder.');
         }
       })();
 
@@ -550,10 +571,7 @@ const server = createServer((req, res) => {
 
           sendJson(res, 200, assignGroupingItems(sessionId, body.itemIds, body.targetGroupLabel));
         } catch (error) {
-          sendJson(res, 500, {
-            status: 'error',
-            message: error instanceof Error ? error.message : 'Could not assign items.'
-          });
+          sendCaughtError(res, error, 'Could not assign items.');
         }
       })();
 
@@ -572,10 +590,7 @@ const server = createServer((req, res) => {
 
           sendJson(res, 200, deleteGroupingItems(sessionId, body.itemIds));
         } catch (error) {
-          sendJson(res, 500, {
-            status: 'error',
-            message: error instanceof Error ? error.message : 'Could not delete items.'
-          });
+          sendCaughtError(res, error, 'Could not delete items.');
         }
       })();
 
@@ -675,10 +690,7 @@ const server = createServer((req, res) => {
         const tree = await scanSourceTreeByPath(body.sourcePath.trim());
         sendJson(res, 200, { tree });
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Could not scan source path.'
-        });
+        sendCaughtError(res, error, 'Could not scan source path.');
       }
     })();
 
@@ -704,10 +716,7 @@ const server = createServer((req, res) => {
 
         sendPickerResult(res, result);
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Could not open folder picker.'
-        });
+        sendCaughtError(res, error, 'Could not open folder picker.');
       }
     })();
 
@@ -738,10 +747,7 @@ const server = createServer((req, res) => {
 
         sendPickerResult(res, result);
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Could not open file picker.'
-        });
+        sendCaughtError(res, error, 'Could not open file picker.');
       }
     })();
 
@@ -751,27 +757,14 @@ const server = createServer((req, res) => {
   if (requestUrl.pathname === '/api/system/maintenance/clear-destination' && req.method === 'POST') {
     void (async () => {
       try {
-        const body = (await readRequestJson(req)) as { destinationPath?: string; sourcePath?: string } | null;
-        const destinationPath = body?.destinationPath?.trim();
-        const sourcePath = body?.sourcePath?.trim();
+        const validation = validateClearDestinationRequest(await readRequestJson(req));
 
-        if (!destinationPath || !path.isAbsolute(destinationPath)) {
-          sendJson(res, 400, { status: 'invalid_request', message: 'destinationPath must be an absolute path.' });
+        if (!validation.valid) {
+          sendJson(res, 400, validation);
           return;
         }
 
-        const destinationResolved = path.resolve(destinationPath);
-        const sourceResolved = sourcePath && path.isAbsolute(sourcePath) ? path.resolve(sourcePath) : null;
-
-        if (sourceResolved && sourceResolved === destinationResolved) {
-          sendJson(res, 400, {
-            status: 'invalid_request',
-            message: 'Destination path cannot be the same as source path.'
-          });
-          return;
-        }
-
-        const destinationStats = await stat(destinationResolved).catch(() => null);
+        const destinationStats = await stat(validation.destinationResolved).catch(() => null);
 
         if (!destinationStats || !destinationStats.isDirectory()) {
           sendJson(res, 400, {
@@ -781,18 +774,15 @@ const server = createServer((req, res) => {
           return;
         }
 
-        const deletedEntries = await clearDirectoryContents(destinationResolved);
+        const deletedEntries = await clearDirectoryContents(validation.destinationResolved);
 
         sendJson(res, 200, {
           status: 'ok',
-          destinationPath: destinationResolved,
+          destinationPath: validation.destinationResolved,
           deletedEntries
         });
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Could not clear destination folder.'
-        });
+        sendCaughtError(res, error, 'Could not clear destination folder.');
       }
     })();
 
@@ -802,6 +792,16 @@ const server = createServer((req, res) => {
   if (requestUrl.pathname === '/api/system/maintenance/reset-persistent-state' && req.method === 'POST') {
     void (async () => {
       try {
+        const body = await readRequestJson(req);
+
+        if (!hasDestructiveConfirmation(body, 'RESET_STATE')) {
+          sendJson(res, 400, {
+            status: 'invalid_request',
+            message: 'confirmation must be RESET_STATE.'
+          });
+          return;
+        }
+
         const db = getDb();
 
         db.exec(`
@@ -819,10 +819,7 @@ const server = createServer((req, res) => {
           cleared: ['sessions', 'media_items', 'item_decisions', 'item_stage_status', 'session_checkpoints']
         });
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Could not reset backend persistent state.'
-        });
+        sendCaughtError(res, error, 'Could not reset backend persistent state.');
       }
     })();
 
@@ -847,10 +844,7 @@ const server = createServer((req, res) => {
           resolvedPath
         });
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Could not resolve command path.'
-        });
+        sendCaughtError(res, error, 'Could not resolve command path.');
       }
     })();
 
@@ -868,10 +862,7 @@ const server = createServer((req, res) => {
           ...presets
         });
       } catch (error) {
-        sendJson(res, 500, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Could not load HandBrake presets.'
-        });
+        sendCaughtError(res, error, 'Could not load HandBrake presets.');
       }
     })();
 
