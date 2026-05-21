@@ -26,6 +26,7 @@ Current automated coverage includes:
 - Grouping workspace creation, assignment, deletion and apply behavior.
 - Path traversal protections for grouping apply/delete flows.
 - Dashboard execution history.
+- HTTP integration coverage for localhost-only security checks.
 - Native picker behavior and local-origin checks.
 - Frontend route smoke coverage and i18n key parity.
 
@@ -57,7 +58,6 @@ Implemented baseline:
 
 Remaining security work:
 
-- Add request-level integration tests around the running HTTP server.
 - Review whether the backend should bind explicitly to localhost in all environments.
 - Add a short threat-model section before supporting LAN access.
 - Keep filesystem mutation tests close to the services that perform the writes.
@@ -88,8 +88,8 @@ After the upgrade, run the dashboard locally and verify the main views manually 
 ## Prioritized Roadmap
 
 1. Keep the current tests green.
-2. Add HTTP integration tests for origin rejection, oversized body handling and destructive confirmation failures.
-3. Extract backend routes from `index.ts` by domain only after each domain has tests.
+2. Continue extracting backend routes from `index.ts` by domain after each domain has tests.
+3. Extract remaining grouping routes once the current route module pattern has settled.
 4. Update Vite in a dedicated dependency branch.
 5. Add more resume/idempotency tests for interrupted compression and grouping flows.
 6. Expand security review when the app moves beyond localhost-only use.

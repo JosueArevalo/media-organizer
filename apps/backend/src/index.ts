@@ -2,12 +2,10 @@ import { createServer } from 'node:http';
 import { pathToFileURL, URL } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
-import { readdir, rm, stat } from 'node:fs/promises';
 import { runMigrations } from './state/migrations/runMigrations.js';
-import { getDb, getDbPath } from './state/db.js';
-import { deleteExecutionHistory, getDashboardSummary, listExecutionHistory } from './dashboard/dashboard.service.js';
-import { getCompressionSession, markCompressionSessionFailed, startCompressionSession, getCompressionProgress } from './pipeline/compression/compressionJob.service.js';
-import { executeCompressionSession } from './pipeline/compression/compressionJob.runner.js';
+import { getDbPath } from './state/db.js';
+import { handleDashboardRoutes } from './dashboard/dashboard.routes.js';
+import { handleCompressionRoutes } from './pipeline/compression/compression.routes.js';
 import {
   getGroupingProgress,
   getGroupingSession,
@@ -31,48 +29,16 @@ import {
   renameGroupingFolder,
   updateGroupingTemplate
 } from './pipeline/grouping/groupingWorkspace.service.js';
-import { scanSourceTreeByPath } from './pipeline/source/sourceTreeScan.service.js';
-import { resolveToolCommand } from './pipeline/compression/toolCommandResolver.js';
-import { listHandBrakePresets } from './pipeline/compression/handbrakePresets.service.js';
-import { isAllowedPickerOrigin, pickDirectory, pickFile, type SystemPickerFilter } from './system/systemPicker.service.js';
-import { validateClearDestinationRequest } from './system/maintenance.service.js';
+import { handleSourceTreeRoutes } from './pipeline/source/sourceTree.routes.js';
+import { handleSystemRoutes } from './system/system.routes.js';
 import {
   getCorsHeaders,
-  hasDestructiveConfirmation,
   isAllowedLocalHost,
-  isAllowedLocalOrigin,
-  MAX_JSON_BODY_BYTES,
-  RequestBodyTooLargeError
+  isAllowedLocalOrigin
 } from './http/localAccess.js';
+import { readRequestJson, sendCaughtError, sendEmpty, sendJson } from './http/httpResponses.js';
 
 const port = Number(process.env.PORT ?? 4000);
-
-const sendJson = (res: import('node:http').ServerResponse, status: number, payload: unknown) => {
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8'
-  });
-  res.end(JSON.stringify(payload));
-};
-
-const sendEmpty = (res: import('node:http').ServerResponse, status: number) => {
-  res.writeHead(status);
-  res.end();
-};
-
-const sendCaughtError = (res: import('node:http').ServerResponse, error: unknown, fallbackMessage: string) => {
-  if (error instanceof RequestBodyTooLargeError) {
-    sendJson(res, 413, {
-      status: 'payload_too_large',
-      message: error.message
-    });
-    return;
-  }
-
-  sendJson(res, 500, {
-    status: 'error',
-    message: error instanceof Error ? error.message : fallbackMessage
-  });
-};
 
 const sendForbiddenLocalOnly = (res: import('node:http').ServerResponse) => {
   sendJson(res, 403, {
@@ -144,62 +110,6 @@ const streamMediaFile = (
   fs.createReadStream(filePath, { start, end }).pipe(res);
 };
 
-const readRequestJson = async (req: import('node:http').IncomingMessage): Promise<unknown> => {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-
-  for await (const chunk of req) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    totalBytes += buffer.length;
-
-    if (totalBytes > MAX_JSON_BODY_BYTES) {
-      throw new RequestBodyTooLargeError(MAX_JSON_BODY_BYTES);
-    }
-
-    chunks.push(buffer);
-  }
-
-  const raw = Buffer.concat(chunks).toString('utf8');
-
-  if (!raw.trim()) {
-    return null;
-  }
-
-  return JSON.parse(raw) as unknown;
-};
-
-const isPickerFilter = (filter: unknown): filter is SystemPickerFilter => {
-  if (!filter || typeof filter !== 'object') {
-    return false;
-  }
-
-  const candidate = filter as { name?: unknown; extensions?: unknown };
-  return (
-    typeof candidate.name === 'string' &&
-    Array.isArray(candidate.extensions) &&
-    candidate.extensions.every((extension) => typeof extension === 'string')
-  );
-};
-
-const sendPickerResult = (res: import('node:http').ServerResponse, result: Awaited<ReturnType<typeof pickDirectory>>) => {
-  if (result.status === 'unsupported') {
-    sendJson(res, 501, result);
-    return;
-  }
-
-  sendJson(res, 200, result);
-};
-
-const clearDirectoryContents = async (directoryPath: string) => {
-  const entries = await readdir(directoryPath, { withFileTypes: true });
-
-  await Promise.all(
-    entries.map((entry) => rm(path.join(directoryPath, entry.name), { recursive: true, force: true }))
-  );
-
-  return entries.length;
-};
-
 export const createBackendServer = (appliedMigrations = runMigrations()) => createServer((req, res) => {
   if (req.method === 'OPTIONS') {
     if (!isAllowedLocalOrigin(req.headers.origin) || !isAllowedLocalHost(req.headers.host)) {
@@ -234,85 +144,12 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
     return;
   }
 
-  if (requestUrl.pathname === '/api/dashboard/summary' && req.method === 'GET') {
-    sendJson(res, 200, getDashboardSummary());
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/dashboard/executions' && req.method === 'GET') {
-    sendJson(res, 200, { executions: listExecutionHistory() });
-    return;
-  }
-
-  if (requestUrl.pathname.startsWith('/api/dashboard/executions/') && req.method === 'DELETE') {
-    const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
-    const executionId = pathSegments[3];
-
-    if (!executionId) {
-      sendJson(res, 400, { status: 'invalid_request' });
-      return;
-    }
-
-    if (!deleteExecutionHistory(executionId)) {
-      sendJson(res, 404, { status: 'not_found' });
-      return;
-    }
-
-    sendEmpty(res, 204);
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/compression/sessions' && req.method === 'POST') {
-    void (async () => {
-      try {
-        const body = (await readRequestJson(req)) as
-          | {
-              name?: string;
-              sourceDir?: string;
-              outputDir?: string;
-              imageQuality?: number;
-              imageProfileLabel?: string;
-              videoPresetLabel?: string;
-              imageToolCommand?: string;
-              videoToolCommand?: string;
-              selectionScope?: {
-                excludedDirectories: string[];
-                excludedFiles: string[];
-                includedDirectories: string[];
-                includedFiles: string[];
-                updatedAt: number;
-              } | null;
-            }
-          | null;
-
-        if (!body?.sourceDir || !body?.outputDir || typeof body.imageQuality !== 'number' || !body.imageProfileLabel || !body.videoPresetLabel) {
-          sendJson(res, 400, { status: 'invalid_request' });
-          return;
-        }
-
-        const result = startCompressionSession({
-          name: body.name,
-          sourceDir: body.sourceDir,
-          outputDir: body.outputDir,
-          imageQuality: body.imageQuality,
-          imageProfileLabel: body.imageProfileLabel,
-          videoPresetLabel: body.videoPresetLabel,
-          imageToolCommand: body.imageToolCommand,
-          videoToolCommand: body.videoToolCommand,
-          selectionScope: body.selectionScope ?? undefined
-        });
-
-        void executeCompressionSession(result.session.id).catch((error) => {
-          console.error(`[backend] compression session ${result.session.id} failed`, error);
-          markCompressionSessionFailed(result.session.id, error instanceof Error ? error : new Error('Compression session failed.'));
-        });
-
-        sendJson(res, 201, result);
-      } catch (error) {
-        sendCaughtError(res, error, 'Failed to start compression session.');
-      }
-    })();
-
+  if (
+    handleDashboardRoutes({ req, res, requestUrl }) ||
+    handleCompressionRoutes({ req, res, requestUrl }) ||
+    handleSourceTreeRoutes({ req, res, requestUrl }) ||
+    handleSystemRoutes({ req, res, requestUrl })
+  ) {
     return;
   }
 
@@ -672,233 +509,6 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
     }
 
     sendJson(res, 404, { status: 'not_found' });
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/source-tree/scan' && req.method === 'POST') {
-    void (async () => {
-      try {
-        const body = (await readRequestJson(req)) as { sourcePath?: string } | null;
-
-        if (!body?.sourcePath || !body.sourcePath.trim()) {
-          sendJson(res, 400, { status: 'invalid_request', message: 'sourcePath is required.' });
-          return;
-        }
-
-        const tree = await scanSourceTreeByPath(body.sourcePath.trim());
-        sendJson(res, 200, { tree });
-      } catch (error) {
-        sendCaughtError(res, error, 'Could not scan source path.');
-      }
-    })();
-
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/system/picker/directory' && req.method === 'POST') {
-    void (async () => {
-      try {
-        if (!isAllowedPickerOrigin(req.headers.origin)) {
-          sendJson(res, 403, {
-            status: 'forbidden',
-            message: 'Native pickers are only available to the local app.'
-          });
-          return;
-        }
-
-        const body = (await readRequestJson(req)) as { title?: unknown; initialPath?: unknown } | null;
-        const result = await pickDirectory({
-          title: typeof body?.title === 'string' ? body.title : undefined,
-          initialPath: typeof body?.initialPath === 'string' ? body.initialPath : undefined
-        });
-
-        sendPickerResult(res, result);
-      } catch (error) {
-        sendCaughtError(res, error, 'Could not open folder picker.');
-      }
-    })();
-
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/system/picker/file' && req.method === 'POST') {
-    void (async () => {
-      try {
-        if (!isAllowedPickerOrigin(req.headers.origin)) {
-          sendJson(res, 403, {
-            status: 'forbidden',
-            message: 'Native pickers are only available to the local app.'
-          });
-          return;
-        }
-
-        const body = (await readRequestJson(req)) as {
-          title?: unknown;
-          initialPath?: unknown;
-          filters?: unknown;
-        } | null;
-        const result = await pickFile({
-          title: typeof body?.title === 'string' ? body.title : undefined,
-          initialPath: typeof body?.initialPath === 'string' ? body.initialPath : undefined,
-          filters: Array.isArray(body?.filters) ? body.filters.filter(isPickerFilter) : undefined
-        });
-
-        sendPickerResult(res, result);
-      } catch (error) {
-        sendCaughtError(res, error, 'Could not open file picker.');
-      }
-    })();
-
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/system/maintenance/clear-destination' && req.method === 'POST') {
-    void (async () => {
-      try {
-        const validation = validateClearDestinationRequest(await readRequestJson(req));
-
-        if (!validation.valid) {
-          sendJson(res, 400, validation);
-          return;
-        }
-
-        const destinationStats = await stat(validation.destinationResolved).catch(() => null);
-
-        if (!destinationStats || !destinationStats.isDirectory()) {
-          sendJson(res, 400, {
-            status: 'invalid_request',
-            message: 'Destination path was not found or is not a directory.'
-          });
-          return;
-        }
-
-        const deletedEntries = await clearDirectoryContents(validation.destinationResolved);
-
-        sendJson(res, 200, {
-          status: 'ok',
-          destinationPath: validation.destinationResolved,
-          deletedEntries
-        });
-      } catch (error) {
-        sendCaughtError(res, error, 'Could not clear destination folder.');
-      }
-    })();
-
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/system/maintenance/reset-persistent-state' && req.method === 'POST') {
-    void (async () => {
-      try {
-        const body = await readRequestJson(req);
-
-        if (!hasDestructiveConfirmation(body, 'RESET_STATE')) {
-          sendJson(res, 400, {
-            status: 'invalid_request',
-            message: 'confirmation must be RESET_STATE.'
-          });
-          return;
-        }
-
-        const db = getDb();
-
-        db.exec(`
-          BEGIN TRANSACTION;
-          DELETE FROM session_checkpoints;
-          DELETE FROM item_stage_status;
-          DELETE FROM item_decisions;
-          DELETE FROM media_items;
-          DELETE FROM sessions;
-          COMMIT;
-        `);
-
-        sendJson(res, 200, {
-          status: 'ok',
-          cleared: ['sessions', 'media_items', 'item_decisions', 'item_stage_status', 'session_checkpoints']
-        });
-      } catch (error) {
-        sendCaughtError(res, error, 'Could not reset backend persistent state.');
-      }
-    })();
-
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/system/maintenance/resolve-command' && req.method === 'POST') {
-    void (async () => {
-      try {
-        const body = (await readRequestJson(req)) as { command?: string } | null;
-        const command = body?.command?.trim() ?? '';
-
-        if (!command) {
-          sendJson(res, 400, { status: 'invalid_request', message: 'command is required.' });
-          return;
-        }
-
-        const resolvedPath = resolveToolCommand(command);
-        sendJson(res, 200, {
-          status: 'ok',
-          command,
-          resolvedPath
-        });
-      } catch (error) {
-        sendCaughtError(res, error, 'Could not resolve command path.');
-      }
-    })();
-
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/system/tools/handbrake/presets' && req.method === 'POST') {
-    void (async () => {
-      try {
-        const body = (await readRequestJson(req)) as { command?: string } | null;
-        const presets = await listHandBrakePresets(body?.command);
-
-        sendJson(res, 200, {
-          status: 'ok',
-          ...presets
-        });
-      } catch (error) {
-        sendCaughtError(res, error, 'Could not load HandBrake presets.');
-      }
-    })();
-
-    return;
-  }
-
-  if (requestUrl.pathname.startsWith('/api/compression/sessions/') && req.method === 'GET') {
-    const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
-    const sessionId = pathSegments[3];
-    const subPath = pathSegments[4];
-
-    if (!sessionId) {
-      sendJson(res, 400, { status: 'invalid_request' });
-      return;
-    }
-
-    // Check if this is a progress request
-    if (subPath === 'progress') {
-      const progress = getCompressionProgress(sessionId);
-
-      if (!progress) {
-        sendJson(res, 404, { status: 'not_found' });
-        return;
-      }
-
-      sendJson(res, 200, progress);
-      return;
-    }
-
-    // Otherwise, get the session
-    const session = getCompressionSession(sessionId);
-
-    if (!session) {
-      sendJson(res, 404, { status: 'not_found' });
-      return;
-    }
-
-    sendJson(res, 200, session);
     return;
   }
 
