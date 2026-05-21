@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { URL } from 'node:url';
+import { pathToFileURL, URL } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readdir, rm, stat } from 'node:fs/promises';
@@ -46,8 +46,6 @@ import {
 } from './http/localAccess.js';
 
 const port = Number(process.env.PORT ?? 4000);
-
-const appliedMigrations = runMigrations();
 
 const sendJson = (res: import('node:http').ServerResponse, status: number, payload: unknown) => {
   res.writeHead(status, {
@@ -202,7 +200,7 @@ const clearDirectoryContents = async (directoryPath: string) => {
   return entries.length;
 };
 
-const server = createServer((req, res) => {
+export const createBackendServer = (appliedMigrations = runMigrations()) => createServer((req, res) => {
   if (req.method === 'OPTIONS') {
     if (!isAllowedLocalOrigin(req.headers.origin) || !isAllowedLocalHost(req.headers.host)) {
       sendForbiddenLocalOnly(res);
@@ -909,6 +907,12 @@ const server = createServer((req, res) => {
   });
 });
 
-server.listen(port, () => {
-  console.log(`[backend] running at http://localhost:${port}`);
-});
+const isMainModule = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
+
+if (isMainModule) {
+  const server = createBackendServer();
+
+  server.listen(port, () => {
+    console.log(`[backend] running at http://localhost:${port}`);
+  });
+}
