@@ -22,6 +22,8 @@ export type CompressionSessionRequest = {
   videoPresetLabel: string;
   imageToolCommand?: string;
   videoToolCommand?: string;
+  imageMagickCommand?: string;
+  exifToolCommand?: string;
   selectionScope?: {
     excludedDirectories: string[];
     excludedFiles: string[];
@@ -43,6 +45,8 @@ export type CompressionSessionManifest = {
   videoPresetLabel: string;
   imageToolCommand: string;
   videoToolCommand: string;
+  imageMagickCommand: string;
+  exifToolCommand: string;
   selectionScope: {
     excludedDirectories: string[];
     excludedFiles: string[];
@@ -145,8 +149,14 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
   const manifestPath = buildCompressionSessionManifestPath(outputRoot);
   const imageCommandFromRequest = request.imageToolCommand?.trim() || 'cjpeg';
   const videoCommandFromRequest = request.videoToolCommand?.trim() || 'HandBrakeCLI';
+  const imageMagickCommandFromRequest = request.imageMagickCommand?.trim() || 'magick';
+  const exifToolCommandFromRequest = request.exifToolCommand?.trim() || '';
   const resolvedImageCommand = resolveToolCommand(imageCommandFromRequest) ?? imageCommandFromRequest;
   const resolvedVideoCommand = resolveToolCommand(videoCommandFromRequest) ?? videoCommandFromRequest;
+  const resolvedImageMagickCommand = resolveToolCommand(imageMagickCommandFromRequest) ?? imageMagickCommandFromRequest;
+  const resolvedExifToolCommand = exifToolCommandFromRequest
+    ? resolveToolCommand(exifToolCommandFromRequest) ?? exifToolCommandFromRequest
+    : '';
   const selectionScope = request.selectionScope ?? {
     excludedDirectories: [],
     excludedFiles: [],
@@ -166,6 +176,8 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
     videoPresetLabel: request.videoPresetLabel,
     imageToolCommand: resolvedImageCommand,
     videoToolCommand: resolvedVideoCommand,
+    imageMagickCommand: resolvedImageMagickCommand,
+    exifToolCommand: resolvedExifToolCommand,
     selectionScope,
     createdAt: timestamp
   };

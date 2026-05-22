@@ -1,6 +1,8 @@
 export type EncoderSettingsSnapshot = {
   imageToolCommand: string;
   videoToolCommand: string;
+  imageMagickCommand: string;
+  exifToolCommand: string;
   updatedAt: number;
 };
 
@@ -10,7 +12,17 @@ const STORAGE_EVENT_TYPE = 'encoderSettingsChanged';
 const getDefaultSettings = (): EncoderSettingsSnapshot => ({
   imageToolCommand: '',
   videoToolCommand: '',
+  imageMagickCommand: '',
+  exifToolCommand: '',
   updatedAt: 0
+});
+
+const normalizeSettings = (value: Partial<EncoderSettingsSnapshot> | null): EncoderSettingsSnapshot => ({
+  imageToolCommand: value?.imageToolCommand ?? '',
+  videoToolCommand: value?.videoToolCommand ?? '',
+  imageMagickCommand: value?.imageMagickCommand ?? '',
+  exifToolCommand: value?.exifToolCommand ?? '',
+  updatedAt: value?.updatedAt ?? 0
 });
 
 export const loadEncoderSettings = async (): Promise<EncoderSettingsSnapshot> => {
@@ -19,7 +31,7 @@ export const loadEncoderSettings = async (): Promise<EncoderSettingsSnapshot> =>
     if (!stored) {
       return getDefaultSettings();
     }
-    return JSON.parse(stored) as EncoderSettingsSnapshot;
+    return normalizeSettings(JSON.parse(stored) as Partial<EncoderSettingsSnapshot>);
   } catch {
     console.warn('Failed to load encoder settings from localStorage');
     return getDefaultSettings();

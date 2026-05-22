@@ -7,6 +7,8 @@ export type CompressionSessionRequest = {
   videoPresetLabel: string;
   imageToolCommand?: string;
   videoToolCommand?: string;
+  imageMagickCommand?: string;
+  exifToolCommand?: string;
   selectionScope?: {
     excludedDirectories: string[];
     excludedFiles: string[];

@@ -42,9 +42,16 @@ test('startCompressionSession creates a resumable session and output scaffold', 
   assert.ok(fs.existsSync(result.outputRoot));
   assert.ok(fs.existsSync(result.manifestPath));
 
-  const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8')) as { imageToolCommand: string; videoToolCommand: string };
+  const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8')) as {
+    imageToolCommand: string;
+    videoToolCommand: string;
+    imageMagickCommand: string;
+    exifToolCommand: string;
+  };
   assert.equal(manifest.imageToolCommand, 'cjpeg');
   assert.equal(manifest.videoToolCommand, 'HandBrakeCLI');
+  assert.equal(manifest.imageMagickCommand, 'magick');
+  assert.equal(manifest.exifToolCommand, '');
 
   const persisted = getCompressionSession(result.session.id);
   assert.ok(persisted);

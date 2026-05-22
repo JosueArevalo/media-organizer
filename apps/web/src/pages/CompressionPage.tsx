@@ -33,6 +33,9 @@ type VideoPresetsState =
 type MediaStats = {
   imageCount: number;
   imageBytes: number;
+  jpegImageCount: number;
+  heicImageCount: number;
+  copyOnlyImageCount: number;
   videoCount: number;
   videoBytes: number;
 };
@@ -116,8 +119,37 @@ const getMediaKind = (fileName: string, mimeType = '', fileType = ''): 'image' |
 const createEmptyMediaStats = (): MediaStats => ({
   imageCount: 0,
   imageBytes: 0,
+  jpegImageCount: 0,
+  heicImageCount: 0,
+  copyOnlyImageCount: 0,
   videoCount: 0,
   videoBytes: 0
+});
+
+const getFileExtension = (fileName: string) => fileName.split('.').pop()?.toLowerCase() ?? '';
+
+const createImageStats = (fileName: string, sizeBytes: number): MediaStats => {
+  const extension = getFileExtension(fileName);
+
+  return {
+    imageCount: 1,
+    imageBytes: sizeBytes,
+    jpegImageCount: ['jpg', 'jpeg'].includes(extension) ? 1 : 0,
+    heicImageCount: ['heic', 'heif'].includes(extension) ? 1 : 0,
+    copyOnlyImageCount: ['png', 'gif', 'webp'].includes(extension) ? 1 : 0,
+    videoCount: 0,
+    videoBytes: 0
+  };
+};
+
+const createVideoStats = (sizeBytes: number): MediaStats => ({
+  imageCount: 0,
+  imageBytes: 0,
+  jpegImageCount: 0,
+  heicImageCount: 0,
+  copyOnlyImageCount: 0,
+  videoCount: 1,
+  videoBytes: sizeBytes
 });
 
 const createDefaultScopeSets = (): ScopeSets => ({
@@ -234,6 +266,9 @@ function isFileIncludedByScope(path: string, scope: ScopeSets) {
 const mergeMediaStats = (base: MediaStats, extra: MediaStats): MediaStats => ({
   imageCount: base.imageCount + extra.imageCount,
   imageBytes: base.imageBytes + extra.imageBytes,
+  jpegImageCount: base.jpegImageCount + extra.jpegImageCount,
+  heicImageCount: base.heicImageCount + extra.heicImageCount,
+  copyOnlyImageCount: base.copyOnlyImageCount + extra.copyOnlyImageCount,
   videoCount: base.videoCount + extra.videoCount,
   videoBytes: base.videoBytes + extra.videoBytes
 });
@@ -247,11 +282,11 @@ const summarizeSnapshotNode = (node: SourceTreeNode, scope: ScopeSets): MediaSta
     const kind = getMediaKind(node.name, '', node.fileType);
 
     if (kind === 'image') {
-      return { imageCount: 1, imageBytes: node.sizeBytes, videoCount: 0, videoBytes: 0 };
+      return createImageStats(node.name, node.sizeBytes);
     }
 
     if (kind === 'video') {
-      return { imageCount: 0, imageBytes: 0, videoCount: 1, videoBytes: node.sizeBytes };
+      return createVideoStats(node.sizeBytes);
     }
 
     return createEmptyMediaStats();
@@ -290,12 +325,12 @@ const summarizeNativeDirectory = async (
     const kind = getMediaKind(file.name, file.type);
 
     if (kind === 'image') {
-      stats = mergeMediaStats(stats, { imageCount: 1, imageBytes: file.size, videoCount: 0, videoBytes: 0 });
+      stats = mergeMediaStats(stats, createImageStats(file.name, file.size));
       continue;
     }
 
     if (kind === 'video') {
-      stats = mergeMediaStats(stats, { imageCount: 0, imageBytes: 0, videoCount: 1, videoBytes: file.size });
+      stats = mergeMediaStats(stats, createVideoStats(file.size));
     }
   }
 
@@ -357,6 +392,8 @@ export const CompressionPage = () => {
   const [encoderSettings, setEncoderSettings] = useState<EncoderSettingsSnapshot>({
     imageToolCommand: '',
     videoToolCommand: '',
+    imageMagickCommand: '',
+    exifToolCommand: '',
     updatedAt: 0
   });
   const [progressData, setProgressData] = useState<{
@@ -580,20 +617,46 @@ export const CompressionPage = () => {
 
   const sourcePath = sourceSelection?.path ?? '';
   const destinationPath = destinationSelection?.path ?? '';
-  const hasConfiguredEncoders = Boolean(encoderSettings.imageToolCommand.trim() && encoderSettings.videoToolCommand.trim());
-  const hasAvailableVideoPresets = videoPresets.length > 0;
+  const selectedStats = mediaStatsState.status === 'ready' ? mediaStatsState.data : createEmptyMediaStats();
+  const estimatedTotalMediaCount = selectedStats.imageCount + selectedStats.videoCount;
+  const hasSelectedJpegImages = selectedStats.jpegImageCount > 0;
+  const hasSelectedHeicImages = selectedStats.heicImageCount > 0;
+  const hasCopyOnlyImages = selectedStats.copyOnlyImageCount > 0;
+  const hasSelectedVideos = selectedStats.videoCount > 0;
+  const needsMozJpeg = hasSelectedJpegImages || hasSelectedHeicImages;
+  const needsImageMagick = hasSelectedHeicImages;
+  const needsHandBrake = hasSelectedVideos;
+  const hasConfiguredMozJpeg = Boolean(encoderSettings.imageToolCommand.trim());
+  const hasConfiguredImageMagick = Boolean(encoderSettings.imageMagickCommand.trim());
+  const hasConfiguredHandBrake = Boolean(encoderSettings.videoToolCommand.trim());
+  const hasAvailableVideoPresets = !needsHandBrake || videoPresets.length > 0;
+  const hasRequiredTools =
+    (!needsMozJpeg || hasConfiguredMozJpeg) &&
+    (!needsImageMagick || hasConfiguredImageMagick) &&
+    (!needsHandBrake || hasConfiguredHandBrake);
   const hasSelectedFolders = Boolean(sourceSelection && destinationSelection);
   const hasAbsolutePaths = isLikelyAbsolutePath(sourcePath) && isLikelyAbsolutePath(destinationPath);
   const isCompressionSetupLoading =
     areFolderSelectionsLoading ||
     isEncoderSettingsLoading ||
-    videoPresetsState.status === 'loading';
+    (needsHandBrake && videoPresetsState.status === 'loading') ||
+    mediaStatsState.status === 'loading';
   const canStartRealCompression =
     !isCompressionSetupLoading &&
     hasSelectedFolders &&
     hasAbsolutePaths &&
-    hasConfiguredEncoders &&
+    mediaStatsState.status === 'ready' &&
+    estimatedTotalMediaCount > 0 &&
+    hasRequiredTools &&
     hasAvailableVideoPresets;
+  const toolWarnings = [
+    hasSelectedHeicImages && !encoderSettings.exifToolCommand.trim()
+      ? t('compression.exifToolWarning')
+      : null,
+    hasCopyOnlyImages
+      ? t('compression.copyOnlyImagesWarning', { count: selectedStats.copyOnlyImageCount })
+      : null
+  ].filter((message): message is string => Boolean(message));
   const compressionSetupMessage = (() => {
     if (isCompressionSetupLoading) {
       return t('compression.loadingSetup');
@@ -603,24 +666,36 @@ export const CompressionPage = () => {
       return t('compression.selectFolders');
     }
 
-    if (!hasConfiguredEncoders) {
-      return t('compression.configureEncoders');
+    if (mediaStatsState.status !== 'ready') {
+      return t('compression.readingStats');
+    }
+
+    if (estimatedTotalMediaCount === 0) {
+      return t('compression.noFiles');
+    }
+
+    if (needsMozJpeg && !hasConfiguredMozJpeg) {
+      return t('compression.configureMozJpeg');
+    }
+
+    if (needsImageMagick && !hasConfiguredImageMagick) {
+      return t('compression.configureImageMagick');
+    }
+
+    if (needsHandBrake && !hasConfiguredHandBrake) {
+      return t('compression.configureHandBrakeTool');
     }
 
     if (!hasAbsolutePaths) {
       return t('compression.absolutePaths');
     }
 
-    if (!hasAvailableVideoPresets) {
+    if (needsHandBrake && !hasAvailableVideoPresets) {
       return t('compression.loadPreset');
     }
 
     return null;
   })();
-  const estimatedTotalMediaCount = mediaStatsState.status === 'ready'
-    ? mediaStatsState.data.imageCount + mediaStatsState.data.videoCount
-    : 0;
-
   const handleStartCompression = async () => {
     if (!destinationSelection || !sourceSelection || mediaStatsState.status === 'error') {
       return;
@@ -628,9 +703,9 @@ export const CompressionPage = () => {
 
     if (!canStartRealCompression) {
       setBackendError(
-        !hasConfiguredEncoders
-          ? t('compression.configureEncoders')
-          : !hasAvailableVideoPresets
+        !hasRequiredTools
+          ? compressionSetupMessage ?? t('compression.configureRequiredTools')
+          : needsHandBrake && !hasAvailableVideoPresets
             ? t('compression.loadPreset')
           : t('compression.realPathRequired')
       );
@@ -651,6 +726,8 @@ export const CompressionPage = () => {
         videoPresetLabel: selectedVideoProfileLabel,
         imageToolCommand: encoderSettings.imageToolCommand,
         videoToolCommand: encoderSettings.videoToolCommand,
+        imageMagickCommand: encoderSettings.imageMagickCommand,
+        exifToolCommand: encoderSettings.exifToolCommand,
         selectionScope: loadSourceSelectionScope()
       });
 
@@ -758,6 +835,11 @@ export const CompressionPage = () => {
             {compressionSetupMessage}
           </p>
         )}
+        {toolWarnings.map((warning) => (
+          <p className="page-summary-note compression-warning" key={warning}>
+            {warning}
+          </p>
+        ))}
         {backendError && (
           <pre className="error compression-error-details">
             {backendError}
@@ -1002,6 +1084,16 @@ export const CompressionPage = () => {
               <p className="page-summary-note">
                 {t('compression.estimatesNote')}
               </p>
+              {hasCopyOnlyImages && (
+                <p className="page-summary-note">
+                  {t('compression.copyOnlyImagesSummary', { count: selectedStats.copyOnlyImageCount })}
+                </p>
+              )}
+              {hasSelectedHeicImages && (
+                <p className="page-summary-note">
+                  {t('compression.heicSummary', { count: selectedStats.heicImageCount })}
+                </p>
+              )}
             </>
           )}
         </div>
