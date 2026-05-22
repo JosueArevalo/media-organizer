@@ -2376,6 +2376,169 @@ body {
   background: #000000;
 }
 
+/* Export workspace */
+.export-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.settings-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  padding: 18px;
+}
+
+.folder-path-control {
+  display: grid;
+  gap: 8px;
+}
+
+.folder-path-control span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.folder-path-input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 13px;
+  width: 100%;
+}
+
+.folder-path-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.success-message {
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+  font-size: 13px;
+  margin: 0;
+  padding: 10px;
+}
+
+.progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.export-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-deep));
+  transition: width 180ms ease;
+}
+
+.export-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.export-stats div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.export-stats strong {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.export-stats span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.export-item-list {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.export-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.export-item-row:last-child {
+  border-bottom: 0;
+}
+
+.export-item-row div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.export-item-row strong {
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-item-row span:not(.status-pill) {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.status-pill {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.status-completed,
+.status-skipped {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.status-failed {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.status-running,
+.status-pending {
+  background: var(--accent-light);
+  color: var(--accent-deep);
+}
+
 @media (max-width: 1024px) {
   .grouping-layout {
     grid-template-columns: 1fr;

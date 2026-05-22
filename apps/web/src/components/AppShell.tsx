@@ -5,6 +5,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useImportStepCompletion } from '../hooks/useImportStepCompletion';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
+import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation } from '../i18n';
 
 const workflowStepBlueprint = [
@@ -27,6 +28,11 @@ const workflowStepBlueprint = [
     id: 'grouping',
     number: 4,
     path: '/grouping'
+  },
+  {
+    id: 'export',
+    number: 5,
+    path: '/export'
   }
 ] as const;
 
@@ -40,6 +46,8 @@ const AppShell = () => {
   const isSelectionComplete = isImportStepComplete && Boolean(sourceSelection && destinationSelection);
   const compressionSessionState = useCompressionSessionState();
   const isCompressionComplete = compressionSessionState.status === 'completed';
+  const groupingSessionState = useGroupingSessionState();
+  const isGroupingReadyForExport = groupingSessionState.status === 'completed' || Boolean(groupingSessionState.outputRootLabel);
 
   const workflowSteps: StepConfig[] = workflowStepBlueprint.map((step) => ({
     ...step,
@@ -58,7 +66,11 @@ const AppShell = () => {
         return isCompressionComplete ? 'completed' : isSelectionComplete ? 'pending' : 'locked';
       }
 
-      return isCompressionComplete ? 'pending' : 'locked';
+      if (step.id === 'grouping') {
+        return isGroupingReadyForExport ? 'completed' : isCompressionComplete ? 'pending' : 'locked';
+      }
+
+      return isGroupingReadyForExport ? 'pending' : 'locked';
     })()
   }));
 
@@ -83,7 +95,8 @@ const AppShell = () => {
     import: t('shell.header.import'),
     selection: t('shell.header.selection'),
     compression: t('shell.header.compression'),
-    grouping: t('shell.header.grouping')
+    grouping: t('shell.header.grouping'),
+    export: t('shell.header.export')
   };
 
   return (

@@ -1,9 +1,11 @@
 import { resetCompressionSession } from './compression-job.store';
+import { resetExportJobSnapshot } from './export-job.store';
 import {
   clearFolderSelectionPersistence,
   clearSourceSelectionScope,
   clearSourceTreeSnapshot
 } from './folder-selection.store';
+import { resetGroupingSession } from './grouping-job.store';
 
 const APP_STORAGE_PREFIX = 'media-organizer-';
 const EXEMPT_KEYS = new Set(['encoderSettings']);
@@ -43,4 +45,6 @@ export const resetAllPersistentAppState = async () => {
   clearSourceTreeSnapshot('source');
   clearSourceTreeSnapshot('destination');
   resetCompressionSession();
+  resetGroupingSession();
+  resetExportJobSnapshot();
 };

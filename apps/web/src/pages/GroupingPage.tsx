@@ -360,6 +360,11 @@ export const GroupingPage = () => {
           <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying}>
             {isApplying ? t('grouping.applying') : t('grouping.apply')}
           </button>
+          {groupingSessionState.status === 'completed' && (
+            <button className="btn btn-secondary" type="button" onClick={() => navigate('/export')}>
+              {t('grouping.continueExport')}
+            </button>
+          )}
         </div>
       </div>
 
