@@ -439,6 +439,7 @@ export const es: TranslationDictionary = {
   'settings.clearImageMagickAria': 'Limpiar ruta de ImageMagick',
   'settings.clearExifToolAria': 'Limpiar ruta de ExifTool',
   'settings.changesLocal': 'Los cambios permanecen locales a esta pantalla hasta que los guardes.',
+  'settings.unsavedChanges': 'Hay rutas de herramientas sin guardar. Guárdalas antes de iniciar una nueva compresión.',
   'settings.saving': 'Guardando...',
   'settings.saveEncoderPaths': 'Guardar rutas de codificadores',
   'settings.maintenance': 'Mantenimiento',

@@ -22,6 +22,8 @@ export const handleCompressionRoutes: RouteHandler = ({ req, res, requestUrl }) 
               videoPresetLabel?: string;
               imageToolCommand?: string;
               videoToolCommand?: string;
+              imageMagickCommand?: string;
+              exifToolCommand?: string;
               selectionScope?: {
                 excludedDirectories: string[];
                 excludedFiles: string[];
@@ -46,6 +48,8 @@ export const handleCompressionRoutes: RouteHandler = ({ req, res, requestUrl }) 
           videoPresetLabel: body.videoPresetLabel,
           imageToolCommand: body.imageToolCommand,
           videoToolCommand: body.videoToolCommand,
+          imageMagickCommand: body.imageMagickCommand,
+          exifToolCommand: body.exifToolCommand,
           selectionScope: body.selectionScope ?? undefined
         });
 

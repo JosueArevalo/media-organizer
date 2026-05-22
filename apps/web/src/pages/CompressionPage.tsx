@@ -701,10 +701,29 @@ export const CompressionPage = () => {
       return;
     }
 
-    if (!canStartRealCompression) {
+    const latestEncoderSettings = await loadEncoderSettings();
+    const latestHasConfiguredMozJpeg = Boolean(latestEncoderSettings.imageToolCommand.trim());
+    const latestHasConfiguredImageMagick = Boolean(latestEncoderSettings.imageMagickCommand.trim());
+    const latestHasConfiguredHandBrake = Boolean(latestEncoderSettings.videoToolCommand.trim());
+    const latestHasRequiredTools =
+      (!needsMozJpeg || latestHasConfiguredMozJpeg) &&
+      (!needsImageMagick || latestHasConfiguredImageMagick) &&
+      (!needsHandBrake || latestHasConfiguredHandBrake);
+
+    setEncoderSettings(latestEncoderSettings);
+
+    if (!canStartRealCompression || !latestHasRequiredTools) {
       setBackendError(
-        !hasRequiredTools
-          ? compressionSetupMessage ?? t('compression.configureRequiredTools')
+        !latestHasRequiredTools
+          ? needsMozJpeg && !latestHasConfiguredMozJpeg
+            ? t('compression.configureMozJpeg')
+            : needsImageMagick && !latestHasConfiguredImageMagick
+              ? t('compression.configureImageMagick')
+              : needsHandBrake && !latestHasConfiguredHandBrake
+                ? t('compression.configureHandBrakeTool')
+                : t('compression.configureRequiredTools')
+          : !hasRequiredTools
+            ? compressionSetupMessage ?? t('compression.configureRequiredTools')
           : needsHandBrake && !hasAvailableVideoPresets
             ? t('compression.loadPreset')
           : t('compression.realPathRequired')
@@ -724,10 +743,10 @@ export const CompressionPage = () => {
         imageQuality: effectiveImageQuality,
         imageProfileLabel: selectedImageProfileLabel,
         videoPresetLabel: selectedVideoProfileLabel,
-        imageToolCommand: encoderSettings.imageToolCommand,
-        videoToolCommand: encoderSettings.videoToolCommand,
-        imageMagickCommand: encoderSettings.imageMagickCommand,
-        exifToolCommand: encoderSettings.exifToolCommand,
+        imageToolCommand: latestEncoderSettings.imageToolCommand,
+        videoToolCommand: latestEncoderSettings.videoToolCommand,
+        imageMagickCommand: latestEncoderSettings.imageMagickCommand,
+        exifToolCommand: latestEncoderSettings.exifToolCommand,
         selectionScope: loadSourceSelectionScope()
       });
 

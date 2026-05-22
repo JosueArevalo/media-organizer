@@ -436,7 +436,7 @@ const SettingsPage = () => {
 
           <div className="encoder-actions-footer">
             <p className="encoder-actions-note">
-              {t('settings.changesLocal')}
+              {hasPendingEncoderChanges ? t('settings.unsavedChanges') : t('settings.changesLocal')}
             </p>
             <button
               className="btn btn-primary"

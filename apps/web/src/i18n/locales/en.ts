@@ -437,6 +437,7 @@ export const en = {
   'settings.clearImageMagickAria': 'Clear ImageMagick path',
   'settings.clearExifToolAria': 'Clear ExifTool path',
   'settings.changesLocal': 'Changes stay local to this screen until you save them.',
+  'settings.unsavedChanges': 'You have unsaved tool paths. Save them before starting a new compression session.',
   'settings.saving': 'Saving...',
   'settings.saveEncoderPaths': 'Save Encoder Paths',
   'settings.maintenance': 'Maintenance',
