@@ -28,7 +28,14 @@ test('initial migration creates core state tables', async () => {
   const { runMigrations } = await import('../src/state/migrations/runMigrations.js?integration=1');
 
   const executed = runMigrations();
-  assert.deepEqual(executed, ['001_initial_state.sql', '003_grouping_stage.sql', '004_grouping_workspace.sql', '005_execution_history.sql']);
+  assert.deepEqual(executed, [
+    '001_initial_state.sql',
+    '003_grouping_stage.sql',
+    '004_grouping_workspace.sql',
+    '005_execution_history.sql',
+    '006_export_jobs.sql',
+    '007_network_destinations.sql'
+  ]);
 
   const db = getDb();
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;").all() as Array<{ name: string }>;
@@ -42,6 +49,10 @@ test('initial migration creates core state tables', async () => {
   assert.ok(tableNames.includes('grouping_folders'));
   assert.ok(tableNames.includes('grouping_folder_templates'));
   assert.ok(tableNames.includes('execution_history'));
+  assert.ok(tableNames.includes('export_jobs'));
+  assert.ok(tableNames.includes('export_items'));
+  assert.ok(tableNames.includes('export_checkpoints'));
+  assert.ok(tableNames.includes('network_destinations'));
   assert.ok(tableNames.includes('schema_migrations'));
 
   const migrationRows = db.prepare('SELECT id FROM schema_migrations;').all() as Array<{ id: string }>;
@@ -49,7 +60,9 @@ test('initial migration creates core state tables', async () => {
     '001_initial_state.sql',
     '003_grouping_stage.sql',
     '004_grouping_workspace.sql',
-    '005_execution_history.sql'
+    '005_execution_history.sql',
+    '006_export_jobs.sql',
+    '007_network_destinations.sql'
   ]);
 });
 
@@ -160,7 +173,14 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
 
   const executed = runMigrations();
 
-  assert.deepEqual(executed, ['002_jobs_to_sessions.sql', '003_grouping_stage.sql', '004_grouping_workspace.sql', '005_execution_history.sql']);
+  assert.deepEqual(executed, [
+    '002_jobs_to_sessions.sql',
+    '003_grouping_stage.sql',
+    '004_grouping_workspace.sql',
+    '005_execution_history.sql',
+    '006_export_jobs.sql',
+    '007_network_destinations.sql'
+  ]);
 
   const tableNames = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
@@ -205,6 +225,8 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '002_jobs_to_sessions.sql',
     '003_grouping_stage.sql',
     '004_grouping_workspace.sql',
-    '005_execution_history.sql'
+    '005_execution_history.sql',
+    '006_export_jobs.sql',
+    '007_network_destinations.sql'
   ]);
 });

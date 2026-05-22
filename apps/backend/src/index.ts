@@ -6,6 +6,7 @@ import { runMigrations } from './state/migrations/runMigrations.js';
 import { getDbPath } from './state/db.js';
 import { handleDashboardRoutes } from './dashboard/dashboard.routes.js';
 import { handleCompressionRoutes } from './pipeline/compression/compression.routes.js';
+import { handleExportRoutes } from './pipeline/export/export.routes.js';
 import {
   getGroupingProgress,
   getGroupingSession,
@@ -147,6 +148,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
   if (
     handleDashboardRoutes({ req, res, requestUrl }) ||
     handleCompressionRoutes({ req, res, requestUrl }) ||
+    handleExportRoutes({ req, res, requestUrl }) ||
     handleSourceTreeRoutes({ req, res, requestUrl }) ||
     handleSystemRoutes({ req, res, requestUrl })
   ) {

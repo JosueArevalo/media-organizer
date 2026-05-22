@@ -1,0 +1,265 @@
+import { readRequestJson, sendCaughtError, sendJson } from '../../http/httpResponses.js';
+import type { RouteHandler } from '../../http/routeTypes.js';
+import { executeExportJob } from './exportJob.runner.js';
+import {
+  createExportJob,
+  getExportJob,
+  getExportProgress,
+  markExportJobFailed,
+  pauseExportJob,
+  retryFailedExportItems,
+  testExportTarget
+} from './exportJob.service.js';
+import {
+  authenticateNetworkPath,
+  browseNetworkPath,
+  createNetworkFolder,
+  deleteNetworkDestination,
+  listNetworkDestinations,
+  NetworkPathError,
+  saveNetworkDestination
+} from './networkDestination.service.js';
+import type {
+  ExportJobRequest,
+  ExportTargetTestRequest,
+  NetworkAuthRequest,
+  NetworkBrowseRequest,
+  NetworkCreateFolderRequest,
+  NetworkDestinationRequest
+} from './export.types.js';
+
+const sendExportRouteError = (res: Parameters<RouteHandler>[0]['res'], error: unknown, fallbackMessage: string) => {
+  if (error instanceof NetworkPathError) {
+    sendJson(res, 400, { status: 'invalid_network_path', message: error.message });
+    return;
+  }
+
+  sendCaughtError(res, error, fallbackMessage);
+};
+
+export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
+  if (requestUrl.pathname === '/api/export/jobs' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as ExportJobRequest | null;
+
+        if (!body?.sourceRoot || !body.target) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'sourceRoot and target are required.' });
+          return;
+        }
+
+        if (body.target.type === 'network-folder' && !body.target.destinationPath) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'target.destinationPath is required.' });
+          return;
+        }
+
+        sendJson(res, 201, createExportJob(body));
+      } catch (error) {
+        sendCaughtError(res, error, 'Failed to create export job.');
+      }
+    })();
+
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/targets/test' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as ExportTargetTestRequest | null;
+
+        if (!body?.target) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'target is required.' });
+          return;
+        }
+
+        sendJson(res, 200, await testExportTarget(body.target, body.credentials));
+      } catch (error) {
+        sendCaughtError(res, error, 'Failed to test export target.');
+      }
+    })();
+
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/network-destinations' && req.method === 'GET') {
+    sendJson(res, 200, { destinations: listNetworkDestinations() });
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/network-destinations' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as NetworkDestinationRequest | null;
+
+        if (!body?.rootPath) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'rootPath is required.' });
+          return;
+        }
+
+        sendJson(res, 201, saveNetworkDestination(body));
+      } catch (error) {
+        sendExportRouteError(res, error, 'Failed to save network destination.');
+      }
+    })();
+
+    return true;
+  }
+
+  if (requestUrl.pathname.startsWith('/api/export/network-destinations/') && req.method === 'DELETE') {
+    const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
+    const destinationId = pathSegments[3];
+
+    if (!destinationId) {
+      sendJson(res, 400, { status: 'invalid_request' });
+      return true;
+    }
+
+    if (!deleteNetworkDestination(destinationId)) {
+      sendJson(res, 404, { status: 'not_found' });
+      return true;
+    }
+
+    sendJson(res, 200, { ok: true });
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/network/auth' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as NetworkAuthRequest | null;
+
+        if (!body?.path || !body.credentials) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'path and credentials are required.' });
+          return;
+        }
+
+        sendJson(res, 200, await authenticateNetworkPath(body));
+      } catch (error) {
+        sendExportRouteError(res, error, 'Failed to authenticate network path.');
+      }
+    })();
+
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/network/browse' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as NetworkBrowseRequest | null;
+
+        if (!body?.path) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'path is required.' });
+          return;
+        }
+
+        sendJson(res, 200, await browseNetworkPath(body));
+      } catch (error) {
+        sendExportRouteError(res, error, 'Failed to browse network path.');
+      }
+    })();
+
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/network/create-folder' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as NetworkCreateFolderRequest | null;
+
+        if (!body?.parentPath || !body.folderName) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'parentPath and folderName are required.' });
+          return;
+        }
+
+        sendJson(res, 201, await createNetworkFolder(body));
+      } catch (error) {
+        sendExportRouteError(res, error, 'Failed to create network folder.');
+      }
+    })();
+
+    return true;
+  }
+
+  if (requestUrl.pathname.startsWith('/api/export/jobs/')) {
+    const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
+    const jobId = pathSegments[3];
+    const subPath = pathSegments[4];
+
+    if (!jobId) {
+      sendJson(res, 400, { status: 'invalid_request' });
+      return true;
+    }
+
+    if (req.method === 'GET' && subPath === 'progress') {
+      const progress = getExportProgress(jobId);
+
+      if (!progress) {
+        sendJson(res, 404, { status: 'not_found' });
+        return true;
+      }
+
+      sendJson(res, 200, progress);
+      return true;
+    }
+
+    if (req.method === 'GET' && !subPath) {
+      const job = getExportJob(jobId);
+
+      if (!job) {
+        sendJson(res, 404, { status: 'not_found' });
+        return true;
+      }
+
+      sendJson(res, 200, job);
+      return true;
+    }
+
+    if (req.method === 'POST' && subPath === 'start') {
+      const job = getExportJob(jobId);
+
+      if (!job) {
+        sendJson(res, 404, { status: 'not_found' });
+        return true;
+      }
+
+      void executeExportJob(jobId).catch((error) => {
+        console.error(`[backend] export job ${jobId} failed`, error);
+        markExportJobFailed(jobId, error instanceof Error ? error : new Error('Export job failed.'));
+      });
+
+      sendJson(res, 202, getExportJob(jobId));
+      return true;
+    }
+
+    if (req.method === 'POST' && subPath === 'pause') {
+      const job = pauseExportJob(jobId);
+
+      if (!job) {
+        sendJson(res, 404, { status: 'not_found' });
+        return true;
+      }
+
+      sendJson(res, 200, job);
+      return true;
+    }
+
+    if (req.method === 'POST' && subPath === 'retry-failed') {
+      const job = retryFailedExportItems(jobId);
+
+      if (!job) {
+        sendJson(res, 404, { status: 'not_found' });
+        return true;
+      }
+
+      void executeExportJob(jobId).catch((error) => {
+        console.error(`[backend] export job ${jobId} retry failed`, error);
+        markExportJobFailed(jobId, error instanceof Error ? error : new Error('Export job retry failed.'));
+      });
+
+      sendJson(res, 202, getExportJob(jobId));
+      return true;
+    }
+  }
+
+  return false;
+};
