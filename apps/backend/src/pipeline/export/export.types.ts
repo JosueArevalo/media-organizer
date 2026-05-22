@@ -9,6 +9,12 @@ export type NetworkFolderTarget = {
   destinationPath: string;
 };
 
+export type NetworkCredentials = {
+  username?: string;
+  password?: string;
+  rememberInWindows?: boolean;
+};
+
 export type GooglePhotosTarget = {
   type: 'google-photos';
 };
@@ -78,10 +84,60 @@ export type ExportProgressData = {
 
 export type ExportTargetTestRequest = {
   target: ExportTarget;
+  credentials?: NetworkCredentials;
 };
 
 export type ExportTargetTestResult = {
   ok: boolean;
   message: string;
   targetType: ExportTargetType;
+  details?: string | null;
+  requiresAuthentication?: boolean;
+};
+
+export type NetworkDestinationRecord = {
+  id: string;
+  name: string;
+  rootPath: string;
+  username: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
+};
+
+export type NetworkDestinationRequest = {
+  name?: string;
+  rootPath: string;
+  username?: string;
+};
+
+export type NetworkAuthRequest = {
+  path: string;
+  credentials: NetworkCredentials;
+};
+
+export type NetworkBrowseRequest = {
+  path: string;
+  rootPath?: string;
+  credentials?: NetworkCredentials;
+};
+
+export type NetworkBrowseEntry = {
+  name: string;
+  path: string;
+  kind: 'share' | 'directory';
+};
+
+export type NetworkBrowseResult = {
+  path: string;
+  parentPath: string | null;
+  entries: NetworkBrowseEntry[];
+  canCreateFolder: boolean;
+};
+
+export type NetworkCreateFolderRequest = {
+  parentPath: string;
+  folderName: string;
+  rootPath?: string;
+  credentials?: NetworkCredentials;
 };

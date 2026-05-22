@@ -2527,6 +2527,47 @@ body {
   gap: 10px;
 }
 
+.network-destination-grid,
+.network-auth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.network-destination-root {
+  grid-column: 1 / -1;
+}
+
+.network-export-tools,
+.network-browser-actions,
+.network-browser-create {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.network-auth-panel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.network-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.network-checkbox input {
+  width: 16px;
+  height: 16px;
+}
+
 .success-message {
   border: 1px solid rgba(16, 185, 129, 0.28);
   border-radius: 8px;
@@ -2535,6 +2576,90 @@ body {
   font-size: 13px;
   margin: 0;
   padding: 10px;
+}
+
+.success-message p,
+.error p {
+  margin: 0;
+}
+
+.success-message small,
+.error small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.network-browser-modal {
+  width: min(760px, 96vw);
+  max-height: 88vh;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  overflow: auto;
+}
+
+.network-browser-create {
+  align-items: center;
+}
+
+.network-browser-create input {
+  flex: 1 1 240px;
+}
+
+.network-browser-list {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.network-browser-row {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
+  color: var(--text);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  text-align: left;
+}
+
+.network-browser-row:last-child {
+  border-bottom: 0;
+}
+
+.network-browser-row:hover {
+  background: var(--accent-light);
+}
+
+.network-browser-row span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.network-browser-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .progress-track {
@@ -2714,5 +2839,10 @@ body {
 
   .export-provider-card {
     grid-template-columns: 64px minmax(0, 1fr) auto;
+  }
+
+  .network-destination-grid,
+  .network-auth-grid {
+    grid-template-columns: 1fr;
   }
 }

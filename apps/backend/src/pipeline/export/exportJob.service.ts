@@ -11,8 +11,14 @@ import type {
   ExportJobSnapshot,
   ExportProgressData,
   ExportTarget,
-  ExportTargetTestResult
+  ExportTargetTestResult,
+  NetworkCredentials
 } from './export.types.js';
+import {
+  authenticateNetworkPath,
+  getNetworkErrorMessage,
+  markNetworkDestinationUsed
+} from './networkDestination.service.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -337,12 +343,14 @@ export const retryFailedExportItems = (jobId: string): ExportJobSnapshot | null 
   return getExportJob(jobId);
 };
 
-export const testExportTarget = (target: ExportTarget): ExportTargetTestResult => {
+export const testExportTarget = async (target: ExportTarget, credentials?: NetworkCredentials): Promise<ExportTargetTestResult> => {
   if (target.type === 'google-photos') {
     return {
       ok: false,
       targetType: target.type,
-      message: 'Google Photos is prepared as a spike only and is not enabled in the MVP UI.'
+      message: 'Google Photos is prepared as a spike only and is not enabled in the MVP UI.',
+      details: null,
+      requiresAuthentication: false
     };
   }
 
@@ -351,25 +359,36 @@ export const testExportTarget = (target: ExportTarget): ExportTargetTestResult =
       return {
         ok: false,
         targetType: target.type,
-        message: 'Destination path is required.'
+        message: 'Destination path is required.',
+        details: null,
+        requiresAuthentication: false
       };
+    }
+
+    if (credentials?.username?.trim() || credentials?.password) {
+      await authenticateNetworkPath({ path: target.destinationPath, credentials });
     }
 
     fs.mkdirSync(target.destinationPath, { recursive: true });
     fs.accessSync(target.destinationPath, fs.constants.R_OK | fs.constants.W_OK);
+    markNetworkDestinationUsed(target.destinationPath);
 
     return {
       ok: true,
       targetType: target.type,
-      message: 'Destination is reachable and writable.'
+      message: 'Destination is reachable and writable.',
+      details: null,
+      requiresAuthentication: false
     };
   } catch (error) {
+    const networkError = getNetworkErrorMessage(error);
+
     return {
       ok: false,
       targetType: target.type,
-      message: error instanceof Error
-        ? `Destination is not reachable with the current Windows session: ${error.message}`
-        : 'Destination is not reachable with the current Windows session.'
+      message: networkError.message,
+      details: networkError.details,
+      requiresAuthentication: networkError.requiresAuthentication
     };
   }
 };
