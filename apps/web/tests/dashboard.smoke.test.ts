@@ -94,7 +94,10 @@ test('dashboard route loads and the client module compiles', async () => {
       '/src/pages/PreviewPage.tsx',
       '/src/pages/CompressionPage.tsx',
       '/src/pages/GroupingPage.tsx',
-      '/src/pages/ExportPage.tsx'
+      '/src/pages/ExportPage.tsx',
+      '/src/pages/NetworkFolderExportPage.tsx',
+      '/src/pages/GooglePhotosExportPage.tsx',
+      '/src/pages/GoogleDriveExportPage.tsx'
     ]) {
       const moduleResponse = await fetch(`${devServerUrl}${pageModule}`);
       const moduleBody = await moduleResponse.text();

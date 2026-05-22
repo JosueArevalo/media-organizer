@@ -74,7 +74,7 @@ const AppShell = () => {
     })()
   }));
 
-  const currentIndex = workflowStepBlueprint.findIndex((s) => s.path === location.pathname);
+  const currentIndex = workflowStepBlueprint.findIndex((s) => location.pathname === s.path || location.pathname.startsWith(`${s.path}/`));
 
   if (currentIndex > 0) {
     for (let i = 0; i < currentIndex; i++) {
@@ -89,7 +89,7 @@ const AppShell = () => {
     }
   }
 
-  const currentStep = workflowSteps.find((s) => s.path === location.pathname);
+  const currentStep = workflowSteps.find((s) => location.pathname === s.path || location.pathname.startsWith(`${s.path}/`));
   const isDashboard = location.pathname === '/dashboard';
   const headerTitles: Record<string, string> = {
     import: t('shell.header.import'),

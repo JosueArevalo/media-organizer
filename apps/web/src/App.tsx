@@ -5,8 +5,11 @@ import { useImportStepCompletion } from './hooks/useImportStepCompletion';
 import CompressionPage from './pages/CompressionPage';
 import DashboardPage from './pages/DashboardPage';
 import ExportPage from './pages/ExportPage';
+import GoogleDriveExportPage from './pages/GoogleDriveExportPage';
+import GooglePhotosExportPage from './pages/GooglePhotosExportPage';
 import GroupingPage from './pages/GroupingPage';
 import ImportPage from './pages/ImportPage';
+import NetworkFolderExportPage from './pages/NetworkFolderExportPage';
 import SelectionPage from './pages/SelectionPage';
 import SettingsPage from './pages/SettingsPage';
 import { useGroupingSessionState } from './hooks/useGroupingJobState';
@@ -95,6 +98,30 @@ const App = () => {
             element={
               <GuardedExportStep>
                 <ExportPage />
+              </GuardedExportStep>
+            }
+          />
+          <Route
+            path="/export/network-folder"
+            element={
+              <GuardedExportStep>
+                <NetworkFolderExportPage />
+              </GuardedExportStep>
+            }
+          />
+          <Route
+            path="/export/google-photos"
+            element={
+              <GuardedExportStep>
+                <GooglePhotosExportPage />
+              </GuardedExportStep>
+            }
+          />
+          <Route
+            path="/export/google-drive"
+            element={
+              <GuardedExportStep>
+                <GoogleDriveExportPage />
               </GuardedExportStep>
             }
           />
