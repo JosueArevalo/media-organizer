@@ -30,14 +30,14 @@ test('saved network destinations store friendly metadata without secrets', async
   } = await import('../src/pipeline/export/networkDestination.service.js');
 
   const saved = saveNetworkDestination({
-    name: 'Synology',
-    rootPath: '\\\\192.168.0.148\\Xternal',
-    username: 'pepe'
+    name: 'Studio Archive',
+    rootPath: '\\\\nas.example.local\\Archive',
+    username: 'media-operator'
   });
 
-  assert.equal(saved.name, 'Synology');
-  assert.equal(saved.rootPath, '\\\\192.168.0.148\\Xternal');
-  assert.equal(saved.username, 'pepe');
+  assert.equal(saved.name, 'Studio Archive');
+  assert.equal(saved.rootPath, '\\\\nas.example.local\\Archive');
+  assert.equal(saved.username, 'media-operator');
 
   const destinations = listNetworkDestinations();
   assert.equal(destinations.length, 1);
@@ -64,7 +64,7 @@ test('browse rejects non-UNC paths before filesystem access', async () => {
   const { browseNetworkPath } = await import('../src/pipeline/export/networkDestination.service.js');
 
   await assert.rejects(
-    browseNetworkPath({ path: 'C:\\Users\\pepe' }),
+    browseNetworkPath({ path: 'C:\\Users\\media-operator' }),
     /Use a UNC path/
   );
 });
@@ -85,7 +85,7 @@ test('create folder validates that target remains under selected UNC root', asyn
     createNetworkFolder({
       parentPath: '\\\\server\\share\\other',
       rootPath: '\\\\server\\share\\photos',
-      folderName: 'Pepe3'
+      folderName: 'EventExport'
     }),
     /must stay under/
   );
