@@ -2471,102 +2471,15 @@ body {
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.22);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  display: grid;
+  place-items: center;
 }
 
-.export-provider-shape {
-  position: absolute;
+.export-provider-icon {
+  width: 44px;
+  height: 44px;
   display: block;
-}
-
-.export-provider-visual-folder .export-provider-shape-primary {
-  left: 50%;
-  bottom: 16px;
-  width: 40px;
-  height: 27px;
-  transform: translateX(-50%);
-  border-radius: 6px;
-  background: #f5b84b;
-}
-
-.export-provider-visual-folder .export-provider-shape-secondary {
-  left: 14px;
-  top: 20px;
-  width: 23px;
-  height: 11px;
-  border-radius: 5px 5px 0 0;
-  background: #f8d277;
-}
-
-.export-provider-visual-folder .export-provider-shape-tertiary {
-  right: 13px;
-  bottom: 23px;
-  width: 13px;
-  height: 9px;
-  border: 2px solid rgba(11, 18, 32, 0.48);
-  border-radius: 999px;
-  border-left-color: transparent;
-  border-right-color: transparent;
-}
-
-.export-provider-visual-photos .export-provider-shape-primary {
-  left: 19px;
-  top: 10px;
-  width: 28px;
-  height: 28px;
-  border-radius: 10px 10px 3px 10px;
-  background: #ef4444;
-  transform: rotate(45deg);
-}
-
-.export-provider-visual-photos .export-provider-shape-secondary {
-  right: 10px;
-  top: 19px;
-  width: 28px;
-  height: 28px;
-  border-radius: 10px 10px 10px 3px;
-  background: #22c55e;
-  transform: rotate(45deg);
-}
-
-.export-provider-visual-photos .export-provider-shape-tertiary {
-  left: 19px;
-  bottom: 10px;
-  width: 29px;
-  height: 29px;
-  border-radius: 3px 10px 10px 10px;
-  background: #3b82f6;
-  box-shadow: 0 -19px 0 -3px #facc15;
-  transform: rotate(45deg);
-}
-
-.export-provider-visual-drive .export-provider-shape-primary {
-  left: 14px;
-  bottom: 16px;
-  width: 26px;
-  height: 13px;
-  transform: skewX(-30deg);
-  background: #22c55e;
-  border-radius: 3px;
-}
-
-.export-provider-visual-drive .export-provider-shape-secondary {
-  left: 25px;
-  top: 12px;
-  width: 13px;
-  height: 40px;
-  transform: rotate(30deg);
-  border-radius: 5px;
-  background: #facc15;
-}
-
-.export-provider-visual-drive .export-provider-shape-tertiary {
-  right: 14px;
-  bottom: 16px;
-  width: 26px;
-  height: 13px;
-  transform: skewX(30deg);
-  background: #3b82f6;
-  border-radius: 3px;
+  overflow: visible;
 }
 
 .export-panel {

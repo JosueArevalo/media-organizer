@@ -1,21 +1,14 @@
 import { Link } from 'react-router-dom';
+import { ExportProviderIcon } from '../components/ExportProviderIcon';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation } from '../i18n';
-import { exportProviders, type ExportProviderStatus, type ExportProviderVisual } from '../services/export-providers';
+import { exportProviders, type ExportProviderStatus } from '../services/export-providers';
 
 const providerStatusLabels: Record<ExportProviderStatus, 'export.status.available' | 'export.status.spike' | 'export.status.planned'> = {
   available: 'export.status.available',
   spike: 'export.status.spike',
   planned: 'export.status.planned'
 };
-
-const renderProviderVisual = (visual: ExportProviderVisual) => (
-  <div className={`export-provider-visual export-provider-visual-${visual}`} aria-hidden="true">
-    <span className="export-provider-shape export-provider-shape-primary" />
-    <span className="export-provider-shape export-provider-shape-secondary" />
-    <span className="export-provider-shape export-provider-shape-tertiary" />
-  </div>
-);
 
 export const ExportPage = () => {
   const { t } = useTranslation();
@@ -41,7 +34,7 @@ export const ExportPage = () => {
       <section className="export-provider-grid" aria-label={t('export.hub.providersAria')}>
         {exportProviders.map((provider) => (
           <Link key={provider.id} to={provider.route} className={`export-provider-card export-provider-card-${provider.status}`}>
-            {renderProviderVisual(provider.visual)}
+            <ExportProviderIcon visual={provider.visual} />
             <div className="export-provider-card-copy">
               <span className={`status-pill export-provider-status export-provider-status-${provider.status}`}>
                 {t(providerStatusLabels[provider.status])}

@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { ExportProviderIcon } from '../components/ExportProviderIcon';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation } from '../i18n';
 
@@ -23,11 +24,7 @@ export const GooglePhotosExportPage = () => {
       {!sourceRoot && <p className="error">{t('export.unavailable')}</p>}
 
       <section className="settings-panel export-spike-panel">
-        <div className="export-spike-visual export-provider-visual export-provider-visual-photos" aria-hidden="true">
-          <span className="export-provider-shape export-provider-shape-primary" />
-          <span className="export-provider-shape export-provider-shape-secondary" />
-          <span className="export-provider-shape export-provider-shape-tertiary" />
-        </div>
+        <ExportProviderIcon visual="photos" />
         <div>
           <p className="page-section-title">{t('export.sourceTitle')}</p>
           <p className="page-summary-note">{sourceRoot || t('export.noSource')}</p>
