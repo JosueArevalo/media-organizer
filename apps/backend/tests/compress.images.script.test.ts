@@ -73,7 +73,16 @@ done
 cp "$last" "$out"
 `);
 
-  return { magick, cjpeg };
+  const exiftool = process.platform === 'win32'
+    ? writeFakeTool(toolsDir, 'exiftool-fake', `@echo off
+echo %* > "%EXIFTOOL_ARGS_LOG%"
+exit /b 0
+`)
+    : writeFakeTool(toolsDir, 'exiftool-fake', `#!/usr/bin/env sh
+printf '%s\\n' "$*" > "$EXIFTOOL_ARGS_LOG"
+`);
+
+  return { magick, cjpeg, exiftool };
 };
 
 test('compress_images converts selected HEIC to JPG and copies PNG without compression', () => {
@@ -125,4 +134,50 @@ test('compress_images converts selected HEIC to JPG and copies PNG without compr
   assert.ok(items.some((item) => item.source.endsWith('graphic.png') && item.warning?.includes('copied without compression')));
   assert.ok(fs.existsSync(path.join(outputDir, 'graphic.png')));
   assert.ok(items.filter((item) => path.basename(item.output).startsWith('photo') && item.output.endsWith('.jpg')).length >= 2);
+});
+
+test('compress_images resets copied EXIF orientation after HEIC auto-orient', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-orientation-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  const exifArgsLog = path.join(tempRoot, 'exiftool-args.txt');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+
+  fs.writeFileSync(path.join(sourceDir, 'portrait.HEIC'), 'fake-heic', 'utf8');
+
+  const tools = createFakeTools(toolsDir);
+  const pythonCommand = process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python';
+  const result = spawnSync(
+    pythonCommand,
+    [
+      scriptPath,
+      '--source-dir',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+      '--quality',
+      '80',
+      '--encoder-command',
+      tools.cjpeg,
+      '--imagemagick-command',
+      tools.magick,
+      '--exiftool-command',
+      tools.exiftool,
+      '--selection-scope-json',
+      ''
+    ],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        EXIFTOOL_ARGS_LOG: exifArgsLog
+      }
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(fs.readFileSync(exifArgsLog, 'utf8'), /-Orientation#=1/);
 });

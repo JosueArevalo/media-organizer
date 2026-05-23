@@ -212,6 +212,7 @@ def copy_metadata(source_file: Path, output_file: Path, exiftool_command: str):
         '-all:all',
         '-unsafe',
         '-icc_profile',
+        '-Orientation#=1',
         str(output_file),
     ]
 
