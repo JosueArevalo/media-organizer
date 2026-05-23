@@ -360,6 +360,21 @@ const findClosestScopeMatch = (sourcePath: string, directories: string[]) =>
     .filter((directory) => isPathInsideOrEqualNormalized(directory, sourcePath))
     .sort((left, right) => right.length - left.length)[0] ?? null;
 
+const isCandidatePathPreserved = (
+  candidatePath: string,
+  preservedScopes: string[],
+  reorganizedScopes: string[]
+) => {
+  const preservedMatch = findClosestScopeMatch(candidatePath, preservedScopes);
+
+  if (!preservedMatch) {
+    return false;
+  }
+
+  const reorganizedMatch = findClosestScopeMatch(candidatePath, reorganizedScopes);
+  return !reorganizedMatch || preservedMatch.length > reorganizedMatch.length;
+};
+
 const isRowPreserved = (
   sourceDir: string,
   row: MediaRow,
@@ -370,15 +385,16 @@ const isRowPreserved = (
     return false;
   }
 
-  const normalizedSourcePath = normalizeScopePath(row.source_path);
-  const preservedMatch = findClosestScopeMatch(normalizedSourcePath, resolveDirectoryScopes(sourceDir, preservedDirectories));
+  const preservedScopes = resolveDirectoryScopes(sourceDir, preservedDirectories);
+  const reorganizedScopes = resolveDirectoryScopes(sourceDir, reorganizedDirectories);
+  const candidates = Array.from(
+    new Set([
+      normalizeScopePath(row.source_path),
+      normalizeScopePath(path.join(sourceDir, row.relative_path))
+    ])
+  );
 
-  if (!preservedMatch) {
-    return false;
-  }
-
-  const reorganizedMatch = findClosestScopeMatch(normalizedSourcePath, resolveDirectoryScopes(sourceDir, reorganizedDirectories));
-  return !reorganizedMatch || preservedMatch.length > reorganizedMatch.length;
+  return candidates.some((candidatePath) => isCandidatePathPreserved(candidatePath, preservedScopes, reorganizedScopes));
 };
 
 const clearGeneratedGrouping = (groupingSessionId: string, sourceSessionId: string) => {

@@ -308,6 +308,7 @@ export const en = {
   'grouping.reorganizing': 'Reorganizing...',
   'grouping.keepStructure': 'Keep structure',
   'grouping.reorganizeMode': 'Reorganize',
+  'grouping.originalStructure': 'Original structure',
   'grouping.keepOverride': 'Custom',
   'grouping.inherited': 'Inherited',
   'grouping.reorganizeOverride': 'Reorganizes here',

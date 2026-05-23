@@ -310,6 +310,7 @@ export const es: TranslationDictionary = {
   'grouping.reorganizing': 'Reorganizando...',
   'grouping.keepStructure': 'Mantener estructura',
   'grouping.reorganizeMode': 'Reorganizar',
+  'grouping.originalStructure': 'Estructura original',
   'grouping.keepOverride': 'Personalizado',
   'grouping.inherited': 'Heredado',
   'grouping.reorganizeOverride': 'Reorganiza aquí',

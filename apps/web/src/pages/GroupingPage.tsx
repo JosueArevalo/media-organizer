@@ -66,6 +66,8 @@ type GroupingDirectoryRow = GroupingDirectoryNode & {
 
 const formatPath = (path: string) => path.split('\\').join('/');
 
+const getPathName = (path: string) => formatPath(path).split('/').filter(Boolean).pop() ?? path;
+
 const getDirectoryPath = (relativePath: string) => {
   const normalized = formatPath(relativePath);
   const segments = normalized.split('/').filter(Boolean);
@@ -305,7 +307,10 @@ export const GroupingPage = () => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
 
     return workspace.items.filter((item) => {
-      const matchesFolder = activeFolderLabel === '__all__' || item.targetGroupLabel === activeFolderLabel;
+      const matchesFolder =
+        activeFolderLabel === '__all__' ||
+        (activeFolderLabel === '__preserved__' && item.preservedStructure) ||
+        item.targetGroupLabel === activeFolderLabel;
       const matchesSearch =
         !normalizedSearch ||
         item.fileName.toLowerCase().includes(normalizedSearch) ||
@@ -334,7 +339,23 @@ export const GroupingPage = () => {
   }, [directoryTree, expandedDirectories, preservedDirectories, reorganizedDirectories]);
 
   const preservedCount = directoryRows.filter((row) => row.isPreserved).length;
+  const preservedItemsCount = workspace?.items.filter((item) => item.preservedStructure).length ?? 0;
+  const preservedGroupLabel = useMemo(() => {
+    if (preservedDirectories.size === 1) {
+      return getPathName(Array.from(preservedDirectories)[0]);
+    }
+
+    return t('grouping.originalStructure');
+  }, [preservedDirectories, t]);
   const canReorganize = activeRules.size > 0 && Boolean(workspace) && !isReorganizing;
+
+  const activeFolderTitle = useMemo(() => {
+    if (activeFolderLabel === '__preserved__') {
+      return preservedGroupLabel;
+    }
+
+    return activeFolder?.label ?? t('grouping.allMedia');
+  }, [activeFolder, activeFolderLabel, preservedGroupLabel, t]);
 
   const handleBack = () => {
     const from = (location.state as { from?: string } | null)?.from;
@@ -605,14 +626,21 @@ export const GroupingPage = () => {
           <button className="btn btn-secondary" type="button" onClick={handleBack}>
             {t('grouping.back')}
           </button>
+          {view === 'setup' && (
+            <button className="btn btn-primary" type="button" onClick={() => void handleReorganize()} disabled={!canReorganize}>
+              {isReorganizing ? t('grouping.reorganizing') : t('grouping.reorganize')}
+            </button>
+          )}
           {view === 'review' && (
             <button className="btn btn-secondary" type="button" onClick={() => setView('setup')} disabled={!workspace || isApplying}>
               {t('grouping.editSetup')}
             </button>
           )}
-          <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={view !== 'review' || !workspace || isApplying}>
-            {isApplying ? t('grouping.applying') : t('grouping.apply')}
-          </button>
+          {view === 'review' && (
+            <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying}>
+              {isApplying ? t('grouping.applying') : t('grouping.apply')}
+            </button>
+          )}
           {groupingSessionState.status === 'completed' && (
             <button className="btn btn-secondary" type="button" onClick={() => navigate('/export')}>
               {t('grouping.continueExport')}
@@ -634,9 +662,6 @@ export const GroupingPage = () => {
                 <p className="page-section-title">{t('grouping.setupRules')}</p>
                 <p className="page-summary-note">{t('grouping.setupRulesNote')}</p>
               </div>
-              <button className="btn btn-primary" type="button" onClick={() => void handleReorganize()} disabled={!canReorganize}>
-                {isReorganizing ? t('grouping.reorganizing') : t('grouping.reorganize')}
-              </button>
             </div>
 
             <div className="grouping-rule-list">
@@ -744,6 +769,14 @@ export const GroupingPage = () => {
           </button>
 
           <div className="grouping-folder-list">
+            {preservedItemsCount > 0 && (
+              <div className={`grouping-folder-drop grouping-folder-drop-preserved ${activeFolderLabel === '__preserved__' ? 'is-active' : ''}`}>
+                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel('__preserved__')}>
+                  <span>{preservedGroupLabel}</span>
+                  <strong>{preservedItemsCount}</strong>
+                </button>
+              </div>
+            )}
             {workspace?.folders.map((folder) => (
               <div
                 key={folder.id}
@@ -833,7 +866,7 @@ export const GroupingPage = () => {
 
           <div className="grouping-main-head">
             <div>
-              <p className="page-section-title">{activeFolder?.label ?? t('grouping.allMedia')}</p>
+              <p className="page-section-title">{activeFolderTitle}</p>
               <p className="page-summary-note">{t('grouping.visibleFiles', { count: visibleItems.length })}</p>
             </div>
             <button className="btn btn-ghost" type="button" onClick={() => setSelectedIds(new Set(visibleItems.map((item) => item.id)))}>
