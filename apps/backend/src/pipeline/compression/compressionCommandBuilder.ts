@@ -22,6 +22,10 @@ export const buildImageCompressionCommand = (manifest: CompressionSessionManifes
     String(manifest.imageQuality),
     '--encoder-command',
     manifest.imageToolCommand,
+    '--imagemagick-command',
+    manifest.imageMagickCommand,
+    '--exiftool-command',
+    manifest.exifToolCommand,
     '--selection-scope-json',
     JSON.stringify(manifest.selectionScope)
   ]

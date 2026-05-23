@@ -12,27 +12,36 @@ import { useTranslation } from '../i18n';
 import '../styles/SettingsPage.css';
 
 type ToolStatus = 'ready' | 'missing' | 'unknown';
+type ToolKey = 'image' | 'video' | 'imagemagick' | 'exiftool';
 
 const SettingsPage = () => {
   const { t } = useTranslation();
   const [settings, setSettings] = useState<EncoderSettingsSnapshot>({
     imageToolCommand: '',
     videoToolCommand: '',
+    imageMagickCommand: '',
+    exifToolCommand: '',
     updatedAt: 0
   });
 
   const [savedSettings, setSavedSettings] = useState<EncoderSettingsSnapshot>({
     imageToolCommand: '',
     videoToolCommand: '',
+    imageMagickCommand: '',
+    exifToolCommand: '',
     updatedAt: 0
   });
 
   const [statuses, setStatuses] = useState<{
     image: ToolStatus;
     video: ToolStatus;
+    imagemagick: ToolStatus;
+    exiftool: ToolStatus;
   }>({
     image: 'unknown',
-    video: 'unknown'
+    video: 'unknown',
+    imagemagick: 'unknown',
+    exiftool: 'unknown'
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -49,7 +58,7 @@ const SettingsPage = () => {
       setSettings(loaded);
       setSavedSettings(loaded);
       // Validate paths
-      validatePaths(loaded.imageToolCommand, loaded.videoToolCommand);
+      validatePaths(loaded);
     });
 
     loadFolderSelections().then((selections) => {
@@ -58,41 +67,61 @@ const SettingsPage = () => {
     });
   }, []);
 
-  const validatePaths = async (imagePath: string, videoPath: string) => {
+  const validatePaths = async (nextSettings: EncoderSettingsSnapshot) => {
     // In a real app, we'd validate against the filesystem
     // For now, we show status based on whether paths are set
     setStatuses({
-      image: imagePath ? 'ready' : 'missing',
-      video: videoPath ? 'ready' : 'missing'
+      image: nextSettings.imageToolCommand ? 'ready' : 'missing',
+      video: nextSettings.videoToolCommand ? 'ready' : 'missing',
+      imagemagick: nextSettings.imageMagickCommand ? 'ready' : 'missing',
+      exiftool: nextSettings.exifToolCommand ? 'ready' : 'missing'
     });
   };
 
-  const handlePathChange = (tool: 'image' | 'video', value: string) => {
-    const newSettings = {
-      ...settings,
-      [tool === 'image' ? 'imageToolCommand' : 'videoToolCommand']: value
-    };
-    setSettings(newSettings);
-    validatePaths(
-      tool === 'image' ? value : settings.imageToolCommand,
-      tool === 'video' ? value : settings.videoToolCommand
-    );
+  const getToolField = (tool: ToolKey) => {
+    if (tool === 'image') return 'imageToolCommand';
+    if (tool === 'video') return 'videoToolCommand';
+    if (tool === 'imagemagick') return 'imageMagickCommand';
+    return 'exifToolCommand';
   };
 
-  const handleClearPath = (tool: 'image' | 'video') => {
+  const getToolName = (tool: ToolKey) => {
+    if (tool === 'image') return 'cjpeg-static.exe';
+    if (tool === 'video') return 'HandBrakeCLI.exe';
+    if (tool === 'imagemagick') return 'magick.exe';
+    return 'exiftool.exe';
+  };
+
+  const handlePathChange = (tool: ToolKey, value: string) => {
+    const newSettings = {
+      ...settings,
+      [getToolField(tool)]: value
+    };
+    setSettings(newSettings);
+    validatePaths(newSettings);
+  };
+
+  const handleClearPath = (tool: ToolKey) => {
     handlePathChange(tool, '');
     setToolPathMessage({
       type: 'success',
-      text: t('settings.pathCleared', { tool: tool === 'image' ? 'cjpeg-static.exe' : 'HandBrakeCLI.exe' })
+      text: t('settings.pathCleared', { tool: getToolName(tool) })
     });
   };
 
-  const handleBrowse = async (tool: 'image' | 'video') => {
+  const handleBrowse = async (tool: ToolKey) => {
     try {
       const isWindows = navigator.platform.toLowerCase().includes('win');
-      const currentPath = tool === 'image' ? settings.imageToolCommand : settings.videoToolCommand;
+      const currentPath = settings[getToolField(tool)];
       const result = await pickFileRequest({
-        title: tool === 'image' ? t('settings.chooseImageExecutable') : t('settings.chooseVideoExecutable'),
+        title:
+          tool === 'image'
+            ? t('settings.chooseImageExecutable')
+            : tool === 'video'
+              ? t('settings.chooseVideoExecutable')
+              : tool === 'imagemagick'
+                ? t('settings.chooseImageMagickExecutable')
+                : t('settings.chooseExifToolExecutable'),
         initialPath: currentPath,
         filters: isWindows
           ? [{ name: t('settings.executableFiles'), extensions: ['exe'] }]
@@ -129,18 +158,20 @@ const SettingsPage = () => {
     try {
       await saveEncoderSettings({
         imageToolCommand: settings.imageToolCommand,
-        videoToolCommand: settings.videoToolCommand
+        videoToolCommand: settings.videoToolCommand,
+        imageMagickCommand: settings.imageMagickCommand,
+        exifToolCommand: settings.exifToolCommand
       });
       setSavedSettings({
         imageToolCommand: settings.imageToolCommand,
         videoToolCommand: settings.videoToolCommand,
+        imageMagickCommand: settings.imageMagickCommand,
+        exifToolCommand: settings.exifToolCommand,
         updatedAt: Date.now()
       });
       setSaveMessage({
         type: 'success',
-        text: settings.imageToolCommand && settings.videoToolCommand
-          ? t('settings.saved')
-          : t('settings.savedBlocked')
+        text: t('settings.saved')
       });
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error) {
@@ -155,7 +186,9 @@ const SettingsPage = () => {
 
   const hasPendingEncoderChanges =
     settings.imageToolCommand !== savedSettings.imageToolCommand ||
-    settings.videoToolCommand !== savedSettings.videoToolCommand;
+    settings.videoToolCommand !== savedSettings.videoToolCommand ||
+    settings.imageMagickCommand !== savedSettings.imageMagickCommand ||
+    settings.exifToolCommand !== savedSettings.exifToolCommand;
 
   const handleResetRuntimeState = async () => {
     setIsResettingState(true);
@@ -297,6 +330,76 @@ const SettingsPage = () => {
           </div>
 
           <div className="settings-card-encoder-block">
+            <div className="card-title card-title-compact">{t('settings.heicConversion')}</div>
+            <div className="card-subtitle">{t('settings.heicSubtitle')}</div>
+
+            <div className="form-group">
+              <label className="form-label">{t('settings.imageMagickPathLabel')}</label>
+              <div className="path-input-group">
+                <input
+                  type="text"
+                  className="path-input"
+                  value={settings.imageMagickCommand}
+                  onChange={(e) => handlePathChange('imagemagick', e.target.value)}
+                  placeholder="C:\\Program Files\\ImageMagick-7.1.1-Q16-HDRI\\magick.exe"
+                />
+                <button
+                  className="path-btn"
+                  onClick={() => void handleBrowse('imagemagick')}
+                  type="button"
+                >
+                  {t('settings.browse')}
+                </button>
+                {settings.imageMagickCommand && (
+                  <button
+                    className="path-btn path-btn-clear"
+                    onClick={() => handleClearPath('imagemagick')}
+                    type="button"
+                    aria-label={t('settings.clearImageMagickAria')}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="settings-card-encoder-block">
+            <div className="card-title card-title-compact">{t('settings.metadataTools')}</div>
+            <div className="card-subtitle">{t('settings.metadataSubtitle')}</div>
+
+            <div className="form-group">
+              <label className="form-label">{t('settings.exifToolPathLabel')}</label>
+              <div className="path-input-group">
+                <input
+                  type="text"
+                  className="path-input"
+                  value={settings.exifToolCommand}
+                  onChange={(e) => handlePathChange('exiftool', e.target.value)}
+                  placeholder="C:\\Tools\\exiftool.exe"
+                />
+                <button
+                  className="path-btn"
+                  onClick={() => void handleBrowse('exiftool')}
+                  type="button"
+                >
+                  {t('settings.browse')}
+                </button>
+                {settings.exifToolCommand && (
+                  <button
+                    className="path-btn path-btn-clear"
+                    onClick={() => handleClearPath('exiftool')}
+                    type="button"
+                    aria-label={t('settings.clearExifToolAria')}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="settings-card-encoder-block">
             <div className="card-title card-title-compact">🎬 {t('settings.videoCompression')}</div>
             <div className="card-subtitle">{t('settings.videoSubtitle')}</div>
 
@@ -333,7 +436,7 @@ const SettingsPage = () => {
 
           <div className="encoder-actions-footer">
             <p className="encoder-actions-note">
-              {t('settings.changesLocal')}
+              {hasPendingEncoderChanges ? t('settings.unsavedChanges') : t('settings.changesLocal')}
             </p>
             <button
               className="btn btn-primary"

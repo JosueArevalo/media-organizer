@@ -15,6 +15,7 @@ type ScriptResultItem = {
   command: string[];
   status: 'completed' | 'failed';
   error?: string;
+  warning?: string;
 };
 
 type ScriptResultPayload = {
@@ -47,6 +48,8 @@ type CompressionManifestData = {
     videoPresetLabel: string;
     imageToolCommand: string;
     videoToolCommand: string;
+    imageMagickCommand?: string;
+    exifToolCommand?: string;
     selectionScope?: SelectionScope;
     createdAt?: string;
   };
@@ -253,10 +256,10 @@ const isFileCompressed = (absolutePath: string, scope: SelectionScope) => {
   return includedFiles.has(normalizedPath);
 };
 
-const upsertMediaItem = (sessionId: string, sourcePath: string, sourceDir: string, outputPath: string) => {
+const upsertMediaItem = (sessionId: string, sourcePath: string, outputRoot: string, outputPath: string) => {
   const db = getDb();
   const now = new Date().toISOString();
-  const relativePath = path.relative(sourceDir, sourcePath) || path.basename(sourcePath);
+  const relativePath = path.relative(outputRoot, outputPath) || path.basename(outputPath);
   const mediaType = getMediaTypeFromPath(sourcePath);
   const sizeBytes = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
 
@@ -502,11 +505,11 @@ const updateCompressionProgressCheckpoint = (
 const persistCompressionItem = (
   sessionId: string,
   item: ScriptResultItem,
-  sourceDir: string,
+  outputRoot: string,
   scope: SelectionScope,
   counters: { completedCount: number; failedCount: number }
 ) => {
-  const itemId = upsertMediaItem(sessionId, item.source, sourceDir, item.output);
+  const itemId = upsertMediaItem(sessionId, item.source, outputRoot, item.output);
   const selectedForCompression = isFileCompressed(item.source, scope);
   upsertDecision(sessionId, itemId, selectedForCompression);
   upsertStageStatus(sessionId, itemId, item.status, item.error ?? null);
@@ -556,6 +559,8 @@ export const executeCompressionSession = async (sessionId: string) => {
     videoPresetLabel: checkpointData.manifest.videoPresetLabel,
     imageToolCommand: checkpointData.manifest.imageToolCommand,
     videoToolCommand: checkpointData.manifest.videoToolCommand,
+    imageMagickCommand: checkpointData.manifest.imageMagickCommand ?? 'magick',
+    exifToolCommand: checkpointData.manifest.exifToolCommand ?? '',
     selectionScope: resolvedSelectionScope,
     createdAt: snapshot.session.createdAt
   });
@@ -572,6 +577,8 @@ export const executeCompressionSession = async (sessionId: string) => {
     videoPresetLabel: checkpointData.manifest.videoPresetLabel,
     imageToolCommand: checkpointData.manifest.imageToolCommand,
     videoToolCommand: checkpointData.manifest.videoToolCommand,
+    imageMagickCommand: checkpointData.manifest.imageMagickCommand ?? 'magick',
+    exifToolCommand: checkpointData.manifest.exifToolCommand ?? '',
     selectionScope: resolvedSelectionScope,
     createdAt: snapshot.session.createdAt
   });
@@ -592,7 +599,7 @@ export const executeCompressionSession = async (sessionId: string) => {
   });
 
   const imageResult = await executeCommand(imageCommand.command, imageCommand.args, (item) => {
-    persistCompressionItem(sessionId, item, checkpointData.manifest.sourceDir, resolvedSelectionScope, progressState);
+    persistCompressionItem(sessionId, item, checkpointData.outputRoot, resolvedSelectionScope, progressState);
 
     updateCompressionProgressCheckpoint(sessionId, {
       outputRoot: checkpointData.outputRoot,
@@ -604,7 +611,7 @@ export const executeCompressionSession = async (sessionId: string) => {
   });
 
   const videoResult = await executeCommand(videoCommand.command, videoCommand.args, (item) => {
-    persistCompressionItem(sessionId, item, checkpointData.manifest.sourceDir, resolvedSelectionScope, progressState);
+    persistCompressionItem(sessionId, item, checkpointData.outputRoot, resolvedSelectionScope, progressState);
 
     updateCompressionProgressCheckpoint(sessionId, {
       outputRoot: checkpointData.outputRoot,

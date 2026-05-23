@@ -6,10 +6,18 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.gif'}
+JPEG_EXTENSIONS = {'.jpg', '.jpeg'}
+HEIC_EXTENSIONS = {'.heic', '.heif'}
+COPY_ONLY_EXTENSIONS = {'.png', '.webp', '.gif'}
+
+
+class ToolConfigurationError(Exception):
+    pass
 
 
 def normalize_path(value: str) -> str:
@@ -93,9 +101,26 @@ def should_compress(source_file: Path, scope) -> bool:
     return normalized in included_files
 
 
-def build_output_path(source_dir: Path, output_dir: Path, source_file: Path) -> Path:
+def build_output_path(source_dir: Path, output_dir: Path, source_file: Path, convert_to_jpg: bool = False) -> Path:
     relative_path = source_file.relative_to(source_dir)
-    return output_dir / relative_path
+    output_path = output_dir / relative_path
+
+    if convert_to_jpg:
+        return output_path.with_suffix('.jpg')
+
+    return output_path
+
+
+def resolve_unique_output_path(output_file: Path, used_outputs: set[str]) -> Path:
+    candidate = output_file
+    index = 2
+
+    while normalize_path(str(candidate)) in used_outputs:
+        candidate = output_file.with_name(f'{output_file.stem} ({index}){output_file.suffix}')
+        index += 1
+
+    used_outputs.add(normalize_path(str(candidate)))
+    return candidate
 
 
 def emit_event(payload: dict):
@@ -111,12 +136,105 @@ def iter_image_files(source_dir: Path):
                 yield file_path
 
 
+def run_cjpeg(encoder_command: str, quality: int, source_file: Path, output_file: Path):
+    command = [
+        encoder_command,
+        '-quality',
+        str(quality),
+        '-progressive',
+        '-optimize',
+        '-outfile',
+        str(output_file),
+        str(source_file),
+    ]
+    subprocess.run(command, check=True, capture_output=True, text=True)
+    return command
+
+
+def convert_heic_to_jpeg(source_file: Path, output_file: Path, quality: int, encoder_command: str, imagemagick_command: str):
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.ppm')
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+
+    magick_command = [
+        imagemagick_command,
+        str(source_file),
+        '-auto-orient',
+        '-colorspace',
+        'sRGB',
+        str(temp_path),
+    ]
+    cjpeg_command = [
+        encoder_command,
+        '-quality',
+        str(quality),
+        '-progressive',
+        '-optimize',
+        '-outfile',
+        str(output_file),
+        str(temp_path),
+    ]
+
+    try:
+        subprocess.run(magick_command, check=True, capture_output=True, text=True)
+        subprocess.run(cjpeg_command, check=True, capture_output=True, text=True)
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return [*magick_command, '&&', *cjpeg_command]
+
+
+def ensure_heic_support(imagemagick_command: str):
+    result = subprocess.run(
+        [imagemagick_command, 'identify', '-list', 'format'],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    output = f'{result.stdout}\n{result.stderr}'.upper()
+
+    if 'HEIC' not in output and 'HEIF' not in output:
+        raise ToolConfigurationError('ImageMagick is installed, but HEIC/HEIF support was not found. Install a build with libheif.')
+
+
+def copy_metadata(source_file: Path, output_file: Path, exiftool_command: str):
+    if not exiftool_command:
+        return 'ExifTool is not configured; metadata copy was skipped.'
+
+    command = [
+        exiftool_command,
+        '-overwrite_original',
+        '-TagsFromFile',
+        str(source_file),
+        '-all:all',
+        '-unsafe',
+        '-icc_profile',
+        '-Orientation#=1',
+        str(output_file),
+    ]
+
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except FileNotFoundError:
+        return f'ExifTool command not found: {exiftool_command}'
+    except subprocess.CalledProcessError as error:
+        stderr = (error.stderr or '').strip()
+        return stderr or f'Metadata copy failed for {source_file}'
+
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description='Compress images into a destination folder.')
     parser.add_argument('--source-dir', required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--quality', required=True, type=int)
     parser.add_argument('--encoder-command', default='cjpeg')
+    parser.add_argument('--imagemagick-command', default='magick')
+    parser.add_argument('--exiftool-command', default='')
     parser.add_argument('--selection-scope-json', default='')
     args = parser.parse_args()
 
@@ -126,30 +244,32 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = []
+    used_outputs = set()
+    heic_support_checked = False
 
     for source_file in iter_image_files(source_dir):
-        output_file = build_output_path(source_dir, output_dir, source_file)
+        selected_for_compression = should_compress(source_file, scope)
+        extension = source_file.suffix.lower()
+        output_file = build_output_path(
+            source_dir,
+            output_dir,
+            source_file,
+            convert_to_jpg=selected_for_compression and extension in HEIC_EXTENSIONS,
+        )
+        output_file = resolve_unique_output_path(output_file, used_outputs)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        command = [
-            args.encoder_command,
-            '-quality',
-            str(args.quality),
-            '-progressive',
-            '-optimize',
-            '-outfile',
-            str(output_file),
-            str(source_file),
-        ]
+        command = []
 
         status = 'completed'
         error_message = None
+        warning_message = None
 
-        if not should_compress(source_file, scope):
+        if not selected_for_compression:
             shutil.copy2(source_file, output_file)
-        else:
+        elif extension in JPEG_EXTENSIONS:
             try:
-                subprocess.run(command, check=True, capture_output=True, text=True)
+                command = run_cjpeg(args.encoder_command, args.quality, source_file, output_file)
             except FileNotFoundError:
                 status = 'failed'
                 error_message = f"Image encoder command not found: {args.encoder_command}"
@@ -157,8 +277,39 @@ def main() -> int:
                 status = 'failed'
                 stderr = (error.stderr or '').strip()
                 error_message = stderr or f"Image compression failed for {source_file}"
+        elif extension in HEIC_EXTENSIONS:
+            try:
+                if not heic_support_checked:
+                    ensure_heic_support(args.imagemagick_command)
+                    heic_support_checked = True
 
-        if status == 'failed':
+                command = convert_heic_to_jpeg(
+                    source_file,
+                    output_file,
+                    args.quality,
+                    args.encoder_command,
+                    args.imagemagick_command,
+                )
+                warning_message = copy_metadata(source_file, output_file, args.exiftool_command.strip())
+            except FileNotFoundError as error:
+                status = 'failed'
+                missing_command = error.filename or args.imagemagick_command
+                error_message = f"HEIC conversion command not found: {missing_command}"
+            except ToolConfigurationError as error:
+                status = 'failed'
+                error_message = str(error)
+            except subprocess.CalledProcessError as error:
+                status = 'failed'
+                stderr = (error.stderr or '').strip()
+                error_message = stderr or f"HEIC conversion failed for {source_file}"
+        elif extension in COPY_ONLY_EXTENSIONS:
+            shutil.copy2(source_file, output_file)
+            warning_message = f"{extension.upper().lstrip('.')} files are copied without compression in this version."
+        else:
+            shutil.copy2(source_file, output_file)
+            warning_message = f"{extension or 'Unknown'} files are copied without compression in this version."
+
+        if status == 'failed' and source_file.suffix.lower() == output_file.suffix.lower():
             shutil.copy2(source_file, output_file)
 
         item = {
@@ -167,6 +318,7 @@ def main() -> int:
             'command': command,
             'status': status,
             'error': error_message,
+            'warning': warning_message,
         }
 
         manifest.append(item)
