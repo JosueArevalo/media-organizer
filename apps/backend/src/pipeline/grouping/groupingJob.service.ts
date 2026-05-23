@@ -138,6 +138,9 @@ export const startGroupingSession = (request: GroupingSessionRequest): GroupingS
     outputDir: request.outputDir,
     outputRoot,
     compressionSessionId: request.compressionSessionId ?? null,
+    preservedDirectories: request.preservedDirectories ?? [],
+    reorganizedDirectories: request.reorganizedDirectories ?? [],
+    rules: request.rules ?? [],
     strategy: request.strategy ?? 'date',
     autoRename: request.autoRename ?? true,
     createdAt: timestamp

@@ -93,7 +93,7 @@ const seedCompressionSession = (relativePaths: string[]) => {
   return { compressionSessionId, items };
 };
 
-test('createGroupingWorkspace proposes event folders from filenames and misc folders for single dates', async () => {
+test('createGroupingWorkspace opens without automatic proposals', async () => {
   const { compressionSessionId } = seedCompressionSession([
     'IMG_20250102_101010.jpg',
     'IMG_20250102_101111.jpg',
@@ -109,9 +109,152 @@ test('createGroupingWorkspace proposes event folders from filenames and misc fol
 
   assert.deepEqual(
     workspace.folders.map((folder) => folder.label).sort(),
-    ['2024 - Varias 2024', '2025.01.02 - Evento']
+    []
   );
-  assert.equal(workspace.items.filter((item) => item.targetGroupLabel === '2025.01.02 - Evento').length, 2);
+  assert.equal(workspace.items.every((item) => item.targetGroupLabel === null), true);
+});
+
+test('reorganizeGroupingWorkspace proposes enabled date rules only', async () => {
+  const { compressionSessionId } = seedCompressionSession([
+    'IMG_20250102_101010.jpg',
+    'IMG_20250102_101111.jpg',
+    'IMG_20240203_101010.jpg',
+    'notes/no-date.jpg'
+  ]);
+  const { createGroupingWorkspace, reorganizeGroupingWorkspace } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+
+  const workspace = createGroupingWorkspace({
+    sourceDir,
+    outputDir,
+    compressionSessionId
+  });
+  const proposed = reorganizeGroupingWorkspace(workspace.sessionId, {
+    rules: ['date-event-multiple', 'single-date-year-unique'],
+    preservedDirectories: [],
+    reorganizedDirectories: []
+  });
+
+  assert.ok(proposed);
+  assert.deepEqual(
+    proposed.folders.map((folder) => folder.label).sort(),
+    ['2024 - Unique', '2025.01.02 - Evento']
+  );
+  assert.equal(proposed.items.filter((item) => item.targetGroupLabel === '2025.01.02 - Evento').length, 2);
+  assert.equal(proposed.items.filter((item) => item.targetGroupLabel === '2024 - Unique').length, 1);
+  assert.ok(proposed.items.find((item) => item.relativePath === 'notes/no-date.jpg')?.targetGroupLabel === null);
+});
+
+test('reorganizeGroupingWorkspace does not generate proposals when no rules are active', async () => {
+  const { compressionSessionId } = seedCompressionSession(['IMG_20250102_101010.jpg', 'IMG_20250102_101111.jpg']);
+  const { createGroupingWorkspace, reorganizeGroupingWorkspace } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  const proposed = reorganizeGroupingWorkspace(workspace.sessionId, {
+    rules: [],
+    preservedDirectories: [],
+    reorganizedDirectories: []
+  });
+
+  assert.ok(proposed);
+  assert.deepEqual(proposed.folders, []);
+  assert.equal(proposed.items.every((item) => item.targetGroupLabel === null), true);
+});
+
+test('reorganizeGroupingWorkspace keeps marked directories out of date reorganization', async () => {
+  const { compressionSessionId } = seedCompressionSession([
+    'Móvil Josué/DCIM/IMG_20250102_101010.jpg',
+    'Móvil Noelia/DCIM/IMG_20250102_101111.jpg',
+    'Casal Llantia 2025/day-1/IMG_20250102_111111.jpg',
+    'Casal Llantia 2025/day-2/IMG_20250103_111111.jpg'
+  ]);
+  const { applyGroupingWorkspace, createGroupingWorkspace, getGroupingWorkspace, reorganizeGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js'
+  );
+
+  const workspace = createGroupingWorkspace({
+    sourceDir,
+    outputDir,
+    compressionSessionId
+  });
+  const proposed = reorganizeGroupingWorkspace(workspace.sessionId, {
+    rules: ['date-event-multiple', 'single-date-year-unique'],
+    preservedDirectories: ['source/Casal Llantia 2025'],
+    reorganizedDirectories: []
+  });
+
+  assert.ok(proposed);
+  assert.deepEqual(proposed.folders.map((folder) => folder.label), ['2025.01.02 - Evento']);
+  assert.equal(proposed.items.filter((item) => item.targetGroupLabel === '2025.01.02 - Evento').length, 2);
+  assert.equal(proposed.items.filter((item) => item.preservedStructure).length, 2);
+  assert.ok(proposed.items.filter((item) => item.preservedStructure).every((item) => item.targetGroupLabel === null));
+
+  const result = applyGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(result?.status, 'completed');
+  assert.equal(result?.movedItems, 2);
+  assert.ok(fs.existsSync(path.join(outputDir, '2025.01.02 - Evento', 'IMG_20250102_101010.jpg')));
+  assert.ok(fs.existsSync(path.join(outputDir, '2025.01.02 - Evento', 'IMG_20250102_101111.jpg')));
+  assert.ok(fs.existsSync(path.join(outputDir, 'Casal Llantia 2025', 'day-1', 'IMG_20250102_111111.jpg')));
+  assert.ok(fs.existsSync(path.join(outputDir, 'Casal Llantia 2025', 'day-2', 'IMG_20250103_111111.jpg')));
+
+  const afterApply = getGroupingWorkspace(workspace.sessionId);
+  assert.equal(afterApply?.items.filter((item) => item.preservedStructure).length, 2);
+});
+
+test('reorganized child directories override a preserved parent directory', async () => {
+  const { compressionSessionId } = seedCompressionSession([
+    'Album/keep/IMG_20250102_111111.jpg',
+    'Album/reorganize/IMG_20250103_111111.jpg',
+    'Album/reorganize/IMG_20250103_121111.jpg'
+  ]);
+  const { applyGroupingWorkspace, createGroupingWorkspace, reorganizeGroupingWorkspace } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+
+  const workspace = createGroupingWorkspace({
+    sourceDir,
+    outputDir,
+    compressionSessionId
+  });
+  const proposed = reorganizeGroupingWorkspace(workspace.sessionId, {
+    rules: ['date-event-multiple'],
+    preservedDirectories: ['source/Album'],
+    reorganizedDirectories: ['source/Album/reorganize']
+  });
+
+  assert.ok(proposed);
+  assert.deepEqual(proposed.folders.map((folder) => folder.label), ['2025.01.03 - Evento']);
+  assert.equal(proposed.items.filter((item) => item.preservedStructure).length, 1);
+  assert.equal(proposed.items.filter((item) => item.targetGroupLabel === '2025.01.03 - Evento').length, 2);
+
+  const result = applyGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(result?.movedItems, 2);
+  assert.ok(fs.existsSync(path.join(outputDir, 'Album', 'keep', 'IMG_20250102_111111.jpg')));
+  assert.ok(fs.existsSync(path.join(outputDir, '2025.01.03 - Evento', 'IMG_20250103_111111.jpg')));
+  assert.ok(fs.existsSync(path.join(outputDir, '2025.01.03 - Evento', 'IMG_20250103_121111.jpg')));
+});
+
+test('manual assignments can move media from preserved directories', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['Album/IMG_20250102_111111.jpg']);
+  const { applyGroupingWorkspace, assignGroupingItems, createGroupingWorkspace, reorganizeGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  const proposed = reorganizeGroupingWorkspace(workspace.sessionId, {
+    rules: ['date-event-multiple', 'single-date-year-unique'],
+    preservedDirectories: ['source/Album'],
+    reorganizedDirectories: []
+  });
+
+  assert.ok(proposed);
+  assert.equal(proposed.items[0].preservedStructure, true);
+  assert.equal(proposed.items[0].targetGroupLabel, null);
+
+  assignGroupingItems(workspace.sessionId, [items[0].itemId], 'Manual');
+  const result = applyGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(result?.movedItems, 1);
+  assert.ok(fs.existsSync(path.join(outputDir, 'Manual', 'IMG_20250102_111111.jpg')));
 });
 
 test('folders can be created, renamed, assigned, deleted when empty, and applied with collision-safe moves', async () => {
@@ -184,7 +327,7 @@ test('deleteGroupingItems hides selected items and apply removes only destinatio
   assert.equal(fs.existsSync(path.join(outputDir, 'delete.jpg')), false);
   assert.equal(fs.existsSync(path.join(sourceDir, 'delete.jpg')), true);
   assert.equal(fs.existsSync(path.join(sourceDir, 'keep.jpg')), true);
-  assert.equal(fs.existsSync(path.join(outputDir, 'keep.jpg')), false);
+  assert.equal(fs.existsSync(path.join(outputDir, 'keep.jpg')), true);
 
   const afterApply = getGroupingWorkspace(workspace.sessionId);
   assert.equal(afterApply?.items.some((item) => item.id === deletedItem.itemId), false);

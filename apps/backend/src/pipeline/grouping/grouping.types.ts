@@ -5,9 +5,14 @@ export type GroupingSessionRequest = {
   sourceDir: string;
   outputDir: string;
   compressionSessionId?: string;
+  preservedDirectories?: string[];
+  reorganizedDirectories?: string[];
+  rules?: GroupingRuleId[];
   strategy?: 'date' | 'source-kind';
   autoRename?: boolean;
 };
+
+export type GroupingRuleId = 'date-event-multiple' | 'single-date-year-unique';
 
 export type GroupingSessionManifest = {
   sessionId: string;
@@ -15,6 +20,9 @@ export type GroupingSessionManifest = {
   outputDir: string;
   outputRoot: string;
   compressionSessionId: string | null;
+  preservedDirectories: string[];
+  reorganizedDirectories: string[];
+  rules: GroupingRuleId[];
   strategy: 'date' | 'source-kind';
   autoRename: boolean;
   createdAt: string;

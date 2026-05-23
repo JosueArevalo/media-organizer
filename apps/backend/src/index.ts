@@ -27,6 +27,7 @@ import {
   getGroupingMediaPath,
   getGroupingWorkspace,
   listGroupingTemplates,
+  reorganizeGroupingWorkspace,
   renameGroupingFolder,
   updateGroupingTemplate
 } from './pipeline/grouping/groupingWorkspace.service.js';
@@ -409,6 +410,37 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
           sendJson(res, 200, assignGroupingItems(sessionId, body.itemIds, body.targetGroupLabel));
         } catch (error) {
           sendCaughtError(res, error, 'Could not assign items.');
+        }
+      })();
+
+      return;
+    }
+
+    if (req.method === 'POST' && subPath === 'reorganize') {
+      void (async () => {
+        try {
+          const body = (await readRequestJson(req)) as
+            | {
+                rules?: Array<'date-event-multiple' | 'single-date-year-unique'>;
+                preservedDirectories?: string[];
+                reorganizedDirectories?: string[];
+              }
+            | null;
+
+          const workspace = reorganizeGroupingWorkspace(sessionId, {
+            rules: Array.isArray(body?.rules) ? body.rules : [],
+            preservedDirectories: Array.isArray(body?.preservedDirectories) ? body.preservedDirectories : [],
+            reorganizedDirectories: Array.isArray(body?.reorganizedDirectories) ? body.reorganizedDirectories : []
+          });
+
+          if (!workspace) {
+            sendJson(res, 404, { status: 'not_found' });
+            return;
+          }
+
+          sendJson(res, 200, workspace);
+        } catch (error) {
+          sendCaughtError(res, error, 'Could not reorganize workspace.');
         }
       })();
 
