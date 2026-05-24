@@ -4,6 +4,7 @@ import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useTranslation } from '../i18n';
 import {
   loadFolderSelectionHandle,
+  loadSourceSelectionScope,
   saveSourceSelectionScope,
   loadSourceTreeSnapshot,
   type SourceTreeDirectoryNode,
@@ -406,6 +407,10 @@ const applyPreset = (root: ScannedDirectory, preset: ScopePreset) => {
   return { excludedDirectories, excludedFiles, includedDirectories, includedFiles };
 };
 
+const isSelectionMode = (value: unknown): value is SelectionMode => value === 'files' || value === 'directories';
+const isScopePreset = (value: unknown): value is ScopePreset =>
+  value === 'all' || value === 'whatsapp' || value === 'camera' || value === 'custom';
+
 export const SelectionPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -433,6 +438,7 @@ export const SelectionPage = () => {
       try {
         const handle = await loadFolderSelectionHandle('source');
         const snapshot = loadSourceTreeSnapshot('source');
+        const persistedScope = loadSourceSelectionScope();
 
         let tree: ScannedDirectory | null = null;
 
@@ -453,13 +459,13 @@ export const SelectionPage = () => {
         }
 
         setScanState({ status: 'ready', root: tree, error: null });
-        setExcludedDirectories(new Set());
-        setExcludedFiles(new Set());
-        setIncludedDirectories(new Set());
-        setIncludedFiles(new Set());
-        setExpandedDirectories(new Set([tree.path]));
-        setActivePreset('all');
-        setMode('files');
+        setExcludedDirectories(new Set(persistedScope?.excludedDirectories ?? []));
+        setExcludedFiles(new Set(persistedScope?.excludedFiles ?? []));
+        setIncludedDirectories(new Set(persistedScope?.includedDirectories ?? []));
+        setIncludedFiles(new Set(persistedScope?.includedFiles ?? []));
+        setExpandedDirectories(new Set([...(persistedScope?.expandedDirectories ?? []), tree.path]));
+        setActivePreset(isScopePreset(persistedScope?.activePreset) ? persistedScope.activePreset : 'all');
+        setMode(isSelectionMode(persistedScope?.mode) ? persistedScope.mode : 'files');
       } catch (error) {
         if (!isActive) {
           return;
@@ -522,9 +528,12 @@ export const SelectionPage = () => {
       excludedDirectories: sortPaths(excludedDirectories),
       excludedFiles: sortPaths(excludedFiles),
       includedDirectories: sortPaths(includedDirectories),
-      includedFiles: sortPaths(includedFiles)
+      includedFiles: sortPaths(includedFiles),
+      activePreset,
+      mode,
+      expandedDirectories: sortPaths(expandedDirectories)
     });
-  }, [scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles]);
+  }, [scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles, activePreset, mode, expandedDirectories]);
 
   const totalBytes = summary ? summary.includedBytes + summary.excludedBytes : 0;
   const totalFiles = summary ? summary.includedFiles + summary.excludedFiles : 0;
