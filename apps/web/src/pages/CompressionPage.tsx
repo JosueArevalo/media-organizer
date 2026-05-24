@@ -12,6 +12,11 @@ import {
   type SourceTreeNode
 } from '../services/folder-selection.store';
 import { loadEncoderSettings, type EncoderSettingsSnapshot } from '../services/encoder-settings.store';
+import {
+  loadCompressionSettings,
+  saveCompressionSettings,
+  type CompressionImagePreset
+} from '../services/compression-settings.store';
 import { completeCompressionSession, failCompressionSession, startCompressionSession, resetCompressionSession } from '../services/compression-job.store';
 import {
   getCompressionSessionRequest,
@@ -22,7 +27,7 @@ import {
 } from '../services/compression.service';
 import { scanSourceTreeRequest } from '../services/source-tree.service';
 
-type ImagePresetId = 'balanced' | 'high' | 'aggressive' | 'custom';
+type ImagePresetId = CompressionImagePreset;
 
 type VideoPresetsState =
   | { status: 'idle'; error: null }
@@ -380,9 +385,10 @@ export const CompressionPage = () => {
   const location = useLocation();
   const { sourceSelection, destinationSelection, isLoading: areFolderSelectionsLoading } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
-  const [imagePreset, setImagePreset] = useState<ImagePresetId>('balanced');
-  const [customQuality, setCustomQuality] = useState<number>(72);
-  const [videoPreset, setVideoPreset] = useState<string>('Fast 1080p30');
+  const savedCompressionSettings = useMemo(() => loadCompressionSettings(), []);
+  const [imagePreset, setImagePreset] = useState<ImagePresetId>(savedCompressionSettings.imagePreset);
+  const [customQuality, setCustomQuality] = useState<number>(savedCompressionSettings.customQuality);
+  const [videoPreset, setVideoPreset] = useState<string>(savedCompressionSettings.videoPreset);
   const [videoPresets, setVideoPresets] = useState<HandBrakePresetOption[]>([]);
   const [videoPresetsState, setVideoPresetsState] = useState<VideoPresetsState>({ status: 'idle', error: null });
   const [mediaStatsState, setMediaStatsState] = useState<MediaStatsState>({ status: 'idle', data: null, error: null });
@@ -415,6 +421,14 @@ export const CompressionPage = () => {
       ? t(activePreset.labelKey)
       : t('compression.preset.balanced');
   const selectedVideoProfileLabel = videoPreset;
+
+  useEffect(() => {
+    saveCompressionSettings({
+      imagePreset,
+      customQuality,
+      videoPreset
+    });
+  }, [imagePreset, customQuality, videoPreset]);
 
   useEffect(() => {
     let isActive = true;
