@@ -556,6 +556,16 @@ const isMainModule = process.argv[1] ? import.meta.url === pathToFileURL(process
 if (isMainModule) {
   const server = createBackendServer();
 
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`[backend] port ${port} is already in use. Stop the existing backend process or change MEDIA_ORGANIZER_PORT.`);
+      process.exit(1);
+    }
+
+    console.error('[backend] failed to start:', error);
+    process.exit(1);
+  });
+
   server.listen(port, () => {
     console.log(`[backend] running at http://localhost:${port}`);
   });
