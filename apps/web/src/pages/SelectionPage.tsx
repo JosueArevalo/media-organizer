@@ -10,6 +10,7 @@ import {
   type SourceTreeDirectoryNode,
   type SourceTreeNode
 } from '../services/folder-selection.store';
+import { notifyCompletion } from '../services/completion-notification.service';
 import { scanSourceTreeRequest } from '../services/source-tree.service';
 
 type SelectionMode = 'files' | 'directories';
@@ -466,6 +467,10 @@ export const SelectionPage = () => {
         setExpandedDirectories(new Set([...(persistedScope?.expandedDirectories ?? []), tree.path]));
         setActivePreset(isScopePreset(persistedScope?.activePreset) ? persistedScope.activePreset : 'all');
         setMode(isSelectionMode(persistedScope?.mode) ? persistedScope.mode : 'files');
+        void notifyCompletion('selectionLoaded', {
+          title: t('notifications.selectionLoaded.title'),
+          body: t('notifications.selectionLoaded.body', { count: tree.fileCount })
+        });
       } catch (error) {
         if (!isActive) {
           return;

@@ -6,13 +6,72 @@ import {
 } from '../services/encoder-settings.store';
 import { loadFolderSelections } from '../services/folder-selection.store';
 import { resetAllPersistentAppState } from '../services/app-maintenance.store';
+import {
+  COMPLETION_NOTIFICATION_EVENT_KEYS,
+  loadCompletionNotificationSettings,
+  saveCompletionNotificationSettings,
+  type CompletionNotificationEventKey,
+  type CompletionNotificationSettings
+} from '../services/completion-notification-settings.store';
+import {
+  getBrowserNotificationPermission,
+  requestBrowserNotificationPermission,
+  testCompletionNotification,
+  type CompletionNotificationBlockedReason,
+  type CompletionNotificationResult
+} from '../services/completion-notification.service';
 import { resetCompressionSession } from '../services/compression-job.store';
 import { pickFileRequest } from '../services/system-picker.service';
-import { useTranslation } from '../i18n';
+import { useTranslation, type TranslationKey } from '../i18n';
 import '../styles/SettingsPage.css';
 
 type ToolStatus = 'ready' | 'missing' | 'unknown';
 type ToolKey = 'image' | 'video' | 'imagemagick' | 'exiftool';
+type BrowserPermissionState = NotificationPermission | 'unsupported';
+
+const notificationEventLabelKeys: Record<CompletionNotificationEventKey, {
+  title: TranslationKey;
+  description: TranslationKey;
+}> = {
+  compressionCompleted: {
+    title: 'settings.notifications.event.compressionCompleted',
+    description: 'settings.notifications.event.compressionCompletedDescription'
+  },
+  exportCompleted: {
+    title: 'settings.notifications.event.exportCompleted',
+    description: 'settings.notifications.event.exportCompletedDescription'
+  },
+  selectionLoaded: {
+    title: 'settings.notifications.event.selectionLoaded',
+    description: 'settings.notifications.event.selectionLoadedDescription'
+  },
+  groupingReorganized: {
+    title: 'settings.notifications.event.groupingReorganized',
+    description: 'settings.notifications.event.groupingReorganizedDescription'
+  },
+  organizationApplied: {
+    title: 'settings.notifications.event.organizationApplied',
+    description: 'settings.notifications.event.organizationAppliedDescription'
+  }
+};
+
+const permissionLabelKeys: Record<BrowserPermissionState, TranslationKey> = {
+  granted: 'settings.notifications.permission.granted',
+  denied: 'settings.notifications.permission.denied',
+  default: 'settings.notifications.permission.default',
+  unsupported: 'settings.notifications.permission.unsupported'
+};
+
+const blockedReasonLabelKeys: Record<CompletionNotificationBlockedReason, TranslationKey> = {
+  'event-disabled': 'settings.notifications.blocked.eventDisabled',
+  duplicate: 'settings.notifications.blocked.duplicate',
+  'no-channels-enabled': 'settings.notifications.blocked.noChannels',
+  'audio-unsupported': 'settings.notifications.blocked.audioUnsupported',
+  'audio-blocked': 'settings.notifications.blocked.audioBlocked',
+  'notification-unsupported': 'settings.notifications.blocked.notificationUnsupported',
+  'notification-permission-default': 'settings.notifications.blocked.notificationPermissionDefault',
+  'notification-permission-denied': 'settings.notifications.blocked.notificationPermissionDenied'
+};
 
 const SettingsPage = () => {
   const { t } = useTranslation();
@@ -52,6 +111,11 @@ const SettingsPage = () => {
   const [isClearingDestination, setIsClearingDestination] = useState(false);
   const [sourcePath, setSourcePath] = useState('');
   const [destinationPath, setDestinationPath] = useState('');
+  const [notificationSettings, setNotificationSettings] = useState<CompletionNotificationSettings>(
+    loadCompletionNotificationSettings
+  );
+  const [browserPermission, setBrowserPermission] = useState<BrowserPermissionState>(() => getBrowserNotificationPermission());
+  const [notificationMessage, setNotificationMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     loadEncoderSettings().then((loaded) => {
@@ -65,6 +129,8 @@ const SettingsPage = () => {
       setSourcePath(selections.source?.path ?? '');
       setDestinationPath(selections.destination?.path ?? '');
     });
+
+    setBrowserPermission(getBrowserNotificationPermission());
   }, []);
 
   const validatePaths = async (nextSettings: EncoderSettingsSnapshot) => {
@@ -189,6 +255,104 @@ const SettingsPage = () => {
     settings.videoToolCommand !== savedSettings.videoToolCommand ||
     settings.imageMagickCommand !== savedSettings.imageMagickCommand ||
     settings.exifToolCommand !== savedSettings.exifToolCommand;
+
+  const saveNotificationSettings = (nextSettings: Omit<CompletionNotificationSettings, 'updatedAt'>) => {
+    const saved = saveCompletionNotificationSettings(nextSettings);
+    setNotificationSettings(saved);
+    return saved;
+  };
+
+  const updateNotificationChannel = (channel: 'soundEnabled' | 'browserNotificationsEnabled', value: boolean) => {
+    saveNotificationSettings({
+      ...notificationSettings,
+      [channel]: value
+    });
+  };
+
+  const updateNotificationEvent = (eventKey: CompletionNotificationEventKey, value: boolean) => {
+    saveNotificationSettings({
+      ...notificationSettings,
+      events: {
+        ...notificationSettings.events,
+        [eventKey]: value
+      }
+    });
+  };
+
+  const handleEnableBrowserNotifications = async () => {
+    const permission = await requestBrowserNotificationPermission();
+    setBrowserPermission(permission);
+
+    if (permission === 'granted') {
+      updateNotificationChannel('browserNotificationsEnabled', true);
+      setNotificationMessage({ type: 'success', text: t('settings.notifications.browserEnabled') });
+      return;
+    }
+
+    updateNotificationChannel('browserNotificationsEnabled', false);
+    setNotificationMessage({
+      type: 'error',
+      text: permission === 'unsupported'
+        ? t('settings.notifications.browserUnsupported')
+        : t('settings.notifications.browserDenied')
+    });
+  };
+
+  const handleToggleBrowserNotifications = (enabled: boolean) => {
+    if (enabled && browserPermission !== 'granted') {
+      void handleEnableBrowserNotifications();
+      return;
+    }
+
+    updateNotificationChannel('browserNotificationsEnabled', enabled);
+  };
+
+  const getTestNotificationMessage = (result: CompletionNotificationResult) => {
+    if (result.soundPlayed && result.browserNotificationShown) {
+      return t('settings.notifications.testSentBoth');
+    }
+
+    if (result.soundPlayed) {
+      return t('settings.notifications.testSentSound');
+    }
+
+    if (result.browserNotificationShown) {
+      return t('settings.notifications.testSentBrowser');
+    }
+
+    return result.blockedReason
+      ? t(blockedReasonLabelKeys[result.blockedReason])
+      : t('settings.notifications.testBlocked');
+  };
+
+  const handleTestNotification = async () => {
+    if (notificationSettings.browserNotificationsEnabled && browserPermission !== 'granted') {
+      const permission = await requestBrowserNotificationPermission();
+      setBrowserPermission(permission);
+
+      if (permission !== 'granted' && !notificationSettings.soundEnabled) {
+        setNotificationMessage({
+          type: 'error',
+          text: permission === 'unsupported'
+            ? t('settings.notifications.browserUnsupported')
+            : t('settings.notifications.browserDenied')
+        });
+        return;
+      }
+    }
+
+    const result = await testCompletionNotification({
+      title: t('notifications.test.title'),
+      body: t('notifications.test.body')
+    });
+
+    const wasAnyChannelDelivered = result.soundPlayed || result.browserNotificationShown;
+
+    setNotificationMessage({
+      type: wasAnyChannelDelivered ? 'success' : 'error',
+      text: getTestNotificationMessage(result)
+    });
+  };
 
   const handleResetRuntimeState = async () => {
     setIsResettingState(true);
@@ -450,6 +614,62 @@ const SettingsPage = () => {
         </div>
 
         <div className="settings-card">
+          <div className="card-title">{t('settings.notifications.title')}</div>
+          <div className="card-subtitle">{t('settings.notifications.subtitle')}</div>
+
+          <div className="notification-settings-grid">
+            <label className="notification-toggle-row">
+              <input
+                checked={notificationSettings.soundEnabled}
+                onChange={(event) => updateNotificationChannel('soundEnabled', event.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                <strong>{t('settings.notifications.sound')}</strong>
+                <small>{t('settings.notifications.soundDescription')}</small>
+              </span>
+            </label>
+
+            <label className="notification-toggle-row">
+              <input
+                checked={notificationSettings.browserNotificationsEnabled}
+                onChange={(event) => handleToggleBrowserNotifications(event.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                <strong>{t('settings.notifications.browser')}</strong>
+                <small>{t('settings.notifications.browserDescription', { permission: t(permissionLabelKeys[browserPermission]) })}</small>
+              </span>
+            </label>
+          </div>
+
+          <div className="notification-actions">
+            <button className="btn btn-secondary" type="button" onClick={() => void handleEnableBrowserNotifications()}>
+              {t('settings.notifications.requestPermission')}
+            </button>
+            <button className="btn btn-primary" type="button" onClick={() => void handleTestNotification()}>
+              {t('settings.notifications.test')}
+            </button>
+          </div>
+
+          <div className="notification-event-list">
+            {COMPLETION_NOTIFICATION_EVENT_KEYS.map((eventKey) => (
+              <label className="notification-event-row" key={eventKey}>
+                <input
+                  checked={notificationSettings.events[eventKey]}
+                  onChange={(event) => updateNotificationEvent(eventKey, event.target.checked)}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>{t(notificationEventLabelKeys[eventKey].title)}</strong>
+                  <small>{t(notificationEventLabelKeys[eventKey].description)}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="settings-card">
           <div className="card-title">{t('settings.maintenance')}</div>
           <div className="card-subtitle">{t('settings.maintenanceSubtitle')}</div>
 
@@ -498,6 +718,12 @@ const SettingsPage = () => {
         {maintenanceMessage && (
           <div className={`message message-${maintenanceMessage.type}`}>
             {maintenanceMessage.text}
+          </div>
+        )}
+
+        {notificationMessage && (
+          <div className={`message message-${notificationMessage.type}`}>
+            {notificationMessage.text}
           </div>
         )}
       </div>

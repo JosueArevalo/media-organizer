@@ -4,6 +4,7 @@ import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation } from '../i18n';
+import { notifyCompletion } from '../services/completion-notification.service';
 import { completeGroupingSession, failGroupingSession, startGroupingSession } from '../services/grouping-job.store';
 import {
   applyGroupingWorkspaceRequest,
@@ -454,6 +455,10 @@ export const GroupingPage = () => {
       setActiveFolderLabel('__all__');
       setView('review');
       setBackendError(null);
+      void notifyCompletion('groupingReorganized', {
+        title: t('notifications.groupingReorganized.title'),
+        body: t('notifications.groupingReorganized.body', { count: nextWorkspace.items.length })
+      });
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.reorganizeError'));
     } finally {
@@ -608,6 +613,10 @@ export const GroupingPage = () => {
 
       if (result.status === 'completed') {
         completeGroupingSession();
+        void notifyCompletion('organizationApplied', {
+          title: t('notifications.organizationApplied.title'),
+          body: t('notifications.organizationApplied.body', { count: result.movedItems })
+        });
       } else {
         failGroupingSession(t('grouping.failedApply', { count: result.failedItems }));
       }

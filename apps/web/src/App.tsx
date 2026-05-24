@@ -13,6 +13,7 @@ import NetworkFolderExportPage from './pages/NetworkFolderExportPage';
 import SelectionPage from './pages/SelectionPage';
 import SettingsPage from './pages/SettingsPage';
 import { useGroupingSessionState } from './hooks/useGroupingJobState';
+import { useCompletionNotifications } from './hooks/useCompletionNotifications';
 
 const GuardedWorkflowStep = ({ children }: { children: JSX.Element }) => {
   const isImportStepComplete = useImportStepCompletion();
@@ -60,6 +61,8 @@ const GuardedExportStep = ({ children }: { children: JSX.Element }) => {
 };
 
 const App = () => {
+  useCompletionNotifications();
+
   return (
     <BrowserRouter>
       <Routes>
