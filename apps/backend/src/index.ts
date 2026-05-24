@@ -258,7 +258,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
               sourceDir?: string;
               outputDir?: string;
               compressionSessionId?: string;
-              strategy?: 'date' | 'source-kind';
+              strategy?: 'date' | 'source-folder';
               autoRename?: boolean;
             }
           | null;
@@ -422,6 +422,9 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
           const body = (await readRequestJson(req)) as
             | {
                 rules?: Array<'date-event-multiple' | 'single-date-year-unique'>;
+                strategy?: 'date' | 'source-folder' | null;
+                dateOptions?: { singleDateHandling?: 'daily-event' | 'year-unique' | 'keep-original' };
+                sourceFolderOptions?: { mode?: 'nearest-folder' | 'relative-path' };
                 preservedDirectories?: string[];
                 reorganizedDirectories?: string[];
               }
@@ -429,6 +432,17 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
 
           const workspace = reorganizeGroupingWorkspace(sessionId, {
             rules: Array.isArray(body?.rules) ? body.rules : [],
+            strategy: body?.strategy ?? null,
+            dateOptions:
+              body?.dateOptions?.singleDateHandling === 'daily-event' ||
+              body?.dateOptions?.singleDateHandling === 'year-unique' ||
+              body?.dateOptions?.singleDateHandling === 'keep-original'
+                ? { singleDateHandling: body.dateOptions.singleDateHandling }
+                : undefined,
+            sourceFolderOptions:
+              body?.sourceFolderOptions?.mode === 'nearest-folder' || body?.sourceFolderOptions?.mode === 'relative-path'
+                ? { mode: body.sourceFolderOptions.mode }
+                : undefined,
             preservedDirectories: Array.isArray(body?.preservedDirectories) ? body.preservedDirectories : [],
             reorganizedDirectories: Array.isArray(body?.reorganizedDirectories) ? body.reorganizedDirectories : []
           });

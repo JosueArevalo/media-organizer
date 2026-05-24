@@ -8,11 +8,24 @@ export type GroupingSessionRequest = {
   preservedDirectories?: string[];
   reorganizedDirectories?: string[];
   rules?: GroupingRuleId[];
-  strategy?: 'date' | 'source-kind';
+  strategy?: GroupingStrategy | null;
+  dateOptions?: GroupingDateOptions;
+  sourceFolderOptions?: GroupingSourceFolderOptions;
   autoRename?: boolean;
 };
 
 export type GroupingRuleId = 'date-event-multiple' | 'single-date-year-unique';
+export type GroupingStrategy = 'date' | 'source-folder';
+export type GroupingSingleDateHandling = 'daily-event' | 'year-unique' | 'keep-original';
+export type GroupingSourceFolderMode = 'nearest-folder' | 'relative-path';
+
+export type GroupingDateOptions = {
+  singleDateHandling: GroupingSingleDateHandling;
+};
+
+export type GroupingSourceFolderOptions = {
+  mode: GroupingSourceFolderMode;
+};
 
 export type GroupingSessionManifest = {
   sessionId: string;
@@ -23,7 +36,9 @@ export type GroupingSessionManifest = {
   preservedDirectories: string[];
   reorganizedDirectories: string[];
   rules: GroupingRuleId[];
-  strategy: 'date' | 'source-kind';
+  strategy: GroupingStrategy | null;
+  dateOptions: GroupingDateOptions;
+  sourceFolderOptions: GroupingSourceFolderOptions;
   autoRename: boolean;
   createdAt: string;
 };

@@ -1,5 +1,16 @@
 export type GroupingFolderKind = 'proposed' | 'manual' | 'template';
 export type GroupingRuleId = 'date-event-multiple' | 'single-date-year-unique';
+export type GroupingStrategy = 'date' | 'source-folder';
+export type GroupingSingleDateHandling = 'daily-event' | 'year-unique' | 'keep-original';
+export type GroupingSourceFolderMode = 'nearest-folder' | 'relative-path';
+
+export type GroupingDateOptions = {
+  singleDateHandling: GroupingSingleDateHandling;
+};
+
+export type GroupingSourceFolderOptions = {
+  mode: GroupingSourceFolderMode;
+};
 
 export type GroupingWorkspaceFolder = {
   id: string;
@@ -34,6 +45,9 @@ export type GroupingWorkspace = {
   outputDir: string;
   compressionSessionId: string | null;
   rules: GroupingRuleId[];
+  strategy: GroupingStrategy | null;
+  dateOptions: GroupingDateOptions;
+  sourceFolderOptions: GroupingSourceFolderOptions;
   preservedDirectories: string[];
   reorganizedDirectories: string[];
   folders: GroupingWorkspaceFolder[];
@@ -79,7 +93,10 @@ export const createGroupingWorkspaceRequest = async (payload: {
 export const reorganizeGroupingWorkspaceRequest = async (
   sessionId: string,
   payload: {
-    rules: GroupingRuleId[];
+    rules?: GroupingRuleId[];
+    strategy: GroupingStrategy | null;
+    dateOptions?: GroupingDateOptions;
+    sourceFolderOptions?: GroupingSourceFolderOptions;
     preservedDirectories: string[];
     reorganizedDirectories: string[];
   }

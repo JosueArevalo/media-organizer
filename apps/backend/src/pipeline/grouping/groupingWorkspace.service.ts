@@ -6,7 +6,12 @@ import { runMigrations } from '../../state/migrations/runMigrations.js';
 import type { MediaType } from '../../state/dto/state.types.js';
 import { updateGroupingExecutionSummary } from '../../dashboard/dashboard.service.js';
 import { startGroupingSession } from './groupingJob.service.js';
-import type { GroupingRuleId } from './grouping.types.js';
+import type {
+  GroupingDateOptions,
+  GroupingRuleId,
+  GroupingSourceFolderOptions,
+  GroupingStrategy
+} from './grouping.types.js';
 
 type FolderKind = 'proposed' | 'manual' | 'template';
 
@@ -18,7 +23,10 @@ export type GroupingWorkspaceRequest = {
 };
 
 export type GroupingReorganizeRequest = {
-  rules: GroupingRuleId[];
+  rules?: GroupingRuleId[];
+  strategy?: GroupingStrategy | null;
+  dateOptions?: GroupingDateOptions;
+  sourceFolderOptions?: GroupingSourceFolderOptions;
   preservedDirectories: string[];
   reorganizedDirectories: string[];
 };
@@ -56,6 +64,9 @@ export type GroupingWorkspace = {
   outputDir: string;
   compressionSessionId: string | null;
   rules: GroupingRuleId[];
+  strategy: GroupingStrategy | null;
+  dateOptions: GroupingDateOptions;
+  sourceFolderOptions: GroupingSourceFolderOptions;
   preservedDirectories: string[];
   reorganizedDirectories: string[];
   folders: GroupingWorkspaceFolder[];
@@ -108,6 +119,9 @@ const sanitizeFolderLabel = (label: string) => {
 
   return sanitized || 'Sin nombre';
 };
+
+const DEFAULT_DATE_OPTIONS: GroupingDateOptions = { singleDateHandling: 'year-unique' };
+const DEFAULT_SOURCE_FOLDER_OPTIONS: GroupingSourceFolderOptions = { mode: 'nearest-folder' };
 
 const formatDateLabel = (date: Date) => {
   const year = date.getFullYear();
@@ -211,6 +225,9 @@ const getGroupingManifest = (groupingSessionId: string) => {
         preservedDirectories?: string[];
         reorganizedDirectories?: string[];
         rules?: GroupingRuleId[];
+        strategy?: GroupingStrategy | null;
+        dateOptions?: GroupingDateOptions;
+        sourceFolderOptions?: GroupingSourceFolderOptions;
       };
     };
     return payload.manifest ?? null;
@@ -413,23 +430,101 @@ const clearGeneratedGrouping = (groupingSessionId: string, sourceSessionId: stri
   ).run(nowIso(), sourceSessionId);
 };
 
+const getRulesFromStrategy = (
+  strategy: GroupingStrategy | null,
+  dateOptions: GroupingDateOptions
+): GroupingRuleId[] => {
+  if (strategy !== 'date') {
+    return [];
+  }
+
+  return dateOptions.singleDateHandling === 'year-unique'
+    ? ['date-event-multiple', 'single-date-year-unique']
+    : ['date-event-multiple'];
+};
+
+const getStrategyFromLegacyRules = (rules: GroupingRuleId[]) => {
+  if (!rules.includes('date-event-multiple') && !rules.includes('single-date-year-unique')) {
+    return {
+      strategy: null,
+      dateOptions: DEFAULT_DATE_OPTIONS,
+      rules: [] as GroupingRuleId[]
+    };
+  }
+
+  const dateOptions: GroupingDateOptions = {
+    singleDateHandling: rules.includes('single-date-year-unique') ? 'year-unique' : 'keep-original'
+  };
+
+  return {
+    strategy: 'date' as const,
+    dateOptions,
+    rules: getRulesFromStrategy('date', dateOptions)
+  };
+};
+
+const normalizeReorganizeConfig = (request: GroupingReorganizeRequest) => {
+  if (request.strategy) {
+    const dateOptions = request.dateOptions ?? DEFAULT_DATE_OPTIONS;
+    const sourceFolderOptions = request.sourceFolderOptions ?? DEFAULT_SOURCE_FOLDER_OPTIONS;
+    return {
+      strategy: request.strategy,
+      dateOptions,
+      sourceFolderOptions,
+      rules: getRulesFromStrategy(request.strategy, dateOptions)
+    };
+  }
+
+  return {
+    ...getStrategyFromLegacyRules(Array.from(new Set(request.rules ?? []))),
+    sourceFolderOptions: request.sourceFolderOptions ?? DEFAULT_SOURCE_FOLDER_OPTIONS
+  };
+};
+
+const getSourceFolderLabel = (relativePath: string, options: GroupingSourceFolderOptions) => {
+  const normalized = relativePath.replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
+  segments.pop();
+
+  if (segments.length === 0) {
+    return null;
+  }
+
+  if (options.mode === 'relative-path') {
+    return sanitizeFolderLabel(segments.join(' - '));
+  }
+
+  return sanitizeFolderLabel(segments[segments.length - 1]);
+};
+
 const buildProposalLabels = (
   sourceDir: string,
   outputDir: string,
   rows: MediaRow[],
   preservedDirectories: string[],
   reorganizedDirectories: string[],
-  rules: GroupingRuleId[]
+  strategy: GroupingStrategy | null,
+  dateOptions: GroupingDateOptions,
+  sourceFolderOptions: GroupingSourceFolderOptions
 ) => {
-  const activeRules = new Set(rules);
   const datedRows = rows.map((row) => {
     const outputPath = getOutputPath(outputDir, row.relative_path);
     const captureDate = getProposalDate(row);
     const preservedStructure = isRowPreserved(sourceDir, row, preservedDirectories, reorganizedDirectories);
     return { row, outputPath, captureDate, preservedStructure };
   });
-  const dateCounts = new Map<string, number>();
+  if (strategy === 'source-folder') {
+    return datedRows.map((item) => ({
+      ...item,
+      label: item.preservedStructure ? null : getSourceFolderLabel(item.row.relative_path, sourceFolderOptions)
+    }));
+  }
 
+  if (strategy !== 'date') {
+    return datedRows.map((item) => ({ ...item, label: null }));
+  }
+
+  const dateCounts = new Map<string, number>();
   for (const item of datedRows) {
     if (item.preservedStructure || !item.captureDate) {
       continue;
@@ -452,11 +547,11 @@ const buildProposalLabels = (
     const count = dateCounts.get(formatted.dateKey) ?? 0;
     let label: string | null = null;
 
-    if (count > 1 && activeRules.has('date-event-multiple')) {
-      label = `${formatted.folderDate} - Evento`;
+    if (count > 1 || dateOptions.singleDateHandling === 'daily-event') {
+      label = `${formatted.folderDate} - Event`;
     }
 
-    if (count === 1 && activeRules.has('single-date-year-unique')) {
+    if (count === 1 && dateOptions.singleDateHandling === 'year-unique') {
       label = `${formatted.year} - Unique`;
     }
 
@@ -492,6 +587,9 @@ const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => 
   const preservedDirectories = groupingManifest?.preservedDirectories ?? [];
   const reorganizedDirectories = groupingManifest?.reorganizedDirectories ?? [];
   const rules = groupingManifest?.rules ?? [];
+  const strategy = groupingManifest?.strategy ?? null;
+  const dateOptions = groupingManifest?.dateOptions ?? DEFAULT_DATE_OPTIONS;
+  const sourceFolderOptions = groupingManifest?.sourceFolderOptions ?? DEFAULT_SOURCE_FOLDER_OPTIONS;
   const sourceSessionId = compressionSessionId ?? groupingSessionId;
   const mediaRows = listMediaRows(sourceSessionId);
   const folders = getFolderRows(groupingSessionId);
@@ -509,6 +607,9 @@ const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => 
     outputDir: session.output_dir,
     compressionSessionId,
     rules,
+    strategy,
+    dateOptions,
+    sourceFolderOptions,
     preservedDirectories,
     reorganizedDirectories,
     folders: folders.map((folder) => ({
@@ -549,7 +650,9 @@ export const createGroupingWorkspace = (request: GroupingWorkspaceRequest): Grou
     preservedDirectories: [],
     reorganizedDirectories: [],
     rules: [],
-    strategy: 'date',
+    strategy: null,
+    dateOptions: DEFAULT_DATE_OPTIONS,
+    sourceFolderOptions: DEFAULT_SOURCE_FOLDER_OPTIONS,
     autoRename: true
   });
 
@@ -573,7 +676,7 @@ export const reorganizeGroupingWorkspace = (sessionId: string, request: Grouping
 
   const sourceSessionId = workspace.compressionSessionId ?? sessionId;
   const timestamp = nowIso();
-  const rules = Array.from(new Set(request.rules));
+  const config = normalizeReorganizeConfig(request);
   const rows = listMediaRows(sourceSessionId);
   clearGeneratedGrouping(sessionId, sourceSessionId);
 
@@ -583,7 +686,9 @@ export const reorganizeGroupingWorkspace = (sessionId: string, request: Grouping
     rows,
     request.preservedDirectories ?? [],
     request.reorganizedDirectories ?? [],
-    rules
+    config.strategy,
+    config.dateOptions,
+    config.sourceFolderOptions
   );
 
   for (const proposal of proposals) {
@@ -609,7 +714,10 @@ export const reorganizeGroupingWorkspace = (sessionId: string, request: Grouping
         compressionSessionId: workspace.compressionSessionId,
         preservedDirectories: request.preservedDirectories ?? [],
         reorganizedDirectories: request.reorganizedDirectories ?? [],
-        rules
+        rules: config.rules,
+        strategy: config.strategy,
+        dateOptions: config.dateOptions,
+        sourceFolderOptions: config.sourceFolderOptions
       },
       totalCount: rows.length,
       summary: { completedItems: 0, failedItems: 0 }
@@ -1014,6 +1122,7 @@ export const applyGroupingWorkspace = (sessionId: string) => {
     .prepare("SELECT COUNT(*) AS total FROM item_stage_status WHERE session_id = ? AND stage = 'group' AND status IN ('completed', 'skipped')")
     .get(sessionId) as { total: number };
   const nextStatus = failed.total > 0 ? 'failed' : 'completed';
+  const groupingManifest = getGroupingManifest(sessionId);
 
   db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(
     nextStatus,
@@ -1032,10 +1141,14 @@ export const applyGroupingWorkspace = (sessionId: string) => {
     JSON.stringify({
       outputRoot: workspace.outputDir,
       manifest: {
+        ...(groupingManifest ?? {}),
         compressionSessionId: workspace.compressionSessionId,
-        preservedDirectories: getGroupingManifest(sessionId)?.preservedDirectories ?? [],
-        reorganizedDirectories: getGroupingManifest(sessionId)?.reorganizedDirectories ?? [],
-        rules: getGroupingManifest(sessionId)?.rules ?? []
+        preservedDirectories: groupingManifest?.preservedDirectories ?? [],
+        reorganizedDirectories: groupingManifest?.reorganizedDirectories ?? [],
+        rules: groupingManifest?.rules ?? [],
+        strategy: groupingManifest?.strategy ?? null,
+        dateOptions: groupingManifest?.dateOptions ?? DEFAULT_DATE_OPTIONS,
+        sourceFolderOptions: groupingManifest?.sourceFolderOptions ?? DEFAULT_SOURCE_FOLDER_OPTIONS
       },
       summary: {
         movedItems: moved.length,

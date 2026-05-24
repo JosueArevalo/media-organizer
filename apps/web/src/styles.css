@@ -2173,6 +2173,31 @@ body {
   font-weight: 700;
 }
 
+.grouping-strategy-options {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.28);
+  margin-top: 14px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.grouping-option-field {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.grouping-option-field select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 10px;
+}
+
 .grouping-directory-list {
   list-style: none;
   padding: 0;

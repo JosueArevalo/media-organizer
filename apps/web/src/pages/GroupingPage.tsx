@@ -21,7 +21,9 @@ import {
   renameGroupingFolderRequest,
   updateGroupingTemplateRequest,
   type GroupingFolderTemplate,
-  type GroupingRuleId,
+  type GroupingSingleDateHandling,
+  type GroupingSourceFolderMode,
+  type GroupingStrategy,
   type GroupingWorkspace,
   type GroupingWorkspaceFolder,
   type GroupingWorkspaceItem
@@ -46,6 +48,9 @@ const getSelectedDragPayload = (item: GroupingWorkspaceItem, selectedIds: Set<st
 };
 
 type GroupingView = 'setup' | 'review';
+
+const DEFAULT_SINGLE_DATE_HANDLING: GroupingSingleDateHandling = 'year-unique';
+const DEFAULT_SOURCE_FOLDER_MODE: GroupingSourceFolderMode = 'nearest-folder';
 
 type GroupingDirectoryNode = {
   name: string;
@@ -206,7 +211,9 @@ export const GroupingPage = () => {
   const [isApplying, setIsApplying] = useState(false);
   const [isReorganizing, setIsReorganizing] = useState(false);
   const [view, setView] = useState<GroupingView>('setup');
-  const [activeRules, setActiveRules] = useState<Set<GroupingRuleId>>(new Set());
+  const [selectedStrategy, setSelectedStrategy] = useState<GroupingStrategy | null>(null);
+  const [singleDateHandling, setSingleDateHandling] = useState<GroupingSingleDateHandling>(DEFAULT_SINGLE_DATE_HANDLING);
+  const [sourceFolderMode, setSourceFolderMode] = useState<GroupingSourceFolderMode>(DEFAULT_SOURCE_FOLDER_MODE);
   const [preservedDirectories, setPreservedDirectories] = useState<Set<string>>(new Set());
   const [reorganizedDirectories, setReorganizedDirectories] = useState<Set<string>>(new Set());
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
@@ -253,11 +260,13 @@ export const GroupingPage = () => {
         }
 
         setWorkspace(nextWorkspace);
-        setActiveRules(new Set(nextWorkspace.rules));
+        setSelectedStrategy(nextWorkspace.strategy);
+        setSingleDateHandling(nextWorkspace.dateOptions.singleDateHandling);
+        setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
         setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
         setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
         setExpandedDirectories(new Set([nextWorkspace.sourceDir.split(/[\\/]/).filter(Boolean).pop() ?? 'Source']));
-        setView(nextWorkspace.folders.length > 0 || nextWorkspace.rules.length > 0 ? 'review' : 'setup');
+        setView(nextWorkspace.folders.length > 0 || nextWorkspace.strategy ? 'review' : 'setup');
         setBackendError(null);
 
         if (!groupingSessionState.backendSessionId) {
@@ -354,7 +363,7 @@ export const GroupingPage = () => {
 
     return t('grouping.originalStructure');
   }, [preservedDirectories, t]);
-  const canReorganize = activeRules.size > 0 && Boolean(workspace) && !isReorganizing;
+  const canReorganize = Boolean(selectedStrategy && workspace) && !isReorganizing;
 
   const activeFolderTitle = useMemo(() => {
     if (activeFolderLabel === '__preserved__') {
@@ -379,18 +388,8 @@ export const GroupingPage = () => {
     navigate('/compression');
   };
 
-  const toggleRule = (rule: GroupingRuleId) => {
-    setActiveRules((current) => {
-      const next = new Set(current);
-
-      if (next.has(rule)) {
-        next.delete(rule);
-      } else {
-        next.add(rule);
-      }
-
-      return next;
-    });
+  const selectStrategy = (strategy: GroupingStrategy) => {
+    setSelectedStrategy((current) => (current === strategy ? null : strategy));
   };
 
   const toggleDirectoryExpansion = (path: string) => {
@@ -430,7 +429,7 @@ export const GroupingPage = () => {
   };
 
   const handleReorganize = async () => {
-    if (!workspace || activeRules.size === 0) {
+    if (!workspace || !selectedStrategy) {
       return;
     }
 
@@ -438,13 +437,17 @@ export const GroupingPage = () => {
 
     try {
       const nextWorkspace = await reorganizeGroupingWorkspaceRequest(workspace.sessionId, {
-        rules: Array.from(activeRules),
+        strategy: selectedStrategy,
+        dateOptions: { singleDateHandling },
+        sourceFolderOptions: { mode: sourceFolderMode },
         preservedDirectories: Array.from(preservedDirectories).sort((left, right) => left.localeCompare(right)),
         reorganizedDirectories: Array.from(reorganizedDirectories).sort((left, right) => left.localeCompare(right))
       });
 
       setWorkspace(nextWorkspace);
-      setActiveRules(new Set(nextWorkspace.rules));
+      setSelectedStrategy(nextWorkspace.strategy);
+      setSingleDateHandling(nextWorkspace.dateOptions.singleDateHandling);
+      setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
       setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
       setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
       setSelectedIds(new Set());
@@ -680,24 +683,51 @@ export const GroupingPage = () => {
 
             <div className="grouping-rule-list">
               <button
-                className={`grouping-rule-chip ${activeRules.has('date-event-multiple') ? 'is-active' : ''}`}
+                className={`grouping-rule-chip ${selectedStrategy === 'date' ? 'is-active' : ''}`}
                 type="button"
-                aria-pressed={activeRules.has('date-event-multiple')}
-                onClick={() => toggleRule('date-event-multiple')}
+                aria-pressed={selectedStrategy === 'date'}
+                onClick={() => selectStrategy('date')}
               >
-                {t('grouping.rule.dateEvent')}
+                {t('grouping.strategy.date')}
               </button>
               <button
-                className={`grouping-rule-chip ${activeRules.has('single-date-year-unique') ? 'is-active' : ''}`}
+                className={`grouping-rule-chip ${selectedStrategy === 'source-folder' ? 'is-active' : ''}`}
                 type="button"
-                aria-pressed={activeRules.has('single-date-year-unique')}
-                onClick={() => toggleRule('single-date-year-unique')}
+                aria-pressed={selectedStrategy === 'source-folder'}
+                onClick={() => selectStrategy('source-folder')}
               >
-                {t('grouping.rule.yearUnique')}
+                {t('grouping.strategy.sourceFolder')}
               </button>
             </div>
 
-            <p className="page-summary-note">{activeRules.size === 0 ? t('grouping.noRulesSelected') : t('grouping.rulesSelected', { count: activeRules.size })}</p>
+            {selectedStrategy === 'date' && (
+              <div className="grouping-strategy-options">
+                <p className="page-summary-note">{t('grouping.dateStrategyPattern')}</p>
+                <label className="grouping-option-field">
+                  <span>{t('grouping.singleDateHandling')}</span>
+                  <select value={singleDateHandling} onChange={(event) => setSingleDateHandling(event.target.value as GroupingSingleDateHandling)}>
+                    <option value="daily-event">{t('grouping.singleDate.dailyEvent')}</option>
+                    <option value="year-unique">{t('grouping.singleDate.yearUnique')}</option>
+                    <option value="keep-original">{t('grouping.singleDate.keepOriginal')}</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {selectedStrategy === 'source-folder' && (
+              <div className="grouping-strategy-options">
+                <p className="page-summary-note">{t('grouping.sourceFolderStrategyNote')}</p>
+                <label className="grouping-option-field">
+                  <span>{t('grouping.sourceFolderMode')}</span>
+                  <select value={sourceFolderMode} onChange={(event) => setSourceFolderMode(event.target.value as GroupingSourceFolderMode)}>
+                    <option value="nearest-folder">{t('grouping.sourceFolder.nearest')}</option>
+                    <option value="relative-path">{t('grouping.sourceFolder.relative')}</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            <p className="page-summary-note">{selectedStrategy ? t('grouping.strategySelected') : t('grouping.noStrategySelected')}</p>
           </section>
 
           <section className="page-card elevated grouping-setup-main">
@@ -752,7 +782,7 @@ export const GroupingPage = () => {
             <p className="page-summary-note">{t('grouping.setupSummaryText', {
               files: workspace.items.length,
               preserved: preservedCount,
-              rules: activeRules.size
+              strategy: selectedStrategy ? 1 : 0
             })}</p>
           </aside>
         </div>
