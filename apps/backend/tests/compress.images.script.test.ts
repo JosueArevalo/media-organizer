@@ -129,8 +129,16 @@ test('compress_images converts selected HEIC to JPG and copies PNG without compr
     .map((line) => JSON.parse(line) as { type: string; item?: ScriptItem; items?: ScriptItem[] });
   const complete = events.find((event) => event.type === 'complete');
   const items = complete?.items ?? [];
+  const firstPhotoStartIndex = events.findIndex((event) => event.type === 'start' && event.item?.source.endsWith('photo.jpg'));
+  const firstPhotoItemIndex = events.findIndex((event) => event.type === 'item' && event.item?.source.endsWith('photo.jpg'));
+  const pngStartIndex = events.findIndex((event) => event.type === 'start' && event.item?.source.endsWith('graphic.png'));
+  const pngItemIndex = events.findIndex((event) => event.type === 'item' && event.item?.source.endsWith('graphic.png'));
 
   assert.equal(items.length, 3);
+  assert.ok(firstPhotoStartIndex >= 0);
+  assert.ok(firstPhotoItemIndex > firstPhotoStartIndex);
+  assert.ok(pngStartIndex >= 0);
+  assert.ok(pngItemIndex > pngStartIndex);
   assert.ok(items.some((item) => item.source.endsWith('photo.heic') && item.output.endsWith('.jpg') && item.status === 'completed' && item.operation === 'compress'));
   assert.ok(items.some((item) => item.source.endsWith('photo.jpg') && item.operation === 'compress'));
   assert.ok(items.some((item) => item.source.endsWith('graphic.png') && item.operation === 'copy' && item.warning?.includes('copied without compression')));

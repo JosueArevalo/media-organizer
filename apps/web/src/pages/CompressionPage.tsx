@@ -608,6 +608,46 @@ export const CompressionPage = () => {
     };
   }, [compressionSessionState.backendSessionId, compressionSessionState.status]);
 
+  useEffect(() => {
+    if (
+      !compressionSessionState.backendSessionId ||
+      (compressionSessionState.status !== 'completed' && compressionSessionState.status !== 'failed')
+    ) {
+      return;
+    }
+
+    let isActive = true;
+
+    void getCompressionProgressRequest(compressionSessionState.backendSessionId)
+      .then((progress) => {
+        if (!isActive) {
+          return;
+        }
+
+        setProgressData({
+          status: progress.status as 'running' | 'completed' | 'failed' | 'cancelled',
+          total: progress.total,
+          completed: progress.completed,
+          failed: progress.failed,
+          currentlyProcessing: progress.currentlyProcessing,
+          processedItems: progress.processedItems,
+          totalCompress: progress.totalCompress,
+          totalCopy: progress.totalCopy,
+          completedCompress: progress.completedCompress,
+          completedCopy: progress.completedCopy,
+          failedCompress: progress.failedCompress,
+          failedCopy: progress.failedCopy
+        });
+      })
+      .catch(() => {
+        // Completed local snapshots can outlive backend cleanup; leave the page usable.
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [compressionSessionState.backendSessionId, compressionSessionState.status]);
+
   const imageEstimatedSavedBytes = useMemo(() => {
     if (mediaStatsState.status !== 'ready') {
       return 0;
@@ -909,7 +949,7 @@ export const CompressionPage = () => {
         )}
       </div>
 
-      {isCompressionRunning && progressData && (
+      {(isCompressionRunning || progressData) && progressData && (
         <div className="page-card compression-progress-card">
           <p className="page-section-title">{t('compression.progressTitle')}</p>
           {progressData.total === 0 && estimatedTotalMediaCount > 0 && (
@@ -967,17 +1007,25 @@ export const CompressionPage = () => {
             </p>
           )}
 
-          {progressData.currentlyProcessing.length > 0 && (
+          {progressData.status === 'running' && (
             <div className="compression-currently-processing">
               <p className="compression-processing-label">{t('compression.processing')}</p>
               <div className="compression-processing-list">
-                {progressData.currentlyProcessing.slice(0, 2).map((item) => (
-                  <div key={item.id} className="compression-processing-item">
-                    {t(item.operation === 'compress' ? 'compression.compressingItem' : 'compression.copyingItem', {
-                      name: item.sourcePath.split('/').pop() || item.sourcePath
-                    })}
+                {progressData.currentlyProcessing.length > 0 ? (
+                  progressData.currentlyProcessing.slice(0, 2).map((item) => (
+                    <div key={item.id} className="compression-processing-item">
+                      {t(item.operation === 'compress' ? 'compression.compressingItem' : 'compression.copyingItem', {
+                        name: item.sourcePath.split('/').pop() || item.sourcePath
+                      })}
+                    </div>
+                  ))
+                ) : (
+                  <div className="compression-processing-item">
+                    {progressData.completed + progressData.failed >= progressData.total
+                      ? t('compression.finalizing')
+                      : t('compression.preparingNextItem')}
                   </div>
-                ))}
+                )}
               </div>
             </div>
           )}

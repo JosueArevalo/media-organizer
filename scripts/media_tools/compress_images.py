@@ -266,6 +266,17 @@ def main() -> int:
         warning_message = None
         operation = 'compress' if selected_for_compression and extension in JPEG_EXTENSIONS.union(HEIC_EXTENSIONS) else 'copy'
 
+        start_item = {
+            'source': str(source_file),
+            'output': str(output_file),
+            'command': command,
+            'operation': operation,
+        }
+        emit_event({
+            'type': 'start',
+            'item': start_item,
+        })
+
         if not selected_for_compression:
             shutil.copy2(source_file, output_file)
         elif extension in JPEG_EXTENSIONS:

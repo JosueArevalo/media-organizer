@@ -340,6 +340,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   let checkpointCompletedCopyCount: number | null = null;
   let checkpointFailedCompressCount: number | null = null;
   let checkpointFailedCopyCount: number | null = null;
+  let activeItems: Array<{ id: string; sourcePath: string; operation: 'compress' | 'copy' }> = [];
   if (checkpoint?.payload_json) {
     try {
       const parsed = JSON.parse(checkpoint.payload_json);
@@ -352,6 +353,19 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
       checkpointCompletedCopyCount = parsed.summary?.completedCopyCount ?? null;
       checkpointFailedCompressCount = parsed.summary?.failedCompressCount ?? null;
       checkpointFailedCopyCount = parsed.summary?.failedCopyCount ?? null;
+      activeItems = Array.isArray(parsed.activeItems)
+        ? parsed.activeItems
+            .filter((item: { id?: unknown; sourcePath?: unknown; operation?: unknown }) =>
+              typeof item.id === 'string' &&
+              typeof item.sourcePath === 'string' &&
+              (item.operation === 'compress' || item.operation === 'copy')
+            )
+            .map((item: { id: string; sourcePath: string; operation: 'compress' | 'copy' }) => ({
+              id: item.id,
+              sourcePath: item.sourcePath,
+              operation: item.operation
+            }))
+        : [];
       console.log(`[getCompressionProgress] sessionId=${sessionId} totalCount=${totalCount}`);
       console.log(`[getCompressionProgress] checkpoint payload keys:`, Object.keys(parsed));
     } catch (e) {
@@ -422,32 +436,13 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
     totalCopyCount = Math.max(0, totalCount - totalCompressCount);
   }
 
-  // Get a few recently processed items for "currently processing" display (most recent)
-  const recentItems = db
-    .prepare(
-      `
-      SELECT mi.id, mi.source_path, COALESCE(idc.selected_for_compression, 0) AS selected_for_compression
-      FROM item_stage_status iss
-      JOIN media_items mi ON iss.item_id = mi.id
-      LEFT JOIN item_decisions idc ON idc.item_id = mi.id AND idc.session_id = iss.session_id
-      WHERE iss.session_id = ? AND iss.stage = 'compress'
-      ORDER BY iss.updated_at DESC
-      LIMIT 3
-    `
-    )
-    .all(sessionId) as Array<{ id: string; source_path: string; selected_for_compression: number }>;
-
   return {
     sessionId,
     status: session.status,
     total: totalCount,
     completed: completedCount,
     failed: failedCount,
-    currentlyProcessing: recentItems.map((item) => ({
-      id: item.id,
-      sourcePath: item.source_path,
-      operation: item.selected_for_compression ? 'compress' : 'copy'
-    })),
+    currentlyProcessing: activeItems,
     processedItems: allProcessedItems.map((item) => ({
       id: item.id,
       sourcePath: item.source_path,
@@ -507,9 +502,11 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
       JSON.stringify({
         ...checkpointPayload,
         summary: {
+          ...checkpointPayload.summary,
           completedItems: checkpointPayload.summary?.completedItems ?? 0,
           failedItems: Math.max(1, checkpointPayload.summary?.failedItems ?? 0)
         },
+        activeItems: [],
         fatalError: error.message
       }),
       timestamp,

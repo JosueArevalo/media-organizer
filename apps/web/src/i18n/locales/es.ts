@@ -222,6 +222,8 @@ export const es: TranslationDictionary = {
   'compression.operationBreakdown': '{compressed}/{totalCompress} comprimidos - {copied}/{totalCopy} copiados',
   'compression.compressingItem': 'Comprimiendo {name}',
   'compression.copyingItem': 'Copiando {name}',
+  'compression.preparingNextItem': 'Preparando el siguiente elemento...',
+  'compression.finalizing': 'Finalizando...',
   'compression.logCompressed': 'Comprimido {name}',
   'compression.logCopied': 'Copiado {name}',
   'compression.detailedLogs': '{icon} Logs detallados ({count} elementos)',

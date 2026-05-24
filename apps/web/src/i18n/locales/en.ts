@@ -220,6 +220,8 @@ export const en = {
   'compression.operationBreakdown': '{compressed}/{totalCompress} compressed - {copied}/{totalCopy} copied',
   'compression.compressingItem': 'Compressing {name}',
   'compression.copyingItem': 'Copying {name}',
+  'compression.preparingNextItem': 'Preparing next item...',
+  'compression.finalizing': 'Finalizing...',
   'compression.logCompressed': 'Compressed {name}',
   'compression.logCopied': 'Copied {name}',
   'compression.detailedLogs': '{icon} Detailed Logs ({count} items)',

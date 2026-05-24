@@ -12,6 +12,43 @@ const migrationsDir = path.resolve(process.cwd(), 'src', 'state', 'migrations');
 const sourceDir = path.join(tempRoot, 'source');
 const outputDir = path.join(tempRoot, 'output');
 
+const sleep = async (milliseconds: number) => {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+};
+
+const writeFakeVideoTool = (toolsDir: string, delayMilliseconds: number) => {
+  const extension = process.platform === 'win32' ? '.cmd' : '.sh';
+  const filePath = path.join(toolsDir, `handbrake-slow${extension}`);
+  const delaySeconds = Math.max(1, Math.ceil(delayMilliseconds / 1000));
+  const script = process.platform === 'win32'
+    ? `@echo off
+if "%~1"=="--preset-list" (
+  echo General/
+  echo     Fast 1080p30
+  exit /b 0
+)
+timeout /t ${delaySeconds} /nobreak >nul
+copy /Y "%~2" "%~4" >nul
+exit /b 0
+`
+    : `#!/usr/bin/env sh
+if [ "$1" = "--preset-list" ]; then
+  printf 'General/\\n    Fast 1080p30\\n'
+  exit 0
+fi
+sleep ${delaySeconds}
+cp "$2" "$4"
+`;
+
+  fs.writeFileSync(filePath, script, 'utf8');
+
+  if (process.platform !== 'win32') {
+    fs.chmodSync(filePath, 0o755);
+  }
+
+  return filePath;
+};
+
 beforeEach(() => {
   process.env.MEDIA_ORGANIZER_DATA_DIR = tempDataDir;
   process.env.MEDIA_ORGANIZER_DB_PATH = tempDbPath;
@@ -203,4 +240,48 @@ test('executeCompressionSession counts copied excluded media in progress while p
   assert.equal(decisionRows.find((row) => row.source_path.endsWith(path.join('include', 'selected.jpg')))?.selected_for_compression, 1);
   assert.equal(decisionRows.find((row) => row.source_path.endsWith(path.join('exclude', 'copied.jpg')))?.selected_for_compression, 0);
   assert.ok(fs.existsSync(path.join(started.outputRoot, 'exclude', 'copied.jpg')));
+});
+
+test('compression progress reports the actively processing video and clears it after completion', async () => {
+  const { startCompressionSession, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js');
+  const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js');
+  const scopedSourceDir = path.join(tempRoot, 'active-video-source');
+  const scopedOutputDir = path.join(tempRoot, 'active-video-output');
+  const toolsDir = path.join(tempRoot, 'active-video-tools');
+  fs.mkdirSync(scopedSourceDir, { recursive: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+  fs.writeFileSync(path.join(scopedSourceDir, 'slow.mp4'), 'fake-video-content', 'utf8');
+
+  const started = startCompressionSession({
+    name: 'Active video progress test',
+    sourceDir: scopedSourceDir,
+    outputDir: scopedOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Fast 1080p30',
+    imageToolCommand: '__missing_image_encoder__',
+    videoToolCommand: writeFakeVideoTool(toolsDir, 1000)
+  });
+
+  const execution = executeCompressionSession(started.session.id);
+  let activeProgress = getCompressionProgress(started.session.id);
+
+  for (let attempt = 0; attempt < 30 && !activeProgress?.currentlyProcessing.length; attempt += 1) {
+    await sleep(100);
+    activeProgress = getCompressionProgress(started.session.id);
+  }
+
+  assert.equal(activeProgress?.currentlyProcessing.length, 1);
+  assert.equal(activeProgress?.currentlyProcessing[0].operation, 'compress');
+  assert.ok(activeProgress?.currentlyProcessing[0].sourcePath.endsWith('slow.mp4'));
+
+  await execution;
+
+  const finalProgress = getCompressionProgress(started.session.id);
+  assert.ok(finalProgress);
+  assert.equal(finalProgress?.status, 'completed');
+  assert.equal(finalProgress?.currentlyProcessing.length, 0);
+  assert.equal(finalProgress?.processedItems.length, 1);
+  assert.equal(finalProgress?.processedItems[0].operation, 'compress');
 });

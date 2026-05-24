@@ -214,6 +214,16 @@ def main() -> int:
         error_message = None
         operation = 'compress' if should_compress(source_file, scope) else 'copy'
 
+        emit_event({
+            'type': 'start',
+            'item': {
+                'source': str(source_file),
+                'output': str(output_file),
+                'command': command,
+                'operation': operation,
+            },
+        })
+
         if operation == 'copy':
             shutil.copy2(source_file, output_file)
         else:
