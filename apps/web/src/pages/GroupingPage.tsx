@@ -314,6 +314,7 @@ export const GroupingPage = () => {
       const matchesFolder =
         activeFolderLabel === '__all__' ||
         (activeFolderLabel === '__preserved__' && item.preservedStructure) ||
+        (activeFolderLabel === '__unassigned__' && !item.preservedStructure && !item.targetGroupLabel) ||
         item.targetGroupLabel === activeFolderLabel;
       const matchesSearch =
         !normalizedSearch ||
@@ -344,6 +345,8 @@ export const GroupingPage = () => {
 
   const preservedCount = directoryRows.filter((row) => row.isPreserved).length;
   const preservedItemsCount = workspace?.items.filter((item) => item.preservedStructure).length ?? 0;
+  const unassignedItemsCount =
+    workspace?.items.filter((item) => !item.preservedStructure && !item.targetGroupLabel).length ?? 0;
   const preservedGroupLabel = useMemo(() => {
     if (preservedDirectories.size === 1) {
       return getPathName(Array.from(preservedDirectories)[0]);
@@ -356,6 +359,10 @@ export const GroupingPage = () => {
   const activeFolderTitle = useMemo(() => {
     if (activeFolderLabel === '__preserved__') {
       return preservedGroupLabel;
+    }
+
+    if (activeFolderLabel === '__unassigned__') {
+      return t('grouping.noProposedFolder');
     }
 
     return activeFolder?.label ?? t('grouping.allMedia');
@@ -782,6 +789,15 @@ export const GroupingPage = () => {
                   <span>{preservedGroupLabel}</span>
                   <strong>{preservedItemsCount}</strong>
                 </button>
+              </div>
+            )}
+            {unassignedItemsCount > 0 && (
+              <div className={`grouping-folder-drop grouping-folder-drop-unassigned ${activeFolderLabel === '__unassigned__' ? 'is-active' : ''}`}>
+                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel('__unassigned__')}>
+                  <span>{t('grouping.noProposedFolder')}</span>
+                  <strong>{unassignedItemsCount}</strong>
+                </button>
+                <p className="grouping-folder-note">{t('grouping.noProposedFolderNote')}</p>
               </div>
             )}
             {workspace?.folders.map((folder) => (

@@ -2249,6 +2249,11 @@ body {
   background: rgba(20, 184, 166, 0.08);
 }
 
+.grouping-folder-drop-unassigned {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.08);
+}
+
 .grouping-folder-button {
   width: 100%;
   min-height: 44px;
@@ -2300,6 +2305,13 @@ body {
   gap: 6px;
   padding: 0 10px 10px;
   min-height: 30px;
+}
+
+.grouping-folder-note {
+  margin: -2px 12px 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .grouping-folder-actions button,
