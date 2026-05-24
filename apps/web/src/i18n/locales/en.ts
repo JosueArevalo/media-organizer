@@ -224,6 +224,7 @@ export const en = {
   'compression.finalizing': 'Finalizing...',
   'compression.logCompressed': 'Compressed {name}',
   'compression.logCopied': 'Copied {name}',
+  'compression.logCopySkipped': 'Skipped copy for {name}',
   'compression.detailedLogs': '{icon} Detailed Logs ({count} items)',
   'compression.noItemsProcessed': 'No items processed yet',
   'compression.imageTitle': 'Image compression',

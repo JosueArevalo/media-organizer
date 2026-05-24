@@ -275,6 +275,7 @@ test('compression progress reports the actively processing video and clears it a
   assert.equal(activeProgress?.currentlyProcessing.length, 1);
   assert.equal(activeProgress?.currentlyProcessing[0].operation, 'compress');
   assert.ok(activeProgress?.currentlyProcessing[0].sourcePath.endsWith('slow.mp4'));
+  assert.equal(typeof activeProgress?.currentlyProcessing[0].startedAt, 'number');
 
   await execution;
 
@@ -284,4 +285,5 @@ test('compression progress reports the actively processing video and clears it a
   assert.equal(finalProgress?.currentlyProcessing.length, 0);
   assert.equal(finalProgress?.processedItems.length, 1);
   assert.equal(finalProgress?.processedItems[0].operation, 'compress');
+  assert.equal(typeof finalProgress?.processedItems[0].durationMs, 'number');
 });

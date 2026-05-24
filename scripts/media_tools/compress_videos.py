@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -100,6 +101,31 @@ def build_output_path(source_dir: Path, output_dir: Path, source_file: Path) -> 
 
 def emit_event(payload: dict):
     print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def has_same_file_metadata(source_file: Path, output_file: Path) -> bool:
+    if not output_file.exists():
+        return False
+
+    try:
+        source_stat = source_file.stat()
+        output_stat = output_file.stat()
+    except OSError:
+        return False
+
+    return source_stat.st_size == output_stat.st_size and source_stat.st_mtime_ns == output_stat.st_mtime_ns
+
+
+def copy_if_changed(source_file: Path, output_file: Path) -> bool:
+    if has_same_file_metadata(source_file, output_file):
+        return True
+
+    shutil.copy2(source_file, output_file)
+    return False
 
 
 def iter_video_files(source_dir: Path):
@@ -213,6 +239,8 @@ def main() -> int:
         status = 'completed'
         error_message = None
         operation = 'compress' if should_compress(source_file, scope) else 'copy'
+        skipped = False
+        started_at = now_ms()
 
         emit_event({
             'type': 'start',
@@ -221,11 +249,12 @@ def main() -> int:
                 'output': str(output_file),
                 'command': command,
                 'operation': operation,
+                'startedAt': started_at,
             },
         })
 
         if operation == 'copy':
-            shutil.copy2(source_file, output_file)
+            skipped = copy_if_changed(source_file, output_file)
         else:
             try:
                 subprocess.run(command, check=True, capture_output=True, text=True)
@@ -240,12 +269,17 @@ def main() -> int:
         if status == 'failed':
             shutil.copy2(source_file, output_file)
 
+        finished_at = now_ms()
         item = {
             'source': str(source_file),
             'output': str(output_file),
             'command': command,
             'status': status,
             'operation': operation,
+            'startedAt': started_at,
+            'finishedAt': finished_at,
+            'durationMs': finished_at - started_at,
+            'skipped': skipped,
             'error': error_message,
         }
 

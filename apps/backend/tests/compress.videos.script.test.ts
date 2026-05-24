@@ -10,6 +10,10 @@ type ScriptItem = {
   output: string;
   status?: 'completed' | 'failed';
   operation: 'compress' | 'copy';
+  startedAt?: number;
+  finishedAt?: number;
+  durationMs?: number;
+  skipped?: boolean;
 };
 
 const repoRoot = path.resolve(process.cwd(), '..', '..');
@@ -87,6 +91,10 @@ test('compress_videos emits start before completed item for selected videos', ()
   assert.ok(startIndex >= 0);
   assert.ok(itemIndex > startIndex);
   assert.equal(events[startIndex].item?.operation, 'compress');
+  assert.equal(typeof events[startIndex].item?.startedAt, 'number');
   assert.equal(complete?.items?.[0]?.operation, 'compress');
+  assert.equal(typeof complete?.items?.[0]?.startedAt, 'number');
+  assert.equal(typeof complete?.items?.[0]?.finishedAt, 'number');
+  assert.equal(typeof complete?.items?.[0]?.durationMs, 'number');
   assert.ok(fs.existsSync(path.join(outputDir, 'clip.mp4')));
 });

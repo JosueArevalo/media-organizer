@@ -58,6 +58,24 @@ type MediaStatsState =
   | { status: 'ready'; data: MediaStats; error: null }
   | { status: 'error'; data: null; error: string };
 
+type CompressionProgressItem = {
+  id: string;
+  sourcePath: string;
+  status: 'completed' | 'failed';
+  operation: 'compress' | 'copy';
+  startedAt?: number;
+  finishedAt?: number;
+  durationMs?: number;
+  skipped?: boolean;
+};
+
+type CompressionActiveItem = {
+  id: string;
+  sourcePath: string;
+  operation: 'compress' | 'copy';
+  startedAt?: number;
+};
+
 const IMAGE_PRESETS: Array<{ id: Exclude<ImagePresetId, 'custom'>; labelKey: TranslationKey; quality: number; noteKey: TranslationKey }> = [
   { id: 'balanced', labelKey: 'compression.preset.balanced', quality: 80, noteKey: 'compression.preset.balancedNote' },
   { id: 'high', labelKey: 'compression.preset.high', quality: 90, noteKey: 'compression.preset.highNote' },
@@ -88,6 +106,28 @@ const formatBytes = (bytes: number) => {
 
   return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 };
+
+const formatDuration = (milliseconds?: number) => {
+  if (typeof milliseconds !== 'number' || !Number.isFinite(milliseconds) || milliseconds < 0) {
+    return '';
+  }
+
+  if (milliseconds < 1000) {
+    return '<1s';
+  }
+
+  const totalSeconds = Math.round(milliseconds / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+};
+
+const getFileLabel = (filePath: string) => filePath.split(/[\\/]/).pop() || filePath;
 
 const getMediaKind = (fileName: string, mimeType = '', fileType = ''): 'image' | 'video' | 'other' => {
   const normalizedType = fileType.toLowerCase();
@@ -407,8 +447,8 @@ export const CompressionPage = () => {
     total: number;
     completed: number;
     failed: number;
-    currentlyProcessing: Array<{ id: string; sourcePath: string; operation: 'compress' | 'copy' }>;
-    processedItems: Array<{ id: string; sourcePath: string; status: 'completed' | 'failed'; operation: 'compress' | 'copy' }>;
+    currentlyProcessing: CompressionActiveItem[];
+    processedItems: CompressionProgressItem[];
     totalCompress: number;
     totalCopy: number;
     completedCompress: number;
@@ -1015,8 +1055,9 @@ export const CompressionPage = () => {
                   progressData.currentlyProcessing.slice(0, 2).map((item) => (
                     <div key={item.id} className="compression-processing-item">
                       {t(item.operation === 'compress' ? 'compression.compressingItem' : 'compression.copyingItem', {
-                        name: item.sourcePath.split('/').pop() || item.sourcePath
+                        name: getFileLabel(item.sourcePath)
                       })}
+                      {item.startedAt ? ` - ${formatDuration(Date.now() - item.startedAt)}` : ''}
                     </div>
                   ))
                 ) : (
@@ -1048,9 +1089,14 @@ export const CompressionPage = () => {
                         {item.status === 'completed' ? '✓' : '✗'}
                       </span>
                       <span className="compression-log-name">
-                        {t(item.operation === 'compress' ? 'compression.logCompressed' : 'compression.logCopied', {
-                          name: item.sourcePath.split('/').pop() || item.sourcePath
+                        {t(item.skipped && item.operation === 'copy'
+                          ? 'compression.logCopySkipped'
+                          : item.operation === 'compress'
+                            ? 'compression.logCompressed'
+                            : 'compression.logCopied', {
+                          name: getFileLabel(item.sourcePath)
                         })}
+                        {typeof item.durationMs === 'number' ? ` - ${formatDuration(item.durationMs)}` : ''}
                       </span>
                     </div>
                   ))

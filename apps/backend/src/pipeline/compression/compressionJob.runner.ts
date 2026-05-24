@@ -15,6 +15,10 @@ type ScriptResultItem = {
   command: string[];
   status: 'completed' | 'failed';
   operation?: 'compress' | 'copy';
+  startedAt?: number;
+  finishedAt?: number;
+  durationMs?: number;
+  skipped?: boolean;
   error?: string;
   warning?: string;
 };
@@ -24,6 +28,7 @@ type ScriptActiveItem = {
   output: string;
   command: string[];
   operation?: 'compress' | 'copy';
+  startedAt?: number;
 };
 
 type ScriptResultPayload = {
@@ -68,6 +73,7 @@ type CompressionManifestData = {
     selectionScope?: SelectionScope;
     createdAt?: string;
   };
+  processedItems?: ScriptResultItem[];
 };
 
 type OperationCounts = {
@@ -443,6 +449,7 @@ const updateSessionAndCheckpoint = (
     totalCount: number;
     operationCounts: OperationCounts;
     activeItems: ActiveCompressionItem[];
+    processedItems: ScriptResultItem[];
   }
 ) => {
   const db = getDb();
@@ -469,6 +476,7 @@ const updateSessionAndCheckpoint = (
         ...getOperationCounts(payload.operationCounts)
       },
       activeItems: payload.activeItems,
+      processedItems: payload.processedItems,
       image: payload.image,
       video: payload.video
     }),
@@ -508,6 +516,7 @@ const updateCompressionProgressCheckpoint = (
     failedCount: number;
     operationCounts: OperationCounts;
     activeItems: ActiveCompressionItem[];
+    processedItems: ScriptResultItem[];
   }
 ) => {
   const db = getDb();
@@ -530,7 +539,8 @@ const updateCompressionProgressCheckpoint = (
         failedItems: payload.failedCount,
         ...getOperationCounts(payload.operationCounts)
       },
-      activeItems: payload.activeItems
+      activeItems: payload.activeItems,
+      processedItems: payload.processedItems
     }),
     now,
     sessionId
@@ -593,7 +603,8 @@ const persistCompressionItem = (
 const toActiveCompressionItem = (item: ScriptActiveItem, scope: SelectionScope): ActiveCompressionItem => ({
   id: normalizePath(item.source),
   sourcePath: item.source,
-  operation: item.operation ?? (isCompressOperation(item.source, scope) ? 'compress' : 'copy')
+  operation: item.operation ?? (isCompressOperation(item.source, scope) ? 'compress' : 'copy'),
+  ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {})
 });
 
 const withoutActiveItem = (items: ActiveCompressionItem[], sourcePath: string) => {
@@ -675,6 +686,7 @@ export const executeCompressionSession = async (sessionId: string) => {
     failedCopyCount: 0
   };
   let activeItems: ActiveCompressionItem[] = checkpointData.activeItems ?? [];
+  const processedItems: ScriptResultItem[] = checkpointData.processedItems ?? [];
 
   // Seed the checkpoint with the total before any phase finishes.
   updateCompressionProgressCheckpoint(sessionId, {
@@ -684,7 +696,8 @@ export const executeCompressionSession = async (sessionId: string) => {
     completedCount: progressState.completedCount,
     failedCount: progressState.failedCount,
     operationCounts: progressState,
-    activeItems
+    activeItems,
+    processedItems
   });
 
   const imageResult = await executeCommand(imageCommand.command, imageCommand.args, (item) => {
@@ -697,11 +710,13 @@ export const executeCompressionSession = async (sessionId: string) => {
       completedCount: progressState.completedCount,
       failedCount: progressState.failedCount,
       operationCounts: progressState,
-      activeItems
+      activeItems,
+      processedItems
     });
   }, (item) => {
     persistCompressionItem(sessionId, item, checkpointData.outputRoot, resolvedSelectionScope, progressState);
     activeItems = withoutActiveItem(activeItems, item.source);
+    processedItems.push(item);
 
     updateCompressionProgressCheckpoint(sessionId, {
       outputRoot: checkpointData.outputRoot,
@@ -710,7 +725,8 @@ export const executeCompressionSession = async (sessionId: string) => {
       completedCount: progressState.completedCount,
       failedCount: progressState.failedCount,
       operationCounts: progressState,
-      activeItems
+      activeItems,
+      processedItems
     });
   });
 
@@ -724,11 +740,13 @@ export const executeCompressionSession = async (sessionId: string) => {
       completedCount: progressState.completedCount,
       failedCount: progressState.failedCount,
       operationCounts: progressState,
-      activeItems
+      activeItems,
+      processedItems
     });
   }, (item) => {
     persistCompressionItem(sessionId, item, checkpointData.outputRoot, resolvedSelectionScope, progressState);
     activeItems = withoutActiveItem(activeItems, item.source);
+    processedItems.push(item);
 
     updateCompressionProgressCheckpoint(sessionId, {
       outputRoot: checkpointData.outputRoot,
@@ -737,7 +755,8 @@ export const executeCompressionSession = async (sessionId: string) => {
       completedCount: progressState.completedCount,
       failedCount: progressState.failedCount,
       operationCounts: progressState,
-      activeItems
+      activeItems,
+      processedItems
     });
   });
 
@@ -751,7 +770,8 @@ export const executeCompressionSession = async (sessionId: string) => {
     completedCount: progressState.completedCount,
     failedCount: progressState.failedCount,
     operationCounts: progressState,
-    activeItems: []
+    activeItems: [],
+    processedItems
   });
 
   updateSessionAndCheckpoint(sessionId, {
@@ -763,7 +783,8 @@ export const executeCompressionSession = async (sessionId: string) => {
     failedCount: progressState.failedCount,
     totalCount,
     operationCounts: progressState,
-    activeItems: []
+    activeItems: [],
+    processedItems
   });
 
   return {

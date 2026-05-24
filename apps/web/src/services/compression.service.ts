@@ -44,12 +44,17 @@ export type CompressionProgressApiResponse = {
     id: string;
     sourcePath: string;
     operation: 'compress' | 'copy';
+    startedAt?: number;
   }>;
   processedItems: Array<{
     id: string;
     sourcePath: string;
     status: 'completed' | 'failed';
     operation: 'compress' | 'copy';
+    startedAt?: number;
+    finishedAt?: number;
+    durationMs?: number;
+    skipped?: boolean;
   }>;
   totalCompress: number;
   totalCopy: number;

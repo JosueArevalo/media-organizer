@@ -226,6 +226,7 @@ export const es: TranslationDictionary = {
   'compression.finalizing': 'Finalizando...',
   'compression.logCompressed': 'Comprimido {name}',
   'compression.logCopied': 'Copiado {name}',
+  'compression.logCopySkipped': 'Copia omitida para {name}',
   'compression.detailedLogs': '{icon} Logs detallados ({count} elementos)',
   'compression.noItemsProcessed': 'Aún no hay elementos procesados',
   'compression.imageTitle': 'Compresión de imágenes',
