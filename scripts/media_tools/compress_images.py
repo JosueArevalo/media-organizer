@@ -264,6 +264,7 @@ def main() -> int:
         status = 'completed'
         error_message = None
         warning_message = None
+        operation = 'compress' if selected_for_compression and extension in JPEG_EXTENSIONS.union(HEIC_EXTENSIONS) else 'copy'
 
         if not selected_for_compression:
             shutil.copy2(source_file, output_file)
@@ -317,6 +318,7 @@ def main() -> int:
             'output': str(output_file),
             'command': command,
             'status': status,
+            'operation': operation,
             'error': error_message,
             'warning': warning_message,
         }

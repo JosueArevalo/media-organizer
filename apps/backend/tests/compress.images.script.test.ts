@@ -9,6 +9,7 @@ type ScriptItem = {
   source: string;
   output: string;
   status: 'completed' | 'failed';
+  operation: 'compress' | 'copy';
   warning?: string | null;
 };
 
@@ -130,10 +131,66 @@ test('compress_images converts selected HEIC to JPG and copies PNG without compr
   const items = complete?.items ?? [];
 
   assert.equal(items.length, 3);
-  assert.ok(items.some((item) => item.source.endsWith('photo.heic') && item.output.endsWith('.jpg') && item.status === 'completed'));
-  assert.ok(items.some((item) => item.source.endsWith('graphic.png') && item.warning?.includes('copied without compression')));
+  assert.ok(items.some((item) => item.source.endsWith('photo.heic') && item.output.endsWith('.jpg') && item.status === 'completed' && item.operation === 'compress'));
+  assert.ok(items.some((item) => item.source.endsWith('photo.jpg') && item.operation === 'compress'));
+  assert.ok(items.some((item) => item.source.endsWith('graphic.png') && item.operation === 'copy' && item.warning?.includes('copied without compression')));
   assert.ok(fs.existsSync(path.join(outputDir, 'graphic.png')));
   assert.ok(items.filter((item) => path.basename(item.output).startsWith('photo') && item.output.endsWith('.jpg')).length >= 2);
+});
+
+test('compress_images marks excluded selected-scope files as copy operations', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-script-scope-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  fs.mkdirSync(path.join(sourceDir, 'keep'), { recursive: true });
+  fs.mkdirSync(path.join(sourceDir, 'skip'), { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+
+  fs.writeFileSync(path.join(sourceDir, 'keep', 'photo.jpg'), 'fake-jpg', 'utf8');
+  fs.writeFileSync(path.join(sourceDir, 'skip', 'excluded.jpg'), 'fake-jpg', 'utf8');
+
+  const tools = createFakeTools(toolsDir);
+  const pythonCommand = process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python';
+  const result = spawnSync(
+    pythonCommand,
+    [
+      scriptPath,
+      '--source-dir',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+      '--quality',
+      '80',
+      '--encoder-command',
+      tools.cjpeg,
+      '--imagemagick-command',
+      tools.magick,
+      '--selection-scope-json',
+      JSON.stringify({
+        excludedDirectories: [path.join(sourceDir, 'skip')],
+        excludedFiles: [],
+        includedDirectories: [],
+        includedFiles: [],
+        updatedAt: 1
+      })
+    ],
+    { encoding: 'utf8' }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+
+  const complete = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const items = complete?.items ?? [];
+
+  assert.equal(items.length, 2);
+  assert.ok(items.some((item) => item.source.endsWith(path.join('keep', 'photo.jpg')) && item.operation === 'compress'));
+  assert.ok(items.some((item) => item.source.endsWith(path.join('skip', 'excluded.jpg')) && item.operation === 'copy'));
 });
 
 test('compress_images resets copied EXIF orientation after HEIC auto-orient', () => {

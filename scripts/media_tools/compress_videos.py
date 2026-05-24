@@ -212,8 +212,9 @@ def main() -> int:
 
         status = 'completed'
         error_message = None
+        operation = 'compress' if should_compress(source_file, scope) else 'copy'
 
-        if not should_compress(source_file, scope):
+        if operation == 'copy':
             shutil.copy2(source_file, output_file)
         else:
             try:
@@ -234,6 +235,7 @@ def main() -> int:
             'output': str(output_file),
             'command': command,
             'status': status,
+            'operation': operation,
             'error': error_message,
         }
 

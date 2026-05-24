@@ -43,12 +43,20 @@ export type CompressionProgressApiResponse = {
   currentlyProcessing: Array<{
     id: string;
     sourcePath: string;
+    operation: 'compress' | 'copy';
   }>;
   processedItems: Array<{
     id: string;
     sourcePath: string;
     status: 'completed' | 'failed';
+    operation: 'compress' | 'copy';
   }>;
+  totalCompress: number;
+  totalCopy: number;
+  completedCompress: number;
+  completedCopy: number;
+  failedCompress: number;
+  failedCopy: number;
 };
 
 export type HandBrakePresetOption = {

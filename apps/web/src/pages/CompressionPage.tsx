@@ -407,8 +407,14 @@ export const CompressionPage = () => {
     total: number;
     completed: number;
     failed: number;
-    currentlyProcessing: Array<{ id: string; sourcePath: string }>;
-    processedItems: Array<{ id: string; sourcePath: string; status: 'completed' | 'failed' }>;
+    currentlyProcessing: Array<{ id: string; sourcePath: string; operation: 'compress' | 'copy' }>;
+    processedItems: Array<{ id: string; sourcePath: string; status: 'completed' | 'failed'; operation: 'compress' | 'copy' }>;
+    totalCompress: number;
+    totalCopy: number;
+    completedCompress: number;
+    completedCopy: number;
+    failedCompress: number;
+    failedCopy: number;
   } | null>(null);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const completionTimerRef = useRef<number | null>(null);
@@ -783,7 +789,13 @@ export const CompressionPage = () => {
             completed: progress.completed,
             failed: progress.failed,
             currentlyProcessing: progress.currentlyProcessing,
-            processedItems: progress.processedItems
+            processedItems: progress.processedItems,
+            totalCompress: progress.totalCompress,
+            totalCopy: progress.totalCopy,
+            completedCompress: progress.completedCompress,
+            completedCopy: progress.completedCopy,
+            failedCompress: progress.failedCompress,
+            failedCopy: progress.failedCopy
           });
 
           const status = progress.status;
@@ -913,13 +925,22 @@ export const CompressionPage = () => {
             </div>
             <div className="progress-stat">
               <span className="progress-label">{t('compression.completed')}</span>
-              <span className="progress-value" style={{ color: '#10b981' }}>{progressData.completed}</span>
+              <span className="progress-value" style={{ color: '#10b981' }}>{progressData.completed} / {progressData.total > 0 ? progressData.total : estimatedTotalMediaCount}</span>
             </div>
             <div className="progress-stat">
               <span className="progress-label">{t('compression.failedLabel')}</span>
               <span className="progress-value" style={{ color: progressData.failed > 0 ? '#ef4444' : '#6b7280' }}>{progressData.failed}</span>
             </div>
           </div>
+
+          <p className="page-summary-note">
+            {t('compression.operationBreakdown', {
+              compressed: progressData.completedCompress,
+              totalCompress: progressData.totalCompress,
+              copied: progressData.completedCopy,
+              totalCopy: progressData.totalCopy
+            })}
+          </p>
 
           <div className="compression-progress-bar">
             <div 
@@ -952,7 +973,9 @@ export const CompressionPage = () => {
               <div className="compression-processing-list">
                 {progressData.currentlyProcessing.slice(0, 2).map((item) => (
                   <div key={item.id} className="compression-processing-item">
-                    📄 {item.sourcePath.split('/').pop() || item.sourcePath}
+                    {t(item.operation === 'compress' ? 'compression.compressingItem' : 'compression.copyingItem', {
+                      name: item.sourcePath.split('/').pop() || item.sourcePath
+                    })}
                   </div>
                 ))}
               </div>
@@ -977,7 +1000,9 @@ export const CompressionPage = () => {
                         {item.status === 'completed' ? '✓' : '✗'}
                       </span>
                       <span className="compression-log-name">
-                        {item.sourcePath.split('/').pop() || item.sourcePath}
+                        {t(item.operation === 'compress' ? 'compression.logCompressed' : 'compression.logCopied', {
+                          name: item.sourcePath.split('/').pop() || item.sourcePath
+                        })}
                       </span>
                     </div>
                   ))

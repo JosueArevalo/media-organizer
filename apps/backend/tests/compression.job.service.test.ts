@@ -50,7 +50,7 @@ test('startCompressionSession creates a resumable session and output scaffold', 
   };
   assert.equal(manifest.imageToolCommand, 'cjpeg');
   assert.equal(manifest.videoToolCommand, 'HandBrakeCLI');
-  assert.equal(manifest.imageMagickCommand, 'magick');
+  assert.ok(['magick', 'magick.exe'].includes(path.basename(manifest.imageMagickCommand).toLowerCase()));
   assert.equal(manifest.exifToolCommand, '');
 
   const persisted = getCompressionSession(result.session.id);
@@ -132,4 +132,75 @@ test('executeCompressionSession persists per-item compression statuses', async (
 
   assert.ok(fs.existsSync(outputImage));
   assert.ok(fs.existsSync(outputVideo));
+});
+
+test('executeCompressionSession counts copied excluded media in progress while preserving compression decisions', async () => {
+  const { startCompressionSession, getCompressionSession, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js');
+  const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js');
+  const scopedSourceDir = path.join(tempRoot, 'scope-progress-source');
+  const scopedOutputDir = path.join(tempRoot, 'scope-progress-output');
+
+  fs.mkdirSync(path.join(scopedSourceDir, 'include'), { recursive: true });
+  fs.mkdirSync(path.join(scopedSourceDir, 'exclude'), { recursive: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+  fs.writeFileSync(path.join(scopedSourceDir, 'include', 'selected.jpg'), 'fake-jpg-content', 'utf8');
+  fs.writeFileSync(path.join(scopedSourceDir, 'exclude', 'copied.jpg'), 'fake-jpg-content', 'utf8');
+  fs.writeFileSync(path.join(scopedSourceDir, 'exclude', 'notes.txt'), 'not-media', 'utf8');
+
+  const started = startCompressionSession({
+    name: 'Scope progress test session',
+    sourceDir: scopedSourceDir,
+    outputDir: scopedOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Balanced',
+    imageToolCommand: '__missing_image_encoder__',
+    videoToolCommand: '__missing_video_encoder__',
+    selectionScope: {
+      excludedDirectories: [path.join(scopedSourceDir, 'exclude')],
+      excludedFiles: [],
+      includedDirectories: [],
+      includedFiles: [],
+      updatedAt: 1
+    }
+  });
+
+  const result = await executeCompressionSession(started.session.id);
+
+  assert.equal(result.totalCount, 2);
+  assert.equal(result.completedCount, 1);
+  assert.equal(result.failedCount, 1);
+
+  const progress = getCompressionProgress(started.session.id);
+  assert.ok(progress);
+  assert.equal(progress?.total, 2);
+  assert.equal(progress?.completed, 1);
+  assert.equal(progress?.failed, 1);
+  assert.equal(progress?.totalCompress, 1);
+  assert.equal(progress?.totalCopy, 1);
+  assert.equal(progress?.completedCompress, 0);
+  assert.equal(progress?.completedCopy, 1);
+  assert.equal(progress?.failedCompress, 1);
+  assert.equal(progress?.failedCopy, 0);
+
+  const persisted = getCompressionSession(started.session.id);
+  assert.equal(persisted?.session.status, 'failed');
+
+  const db = getDb();
+  const decisionRows = db
+    .prepare(
+      `
+        SELECT mi.source_path, idc.selected_for_compression
+        FROM item_decisions idc
+        JOIN media_items mi ON mi.id = idc.item_id
+        WHERE idc.session_id = ?
+        ORDER BY mi.source_path
+      `
+    )
+    .all(started.session.id) as Array<{ source_path: string; selected_for_compression: number }>;
+
+  assert.equal(decisionRows.length, 2);
+  assert.equal(decisionRows.find((row) => row.source_path.endsWith(path.join('include', 'selected.jpg')))?.selected_for_compression, 1);
+  assert.equal(decisionRows.find((row) => row.source_path.endsWith(path.join('exclude', 'copied.jpg')))?.selected_for_compression, 0);
+  assert.ok(fs.existsSync(path.join(started.outputRoot, 'exclude', 'copied.jpg')));
 });

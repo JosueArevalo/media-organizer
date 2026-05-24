@@ -14,6 +14,7 @@ type ScriptResultItem = {
   output: string;
   command: string[];
   status: 'completed' | 'failed';
+  operation?: 'compress' | 'copy';
   error?: string;
   warning?: string;
 };
@@ -53,6 +54,15 @@ type CompressionManifestData = {
     selectionScope?: SelectionScope;
     createdAt?: string;
   };
+};
+
+type OperationCounts = {
+  totalCompressCount: number;
+  totalCopyCount: number;
+  completedCompressCount: number;
+  completedCopyCount: number;
+  failedCompressCount: number;
+  failedCopyCount: number;
 };
 
 const executeCommand = async (
@@ -211,6 +221,15 @@ const collectFailedItems = (...payloads: ScriptResultPayload[]) =>
     .filter((item) => item.status === 'failed')
     .map((item) => ({ source: item.source, error: item.error ?? null }));
 
+const getOperationCounts = (counts: OperationCounts): OperationCounts => ({
+  totalCompressCount: counts.totalCompressCount,
+  totalCopyCount: counts.totalCopyCount,
+  completedCompressCount: counts.completedCompressCount,
+  completedCopyCount: counts.completedCopyCount,
+  failedCompressCount: counts.failedCompressCount,
+  failedCopyCount: counts.failedCopyCount
+});
+
 const isUnderExcludedAncestor = (
   absolutePath: string,
   excludedDirectories: Set<string>,
@@ -341,10 +360,22 @@ const upsertStageStatus = (sessionId: string, itemId: string, status: 'completed
   ).run(randomUUID(), sessionId, itemId, status, errorMessage, now);
 };
 
-const countFilesToProcess = (sourceDir: string, scope: SelectionScope): number => {
+const isCompressOperation = (filePath: string, scope: SelectionScope) => {
+  const extension = path.extname(filePath).toLowerCase();
+
+  if (!isFileCompressed(filePath, scope)) {
+    return false;
+  }
+
+  return ['.jpg', '.jpeg', '.heic', '.heif', '.mp4', '.mov', '.m4v', '.avi', '.mkv'].includes(extension);
+};
+
+const countFilesToProcess = (sourceDir: string, scope: SelectionScope): { totalCount: number } & Pick<OperationCounts, 'totalCompressCount' | 'totalCopyCount'> => {
   const imageExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif']);
   const videoExtensions = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv']);
-  let count = 0;
+  let totalCount = 0;
+  let totalCompressCount = 0;
+  let totalCopyCount = 0;
 
   const walkDir = (dir: string, depth = 0): void => {
     if (depth > 50) return; // Prevent infinite recursion
@@ -354,23 +385,19 @@ const countFilesToProcess = (sourceDir: string, scope: SelectionScope): number =
 
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
-        const normalizedPath = fullPath.replace(/\\/g, '/').toLowerCase();
-        const basePath = sourceDir.replace(/\\/g, '/').toLowerCase();
-
-        // Check if excluded
-        if (scope.excludedDirectories.some((excl) => normalizedPath.startsWith(excl))) {
-          continue;
-        }
-        if (scope.excludedFiles.some((excl) => excl.toLowerCase() === normalizedPath)) {
-          continue;
-        }
 
         if (entry.isDirectory()) {
           walkDir(fullPath, depth + 1);
         } else {
           const ext = path.extname(entry.name).toLowerCase();
           if (imageExtensions.has(ext) || videoExtensions.has(ext)) {
-            count += 1;
+            totalCount += 1;
+
+            if (isCompressOperation(fullPath, scope)) {
+              totalCompressCount += 1;
+            } else {
+              totalCopyCount += 1;
+            }
           }
         }
       }
@@ -380,7 +407,7 @@ const countFilesToProcess = (sourceDir: string, scope: SelectionScope): number =
   };
 
   walkDir(sourceDir);
-  return count;
+  return { totalCount, totalCompressCount, totalCopyCount };
 };
 
 const updateSessionAndCheckpoint = (
@@ -393,6 +420,7 @@ const updateSessionAndCheckpoint = (
     failedCount: number;
     completedCount: number;
     totalCount: number;
+    operationCounts: OperationCounts;
   }
 ) => {
   const db = getDb();
@@ -415,7 +443,8 @@ const updateSessionAndCheckpoint = (
       totalCount: payload.totalCount,
       summary: {
         completedItems: payload.completedCount,
-        failedItems: payload.failedCount
+        failedItems: payload.failedCount,
+        ...getOperationCounts(payload.operationCounts)
       },
       image: payload.image,
       video: payload.video
@@ -454,6 +483,7 @@ const updateCompressionProgressCheckpoint = (
     totalCount: number;
     completedCount: number;
     failedCount: number;
+    operationCounts: OperationCounts;
   }
 ) => {
   const db = getDb();
@@ -473,7 +503,8 @@ const updateCompressionProgressCheckpoint = (
       totalCount: payload.totalCount,
       summary: {
         completedItems: payload.completedCount,
-        failedItems: payload.failedCount
+        failedItems: payload.failedCount,
+        ...getOperationCounts(payload.operationCounts)
       }
     }),
     now,
@@ -507,17 +538,30 @@ const persistCompressionItem = (
   item: ScriptResultItem,
   outputRoot: string,
   scope: SelectionScope,
-  counters: { completedCount: number; failedCount: number }
+  counters: { completedCount: number; failedCount: number } & OperationCounts
 ) => {
   const itemId = upsertMediaItem(sessionId, item.source, outputRoot, item.output);
-  const selectedForCompression = isFileCompressed(item.source, scope);
+  const operation = item.operation ?? (isCompressOperation(item.source, scope) ? 'compress' : 'copy');
+  const selectedForCompression = operation === 'compress';
   upsertDecision(sessionId, itemId, selectedForCompression);
   upsertStageStatus(sessionId, itemId, item.status, item.error ?? null);
 
   if (item.status === 'completed') {
     counters.completedCount += 1;
+
+    if (operation === 'compress') {
+      counters.completedCompressCount += 1;
+    } else {
+      counters.completedCopyCount += 1;
+    }
   } else {
     counters.failedCount += 1;
+
+    if (operation === 'compress') {
+      counters.failedCompressCount += 1;
+    } else {
+      counters.failedCopyCount += 1;
+    }
   }
 };
 
@@ -583,10 +627,16 @@ export const executeCompressionSession = async (sessionId: string) => {
     createdAt: snapshot.session.createdAt
   });
 
-  const totalCount = countFilesToProcess(checkpointData.manifest.sourceDir, resolvedSelectionScope);
+  const { totalCount, totalCompressCount, totalCopyCount } = countFilesToProcess(checkpointData.manifest.sourceDir, resolvedSelectionScope);
   const progressState = {
     completedCount: 0,
-    failedCount: 0
+    failedCount: 0,
+    totalCompressCount,
+    totalCopyCount,
+    completedCompressCount: 0,
+    completedCopyCount: 0,
+    failedCompressCount: 0,
+    failedCopyCount: 0
   };
 
   // Seed the checkpoint with the total before any phase finishes.
@@ -595,7 +645,8 @@ export const executeCompressionSession = async (sessionId: string) => {
     manifest: checkpointData.manifest,
     totalCount,
     completedCount: progressState.completedCount,
-    failedCount: progressState.failedCount
+    failedCount: progressState.failedCount,
+    operationCounts: progressState
   });
 
   const imageResult = await executeCommand(imageCommand.command, imageCommand.args, (item) => {
@@ -606,7 +657,8 @@ export const executeCompressionSession = async (sessionId: string) => {
       manifest: checkpointData.manifest,
       totalCount,
       completedCount: progressState.completedCount,
-      failedCount: progressState.failedCount
+      failedCount: progressState.failedCount,
+      operationCounts: progressState
     });
   });
 
@@ -618,7 +670,8 @@ export const executeCompressionSession = async (sessionId: string) => {
       manifest: checkpointData.manifest,
       totalCount,
       completedCount: progressState.completedCount,
-      failedCount: progressState.failedCount
+      failedCount: progressState.failedCount,
+      operationCounts: progressState
     });
   });
 
@@ -630,7 +683,8 @@ export const executeCompressionSession = async (sessionId: string) => {
     manifest: checkpointData.manifest,
     totalCount,
     completedCount: progressState.completedCount,
-    failedCount: progressState.failedCount
+    failedCount: progressState.failedCount,
+    operationCounts: progressState
   });
 
   updateSessionAndCheckpoint(sessionId, {
@@ -640,7 +694,8 @@ export const executeCompressionSession = async (sessionId: string) => {
     manifest: checkpointData.manifest,
     completedCount: progressState.completedCount,
     failedCount: progressState.failedCount,
-    totalCount
+    totalCount,
+    operationCounts: progressState
   });
 
   return {
