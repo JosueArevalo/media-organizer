@@ -194,7 +194,7 @@ export const GroupingPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { sourceSelection, destinationSelection } = useFolderSelections();
+  const { sourceSelection, destinationSelection, isLoading: isLoadingFolderSelections } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
   const groupingSessionState = useGroupingSessionState();
   const [workspace, setWorkspace] = useState<GroupingWorkspace | null>(null);
@@ -214,7 +214,10 @@ export const GroupingPage = () => {
 
   const sourcePath = sourceSelection?.path ?? '';
   const destinationPath = destinationSelection?.path ?? '';
-  const canOpenWorkspace = Boolean(sourcePath && destinationPath && compressionSessionState.backendSessionId);
+  const hasWorkspacePrerequisites = Boolean(sourcePath && destinationPath && compressionSessionState.backendSessionId);
+  const canOpenWorkspace = hasWorkspacePrerequisites && compressionSessionState.status === 'completed';
+  const isWaitingForWorkspacePrerequisites =
+    isLoadingFolderSelections || (hasWorkspacePrerequisites && compressionSessionState.status === 'running');
 
   const refreshWorkspace = useCallback(
     async (sessionId: string) => {
@@ -286,6 +289,7 @@ export const GroupingPage = () => {
   }, [
     canOpenWorkspace,
     compressionSessionState.backendSessionId,
+    compressionSessionState.status,
     destinationPath,
     groupingSessionState.backendSessionId,
     sourcePath
@@ -649,8 +653,11 @@ export const GroupingPage = () => {
         </div>
       </div>
 
-      {!canOpenWorkspace && (
-        <p className="error">{t('grouping.unavailable')}</p>
+      {isWaitingForWorkspacePrerequisites && !workspace && !backendError && (
+        <p className="empty-note">{t('grouping.loadingWorkspace')}</p>
+      )}
+      {!isWaitingForWorkspacePrerequisites && !workspace && !canOpenWorkspace && !backendError && (
+        <p className="empty-note">{t('grouping.unavailable')}</p>
       )}
       {backendError && <p className="error">{backendError}</p>}
 

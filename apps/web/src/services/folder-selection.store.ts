@@ -224,20 +224,26 @@ const openDatabase = (): Promise<IDBDatabase | null> => {
 };
 
 const readRecord = async (slot: FolderSlot): Promise<SelectionRecord | null> => {
-  const database = await openDatabase();
+  const database = await openDatabase().catch((error) => {
+    console.warn('Failed to open folder selection database', error);
+    return null;
+  });
 
   if (!database) {
     return null;
   }
 
   try {
-    return await new Promise((resolve, reject) => {
+    return await new Promise<SelectionRecord | null>((resolve, reject) => {
       const transaction = database.transaction(STORE_NAME, 'readonly');
       const store = transaction.objectStore(STORE_NAME);
       const request = store.get(slot);
 
       request.onsuccess = () => resolve((request.result as SelectionRecord | undefined) ?? null);
       request.onerror = () => reject(request.error);
+    }).catch((error) => {
+      console.warn('Failed to read folder selection record', error);
+      return null;
     });
   } finally {
     closeDatabaseConnection(database);
@@ -245,7 +251,10 @@ const readRecord = async (slot: FolderSlot): Promise<SelectionRecord | null> => 
 };
 
 const writeRecord = async (record: SelectionRecord) => {
-  const database = await openDatabase();
+  const database = await openDatabase().catch((error) => {
+    console.warn('Failed to open folder selection database', error);
+    return null;
+  });
 
   if (!database) {
     return;
@@ -260,13 +269,18 @@ const writeRecord = async (record: SelectionRecord) => {
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
+  } catch (error) {
+    console.warn('Failed to write folder selection record', error);
   } finally {
     closeDatabaseConnection(database);
   }
 };
 
 const deleteRecord = async (slot: FolderSlot) => {
-  const database = await openDatabase();
+  const database = await openDatabase().catch((error) => {
+    console.warn('Failed to open folder selection database', error);
+    return null;
+  });
 
   if (!database) {
     return;
@@ -281,6 +295,8 @@ const deleteRecord = async (slot: FolderSlot) => {
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
+  } catch (error) {
+    console.warn('Failed to delete folder selection record', error);
   } finally {
     closeDatabaseConnection(database);
   }

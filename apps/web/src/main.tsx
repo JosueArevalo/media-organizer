@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { en } from './i18n/locales/en';
 import './styles.css';
 
+let hasRenderedApp = false;
+
 type ErrorBoundaryProps = {
   children: React.ReactNode;
 };
@@ -138,7 +140,10 @@ if (typeof window !== 'undefined') {
 
   window.addEventListener('unhandledrejection', (event) => {
     console.error('Unhandled promise rejection:', event.reason);
-    renderBootstrapError(event.reason);
+
+    if (!hasRenderedApp) {
+      renderBootstrapError(event.reason);
+    }
   });
 }
 
@@ -164,6 +169,7 @@ const bootstrap = async () => {
         </React.StrictMode>
       </AppRuntimeErrorBoundary>
     );
+    hasRenderedApp = true;
   } catch (error) {
     console.error('Application bootstrap error:', error);
     renderBootstrapError(error);
