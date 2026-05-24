@@ -8,7 +8,7 @@ import {
 import { resetGroupingSession } from './grouping-job.store';
 
 const APP_STORAGE_PREFIX = 'media-organizer-';
-const EXEMPT_KEYS = new Set(['encoderSettings']);
+const EXEMPT_KEYS = new Set(['encoderSettings', 'media-organizer-notification-settings']);
 
 const clearKnownLocalStorageKeys = () => {
   if (typeof window === 'undefined') {

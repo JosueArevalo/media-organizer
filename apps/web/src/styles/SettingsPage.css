@@ -236,6 +236,59 @@
   font-family: 'Courier New', monospace;
 }
 
+.notification-settings-grid,
+.notification-event-list {
+  display: grid;
+  gap: 12px;
+}
+
+.notification-settings-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-bottom: 16px;
+}
+
+.notification-toggle-row,
+.notification-event-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+:root:not([data-theme='dark']) .notification-toggle-row,
+:root:not([data-theme='dark']) .notification-event-row {
+  border-color: #dfe4ec;
+}
+
+.notification-toggle-row input,
+.notification-event-row input {
+  margin-top: 2px;
+}
+
+.notification-toggle-row span,
+.notification-event-row span {
+  display: grid;
+  gap: 4px;
+}
+
+.notification-toggle-row small,
+.notification-event-row small {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.notification-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
 .encoder-actions-footer {
   display: flex;
   align-items: center;
