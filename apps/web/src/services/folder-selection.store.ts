@@ -36,6 +36,9 @@ export type SourceSelectionScopeSnapshot = {
   excludedFiles: string[];
   includedDirectories: string[];
   includedFiles: string[];
+  activePreset?: 'all' | 'whatsapp' | 'camera' | 'custom';
+  mode?: 'files' | 'directories';
+  expandedDirectories?: string[];
   updatedAt: number;
 };
 
