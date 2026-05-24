@@ -6,6 +6,12 @@ import { runMigrations } from '../../state/migrations/runMigrations.js';
 import type { MediaType } from '../../state/dto/state.types.js';
 import { updateGroupingExecutionSummary } from '../../dashboard/dashboard.service.js';
 import { startGroupingSession } from './groupingJob.service.js';
+import type {
+  GroupingDateOptions,
+  GroupingRuleId,
+  GroupingSourceFolderOptions,
+  GroupingStrategy
+} from './grouping.types.js';
 
 type FolderKind = 'proposed' | 'manual' | 'template';
 
@@ -14,6 +20,15 @@ export type GroupingWorkspaceRequest = {
   sourceDir: string;
   outputDir: string;
   compressionSessionId: string;
+};
+
+export type GroupingReorganizeRequest = {
+  rules?: GroupingRuleId[];
+  strategy?: GroupingStrategy | null;
+  dateOptions?: GroupingDateOptions;
+  sourceFolderOptions?: GroupingSourceFolderOptions;
+  preservedDirectories: string[];
+  reorganizedDirectories: string[];
 };
 
 export type GroupingWorkspaceFolder = {
@@ -33,6 +48,7 @@ export type GroupingWorkspaceItem = {
   sizeBytes: number;
   captureDate: string | null;
   targetGroupLabel: string | null;
+  preservedStructure: boolean;
 };
 
 export type GroupingWorkspaceTemplate = {
@@ -47,6 +63,12 @@ export type GroupingWorkspace = {
   sourceDir: string;
   outputDir: string;
   compressionSessionId: string | null;
+  rules: GroupingRuleId[];
+  strategy: GroupingStrategy | null;
+  dateOptions: GroupingDateOptions;
+  sourceFolderOptions: GroupingSourceFolderOptions;
+  preservedDirectories: string[];
+  reorganizedDirectories: string[];
   folders: GroupingWorkspaceFolder[];
   items: GroupingWorkspaceItem[];
   templates: GroupingWorkspaceTemplate[];
@@ -81,6 +103,8 @@ const nowIso = () => new Date().toISOString();
 
 const normalizePath = (value: string) => path.resolve(value);
 
+const normalizeScopePath = (value: string) => path.resolve(value).replace(/\\/g, '/').toLowerCase();
+
 const isPathInside = (parentPath: string, childPath: string) => {
   const relative = path.relative(normalizePath(parentPath), normalizePath(childPath));
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -95,6 +119,9 @@ const sanitizeFolderLabel = (label: string) => {
 
   return sanitized || 'Sin nombre';
 };
+
+const DEFAULT_DATE_OPTIONS: GroupingDateOptions = { singleDateHandling: 'year-unique' };
+const DEFAULT_SOURCE_FOLDER_OPTIONS: GroupingSourceFolderOptions = { mode: 'nearest-folder' };
 
 const formatDateLabel = (date: Date) => {
   const year = date.getFullYear();
@@ -146,6 +173,21 @@ const getCaptureDate = (outputPath: string, relativePath: string): Date | null =
   }
 };
 
+const getProposalDate = (row: MediaRow): Date | null => {
+  const fromName = parseDateFromName(path.basename(row.relative_path));
+
+  if (fromName) {
+    return fromName;
+  }
+
+  if (row.capture_time) {
+    const fromMetadata = new Date(row.capture_time);
+    return Number.isNaN(fromMetadata.getTime()) ? null : fromMetadata;
+  }
+
+  return null;
+};
+
 const getOutputPath = (outputDir: string, relativePath: string) => path.join(outputDir, relativePath);
 
 const getCompressionSourceSessionId = (groupingSessionId: string) => {
@@ -161,6 +203,34 @@ const getCompressionSourceSessionId = (groupingSessionId: string) => {
   try {
     const payload = JSON.parse(row.payload_json) as { manifest?: { compressionSessionId?: string | null } };
     return payload.manifest?.compressionSessionId ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const getGroupingManifest = (groupingSessionId: string) => {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT payload_json FROM session_checkpoints WHERE session_id = ? AND stage = ?')
+    .get(groupingSessionId, 'group') as { payload_json: string | null } | undefined;
+
+  if (!row?.payload_json) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(row.payload_json) as {
+      manifest?: {
+        compressionSessionId?: string | null;
+        preservedDirectories?: string[];
+        reorganizedDirectories?: string[];
+        rules?: GroupingRuleId[];
+        strategy?: GroupingStrategy | null;
+        dateOptions?: GroupingDateOptions;
+        sourceFolderOptions?: GroupingSourceFolderOptions;
+      };
+    };
+    return payload.manifest ?? null;
   } catch {
     return null;
   }
@@ -274,16 +344,189 @@ const upsertDecisionLabel = (sessionId: string, itemId: string, label: string, u
   ).run(randomUUID(), sessionId, itemId, sanitizeFolderLabel(label), userOverridden ? 1 : 0, timestamp);
 };
 
-const buildProposalLabels = (outputDir: string, rows: MediaRow[]) => {
+const resolveScopePath = (sourceDir: string, scopePath: string) => {
+  const trimmed = scopePath.trim();
+
+  if (!trimmed) {
+    return normalizeScopePath(sourceDir);
+  }
+
+  if (path.isAbsolute(trimmed)) {
+    return normalizeScopePath(trimmed);
+  }
+
+  const normalizedInput = trimmed.replace(/\\/g, '/').replace(/^\/+/, '');
+  const sourceRootName = path.basename(sourceDir).replace(/\\/g, '/').toLowerCase();
+  const segments = normalizedInput.split('/').filter(Boolean);
+
+  if (segments[0]?.toLowerCase() === sourceRootName) {
+    segments.shift();
+  }
+
+  return normalizeScopePath(path.join(sourceDir, ...segments));
+};
+
+const isPathInsideOrEqualNormalized = (parentPath: string, childPath: string) =>
+  childPath === parentPath || childPath.startsWith(`${parentPath}/`);
+
+const resolveDirectoryScopes = (sourceDir: string, directories: string[]) =>
+  directories.map((entry) => resolveScopePath(sourceDir, entry));
+
+const findClosestScopeMatch = (sourcePath: string, directories: string[]) =>
+  directories
+    .filter((directory) => isPathInsideOrEqualNormalized(directory, sourcePath))
+    .sort((left, right) => right.length - left.length)[0] ?? null;
+
+const isCandidatePathPreserved = (
+  candidatePath: string,
+  preservedScopes: string[],
+  reorganizedScopes: string[]
+) => {
+  const preservedMatch = findClosestScopeMatch(candidatePath, preservedScopes);
+
+  if (!preservedMatch) {
+    return false;
+  }
+
+  const reorganizedMatch = findClosestScopeMatch(candidatePath, reorganizedScopes);
+  return !reorganizedMatch || preservedMatch.length > reorganizedMatch.length;
+};
+
+const isRowPreserved = (
+  sourceDir: string,
+  row: MediaRow,
+  preservedDirectories: string[],
+  reorganizedDirectories: string[]
+) => {
+  if (preservedDirectories.length === 0) {
+    return false;
+  }
+
+  const preservedScopes = resolveDirectoryScopes(sourceDir, preservedDirectories);
+  const reorganizedScopes = resolveDirectoryScopes(sourceDir, reorganizedDirectories);
+  const candidates = Array.from(
+    new Set([
+      normalizeScopePath(row.source_path),
+      normalizeScopePath(path.join(sourceDir, row.relative_path))
+    ])
+  );
+
+  return candidates.some((candidatePath) => isCandidatePathPreserved(candidatePath, preservedScopes, reorganizedScopes));
+};
+
+const clearGeneratedGrouping = (groupingSessionId: string, sourceSessionId: string) => {
+  const db = getDb();
+
+  db.prepare("DELETE FROM grouping_folders WHERE session_id = ? AND kind = 'proposed'").run(groupingSessionId);
+  db.prepare(
+    `
+      UPDATE item_decisions
+      SET target_group_label = NULL,
+          user_overridden = 0,
+          updated_at = ?
+      WHERE session_id = ?
+        AND user_overridden = 0
+    `
+  ).run(nowIso(), sourceSessionId);
+};
+
+const getRulesFromStrategy = (
+  strategy: GroupingStrategy | null,
+  dateOptions: GroupingDateOptions
+): GroupingRuleId[] => {
+  if (strategy !== 'date') {
+    return [];
+  }
+
+  return dateOptions.singleDateHandling === 'year-unique'
+    ? ['date-event-multiple', 'single-date-year-unique']
+    : ['date-event-multiple'];
+};
+
+const getStrategyFromLegacyRules = (rules: GroupingRuleId[]) => {
+  if (!rules.includes('date-event-multiple') && !rules.includes('single-date-year-unique')) {
+    return {
+      strategy: null,
+      dateOptions: DEFAULT_DATE_OPTIONS,
+      rules: [] as GroupingRuleId[]
+    };
+  }
+
+  const dateOptions: GroupingDateOptions = {
+    singleDateHandling: rules.includes('single-date-year-unique') ? 'year-unique' : 'keep-original'
+  };
+
+  return {
+    strategy: 'date' as const,
+    dateOptions,
+    rules: getRulesFromStrategy('date', dateOptions)
+  };
+};
+
+const normalizeReorganizeConfig = (request: GroupingReorganizeRequest) => {
+  if (request.strategy) {
+    const dateOptions = request.dateOptions ?? DEFAULT_DATE_OPTIONS;
+    const sourceFolderOptions = request.sourceFolderOptions ?? DEFAULT_SOURCE_FOLDER_OPTIONS;
+    return {
+      strategy: request.strategy,
+      dateOptions,
+      sourceFolderOptions,
+      rules: getRulesFromStrategy(request.strategy, dateOptions)
+    };
+  }
+
+  return {
+    ...getStrategyFromLegacyRules(Array.from(new Set(request.rules ?? []))),
+    sourceFolderOptions: request.sourceFolderOptions ?? DEFAULT_SOURCE_FOLDER_OPTIONS
+  };
+};
+
+const getSourceFolderLabel = (relativePath: string, options: GroupingSourceFolderOptions) => {
+  const normalized = relativePath.replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
+  segments.pop();
+
+  if (segments.length === 0) {
+    return null;
+  }
+
+  if (options.mode === 'relative-path') {
+    return sanitizeFolderLabel(segments.join(' - '));
+  }
+
+  return sanitizeFolderLabel(segments[segments.length - 1]);
+};
+
+const buildProposalLabels = (
+  sourceDir: string,
+  outputDir: string,
+  rows: MediaRow[],
+  preservedDirectories: string[],
+  reorganizedDirectories: string[],
+  strategy: GroupingStrategy | null,
+  dateOptions: GroupingDateOptions,
+  sourceFolderOptions: GroupingSourceFolderOptions
+) => {
   const datedRows = rows.map((row) => {
     const outputPath = getOutputPath(outputDir, row.relative_path);
-    const captureDate = getCaptureDate(outputPath, row.relative_path);
-    return { row, outputPath, captureDate };
+    const captureDate = getProposalDate(row);
+    const preservedStructure = isRowPreserved(sourceDir, row, preservedDirectories, reorganizedDirectories);
+    return { row, outputPath, captureDate, preservedStructure };
   });
-  const dateCounts = new Map<string, number>();
+  if (strategy === 'source-folder') {
+    return datedRows.map((item) => ({
+      ...item,
+      label: item.preservedStructure ? null : getSourceFolderLabel(item.row.relative_path, sourceFolderOptions)
+    }));
+  }
 
+  if (strategy !== 'date') {
+    return datedRows.map((item) => ({ ...item, label: null }));
+  }
+
+  const dateCounts = new Map<string, number>();
   for (const item of datedRows) {
-    if (!item.captureDate) {
+    if (item.preservedStructure || !item.captureDate) {
       continue;
     }
 
@@ -292,13 +535,26 @@ const buildProposalLabels = (outputDir: string, rows: MediaRow[]) => {
   }
 
   return datedRows.map((item) => {
+    if (item.preservedStructure) {
+      return { ...item, label: null };
+    }
+
     if (!item.captureDate) {
-      return { ...item, label: 'Sin fecha' };
+      return { ...item, label: null };
     }
 
     const formatted = formatDateLabel(item.captureDate);
     const count = dateCounts.get(formatted.dateKey) ?? 0;
-    const label = count > 1 ? `${formatted.folderDate} - Evento` : `${formatted.year} - Varias ${formatted.year}`;
+    let label: string | null = null;
+
+    if (count > 1 || dateOptions.singleDateHandling === 'daily-event') {
+      label = `${formatted.folderDate} - Event`;
+    }
+
+    if (count === 1 && dateOptions.singleDateHandling === 'year-unique') {
+      label = `${formatted.year} - Unique`;
+    }
+
     return { ...item, label };
   });
 };
@@ -327,6 +583,13 @@ const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => 
   }
 
   const compressionSessionId = getCompressionSourceSessionId(groupingSessionId);
+  const groupingManifest = getGroupingManifest(groupingSessionId);
+  const preservedDirectories = groupingManifest?.preservedDirectories ?? [];
+  const reorganizedDirectories = groupingManifest?.reorganizedDirectories ?? [];
+  const rules = groupingManifest?.rules ?? [];
+  const strategy = groupingManifest?.strategy ?? null;
+  const dateOptions = groupingManifest?.dateOptions ?? DEFAULT_DATE_OPTIONS;
+  const sourceFolderOptions = groupingManifest?.sourceFolderOptions ?? DEFAULT_SOURCE_FOLDER_OPTIONS;
   const sourceSessionId = compressionSessionId ?? groupingSessionId;
   const mediaRows = listMediaRows(sourceSessionId);
   const folders = getFolderRows(groupingSessionId);
@@ -343,6 +606,12 @@ const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => 
     sourceDir: session.source_dir,
     outputDir: session.output_dir,
     compressionSessionId,
+    rules,
+    strategy,
+    dateOptions,
+    sourceFolderOptions,
+    preservedDirectories,
+    reorganizedDirectories,
     folders: folders.map((folder) => ({
       id: folder.id,
       label: folder.label,
@@ -352,6 +621,7 @@ const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => 
     items: mediaRows.map((row) => {
       const outputPath = getOutputPath(session.output_dir, row.relative_path);
       const captureDate = getCaptureDate(outputPath, row.relative_path);
+      const preservedStructure = isRowPreserved(session.source_dir, row, preservedDirectories, reorganizedDirectories);
       return {
         id: row.id,
         sourcePath: row.source_path,
@@ -361,7 +631,8 @@ const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => 
         mediaType: row.media_type,
         sizeBytes: row.size_bytes,
         captureDate: captureDate ? formatDateLabel(captureDate).dateKey : row.capture_time,
-        targetGroupLabel: row.target_group_label
+        targetGroupLabel: row.target_group_label,
+        preservedStructure
       };
     }),
     templates: getTemplateRows()
@@ -376,16 +647,14 @@ export const createGroupingWorkspace = (request: GroupingWorkspaceRequest): Grou
     sourceDir: request.sourceDir,
     outputDir: request.outputDir,
     compressionSessionId: request.compressionSessionId,
-    strategy: 'date',
+    preservedDirectories: [],
+    reorganizedDirectories: [],
+    rules: [],
+    strategy: null,
+    dateOptions: DEFAULT_DATE_OPTIONS,
+    sourceFolderOptions: DEFAULT_SOURCE_FOLDER_OPTIONS,
     autoRename: true
   });
-  const rows = listMediaRows(request.compressionSessionId);
-  const proposals = buildProposalLabels(request.outputDir, rows);
-
-  for (const proposal of proposals) {
-    upsertFolder(grouping.session.id, proposal.label, 'proposed');
-    upsertDecisionLabel(request.compressionSessionId, proposal.row.id, proposal.label, false);
-  }
 
   const workspace = buildWorkspace(grouping.session.id);
 
@@ -394,6 +663,70 @@ export const createGroupingWorkspace = (request: GroupingWorkspaceRequest): Grou
   }
 
   return workspace;
+};
+
+export const reorganizeGroupingWorkspace = (sessionId: string, request: GroupingReorganizeRequest): GroupingWorkspace | null => {
+  runMigrations();
+
+  const workspace = getGroupingWorkspace(sessionId);
+
+  if (!workspace) {
+    return null;
+  }
+
+  const sourceSessionId = workspace.compressionSessionId ?? sessionId;
+  const timestamp = nowIso();
+  const config = normalizeReorganizeConfig(request);
+  const rows = listMediaRows(sourceSessionId);
+  clearGeneratedGrouping(sessionId, sourceSessionId);
+
+  const proposals = buildProposalLabels(
+    workspace.sourceDir,
+    workspace.outputDir,
+    rows,
+    request.preservedDirectories ?? [],
+    request.reorganizedDirectories ?? [],
+    config.strategy,
+    config.dateOptions,
+    config.sourceFolderOptions
+  );
+
+  for (const proposal of proposals) {
+    if (proposal.label) {
+      upsertFolder(sessionId, proposal.label, 'proposed');
+      upsertDecisionLabel(sourceSessionId, proposal.row.id, proposal.label, false);
+    }
+  }
+
+  const db = getDb();
+  const currentManifest = getGroupingManifest(sessionId);
+  db.prepare(
+    `
+      UPDATE session_checkpoints
+      SET payload_json = ?, updated_at = ?
+      WHERE session_id = ? AND stage = 'group'
+    `
+  ).run(
+    JSON.stringify({
+      outputRoot: workspace.outputDir,
+      manifest: {
+        ...currentManifest,
+        compressionSessionId: workspace.compressionSessionId,
+        preservedDirectories: request.preservedDirectories ?? [],
+        reorganizedDirectories: request.reorganizedDirectories ?? [],
+        rules: config.rules,
+        strategy: config.strategy,
+        dateOptions: config.dateOptions,
+        sourceFolderOptions: config.sourceFolderOptions
+      },
+      totalCount: rows.length,
+      summary: { completedItems: 0, failedItems: 0 }
+    }),
+    timestamp,
+    sessionId
+  );
+
+  return getGroupingWorkspace(sessionId);
 };
 
 export const getGroupingWorkspace = (groupingSessionId: string) => buildWorkspace(groupingSessionId);
@@ -705,6 +1038,25 @@ export const applyGroupingWorkspace = (sessionId: string) => {
   }
 
   for (const item of workspace.items) {
+    if (!item.targetGroupLabel) {
+      if (!isPathInside(workspace.outputDir, item.outputPath)) {
+        throw new Error('Refusing to keep media outside the destination folder.');
+      }
+
+      db.prepare(
+        `
+          INSERT INTO item_stage_status (id, session_id, item_id, stage, status, attempt_count, last_error, updated_at)
+          VALUES (?, ?, ?, 'group', 'completed', 1, NULL, ?)
+          ON CONFLICT(session_id, item_id, stage) DO UPDATE SET
+            status = excluded.status,
+            attempt_count = item_stage_status.attempt_count + 1,
+            last_error = excluded.last_error,
+            updated_at = excluded.updated_at
+        `
+      ).run(randomUUID(), sessionId, item.id, timestamp);
+      continue;
+    }
+
     const label = item.targetGroupLabel ? sanitizeFolderLabel(item.targetGroupLabel) : 'Sin fecha';
     const sourcePath = item.outputPath;
     const targetDirectory = path.join(workspace.outputDir, label);
@@ -770,6 +1122,7 @@ export const applyGroupingWorkspace = (sessionId: string) => {
     .prepare("SELECT COUNT(*) AS total FROM item_stage_status WHERE session_id = ? AND stage = 'group' AND status IN ('completed', 'skipped')")
     .get(sessionId) as { total: number };
   const nextStatus = failed.total > 0 ? 'failed' : 'completed';
+  const groupingManifest = getGroupingManifest(sessionId);
 
   db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(
     nextStatus,
@@ -788,7 +1141,14 @@ export const applyGroupingWorkspace = (sessionId: string) => {
     JSON.stringify({
       outputRoot: workspace.outputDir,
       manifest: {
-        compressionSessionId: workspace.compressionSessionId
+        ...(groupingManifest ?? {}),
+        compressionSessionId: workspace.compressionSessionId,
+        preservedDirectories: groupingManifest?.preservedDirectories ?? [],
+        reorganizedDirectories: groupingManifest?.reorganizedDirectories ?? [],
+        rules: groupingManifest?.rules ?? [],
+        strategy: groupingManifest?.strategy ?? null,
+        dateOptions: groupingManifest?.dateOptions ?? DEFAULT_DATE_OPTIONS,
+        sourceFolderOptions: groupingManifest?.sourceFolderOptions ?? DEFAULT_SOURCE_FOLDER_OPTIONS
       },
       summary: {
         movedItems: moved.length,

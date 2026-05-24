@@ -3,11 +3,21 @@ import { platform } from "node:process";
 
 const childProcesses = [];
 const npmCommand = platform === "win32" ? "npm.cmd" : "npm";
+const command = platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : npmCommand;
 
-const run = (name, script) => {
-  const child = spawn(npmCommand, ["run", script], {
+const formatExitCode = (code) => {
+  if (typeof code !== "number") {
+    return String(code);
+  }
+
+  return `${code} (0x${code.toString(16)})`;
+};
+
+const run = (name, args) => {
+  const commandArgs = platform === "win32" ? ["/d", "/s", "/c", npmCommand, ...args] : args;
+  const child = spawn(command, commandArgs, {
     stdio: "inherit",
-    shell: platform === "win32" ? true : false
+    shell: false
   });
 
   child.on("error", (err) => {
@@ -16,7 +26,7 @@ const run = (name, script) => {
 
   child.on("exit", (code) => {
     if (code !== 0 && code !== null) {
-      console.error(`[dev-all] ${name} exited with code ${code}`);
+      console.error(`[dev-all] ${name} exited with code ${formatExitCode(code)}`);
       shutdown(code);
     }
   });
@@ -39,5 +49,5 @@ process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
 console.log("[dev-all] Starting backend and web...");
-run("backend", "dev:backend");
-run("web", "dev:web");
+run("backend", ["run", "dev", "--workspace", "apps/backend"]);
+run("web", ["run", "dev", "--workspace", "apps/web"]);

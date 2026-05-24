@@ -17,9 +17,13 @@ import {
   deleteGroupingItemsRequest,
   deleteGroupingTemplateRequest,
   getGroupingWorkspaceRequest,
+  reorganizeGroupingWorkspaceRequest,
   renameGroupingFolderRequest,
   updateGroupingTemplateRequest,
   type GroupingFolderTemplate,
+  type GroupingSingleDateHandling,
+  type GroupingSourceFolderMode,
+  type GroupingStrategy,
   type GroupingWorkspace,
   type GroupingWorkspaceFolder,
   type GroupingWorkspaceItem
@@ -43,11 +47,159 @@ const getSelectedDragPayload = (item: GroupingWorkspaceItem, selectedIds: Set<st
   return [item.id];
 };
 
+type GroupingView = 'setup' | 'review';
+
+const DEFAULT_SINGLE_DATE_HANDLING: GroupingSingleDateHandling = 'year-unique';
+const DEFAULT_SOURCE_FOLDER_MODE: GroupingSourceFolderMode = 'nearest-folder';
+
+type GroupingDirectoryNode = {
+  name: string;
+  path: string;
+  depth: number;
+  fileCount: number;
+  sizeBytes: number;
+  children: GroupingDirectoryNode[];
+};
+
+type GroupingDirectoryRow = GroupingDirectoryNode & {
+  isExpanded: boolean;
+  hasChildren: boolean;
+  isPreserved: boolean;
+  isPreservedOverride: boolean;
+  isReorganizedOverride: boolean;
+};
+
+const formatPath = (path: string) => path.split('\\').join('/');
+
+const getPathName = (path: string) => formatPath(path).split('/').filter(Boolean).pop() ?? path;
+
+const getDirectoryPath = (relativePath: string) => {
+  const normalized = formatPath(relativePath);
+  const segments = normalized.split('/').filter(Boolean);
+  segments.pop();
+  return segments.join('/');
+};
+
+const ensureDirectoryNode = (root: GroupingDirectoryNode, directoryPath: string) => {
+  const segments = directoryPath.split('/').filter(Boolean);
+  let current = root;
+  let currentPath = root.path;
+
+  for (const segment of segments) {
+    currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+    let child = current.children.find((candidate) => candidate.name === segment);
+
+    if (!child) {
+      child = {
+        name: segment,
+        path: currentPath,
+        depth: current.depth + 1,
+        fileCount: 0,
+        sizeBytes: 0,
+        children: []
+      };
+      current.children.push(child);
+      current.children.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
+    }
+
+    current = child;
+  }
+
+  return current;
+};
+
+const buildGroupingDirectoryTree = (workspace: GroupingWorkspace): GroupingDirectoryNode => {
+  const root: GroupingDirectoryNode = {
+    name: workspace.sourceDir.split(/[\\/]/).filter(Boolean).pop() ?? 'Source',
+    path: workspace.sourceDir.split(/[\\/]/).filter(Boolean).pop() ?? 'Source',
+    depth: 0,
+    fileCount: 0,
+    sizeBytes: 0,
+    children: []
+  };
+
+  for (const item of workspace.items) {
+    root.fileCount += 1;
+    root.sizeBytes += item.sizeBytes;
+    const directoryPath = getDirectoryPath(item.relativePath);
+    const directory = directoryPath ? ensureDirectoryNode(root, directoryPath) : null;
+
+    if (directory) {
+      directory.fileCount += 1;
+      directory.sizeBytes += item.sizeBytes;
+    }
+
+    const segments = directoryPath.split('/').filter(Boolean);
+    let currentPath = root.path;
+    let current = root;
+
+    for (const segment of segments) {
+      currentPath = `${currentPath}/${segment}`;
+      current = current.children.find((candidate) => candidate.path === currentPath) ?? current;
+      if (current !== directory) {
+        current.fileCount += 1;
+        current.sizeBytes += item.sizeBytes;
+      }
+    }
+  }
+
+  return root;
+};
+
+const getStructureState = (path: string, preservedDirectories: Set<string>, reorganizedDirectories: Set<string>) => {
+  const segments = formatPath(path).split('/').filter(Boolean);
+  let currentPath = '';
+  let isPreserved = false;
+
+  for (const segment of segments) {
+    currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+
+    if (preservedDirectories.has(currentPath)) {
+      isPreserved = true;
+    }
+
+    if (reorganizedDirectories.has(currentPath)) {
+      isPreserved = false;
+    }
+  }
+
+  return {
+    isPreserved,
+    isPreservedOverride: preservedDirectories.has(path),
+    isReorganizedOverride: reorganizedDirectories.has(path)
+  };
+};
+
+const flattenDirectoryTree = (
+  node: GroupingDirectoryNode,
+  expandedDirectories: Set<string>,
+  preservedDirectories: Set<string>,
+  reorganizedDirectories: Set<string>,
+  rows: GroupingDirectoryRow[] = []
+) => {
+  const structureState = getStructureState(node.path, preservedDirectories, reorganizedDirectories);
+  const isExpanded = expandedDirectories.has(node.path);
+  rows.push({
+    ...node,
+    isExpanded,
+    hasChildren: node.children.length > 0,
+    ...structureState
+  });
+
+  if (isExpanded) {
+    for (const child of node.children) {
+      flattenDirectoryTree(child, expandedDirectories, preservedDirectories, reorganizedDirectories, rows);
+    }
+  }
+
+  return rows;
+};
+
 export const GroupingPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { sourceSelection, destinationSelection } = useFolderSelections();
+  const { sourceSelection, destinationSelection, isLoading: isLoadingFolderSelections } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
   const groupingSessionState = useGroupingSessionState();
   const [workspace, setWorkspace] = useState<GroupingWorkspace | null>(null);
@@ -57,11 +209,22 @@ export const GroupingPage = () => {
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
+  const [isReorganizing, setIsReorganizing] = useState(false);
+  const [view, setView] = useState<GroupingView>('setup');
+  const [selectedStrategy, setSelectedStrategy] = useState<GroupingStrategy | null>(null);
+  const [singleDateHandling, setSingleDateHandling] = useState<GroupingSingleDateHandling>(DEFAULT_SINGLE_DATE_HANDLING);
+  const [sourceFolderMode, setSourceFolderMode] = useState<GroupingSourceFolderMode>(DEFAULT_SOURCE_FOLDER_MODE);
+  const [preservedDirectories, setPreservedDirectories] = useState<Set<string>>(new Set());
+  const [reorganizedDirectories, setReorganizedDirectories] = useState<Set<string>>(new Set());
+  const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
   const [previewItem, setPreviewItem] = useState<GroupingWorkspaceItem | null>(null);
 
   const sourcePath = sourceSelection?.path ?? '';
   const destinationPath = destinationSelection?.path ?? '';
-  const canOpenWorkspace = Boolean(sourcePath && destinationPath && compressionSessionState.backendSessionId);
+  const hasWorkspacePrerequisites = Boolean(sourcePath && destinationPath && compressionSessionState.backendSessionId);
+  const canOpenWorkspace = hasWorkspacePrerequisites && compressionSessionState.status === 'completed';
+  const isWaitingForWorkspacePrerequisites =
+    isLoadingFolderSelections || (hasWorkspacePrerequisites && compressionSessionState.status === 'running');
 
   const refreshWorkspace = useCallback(
     async (sessionId: string) => {
@@ -97,6 +260,13 @@ export const GroupingPage = () => {
         }
 
         setWorkspace(nextWorkspace);
+        setSelectedStrategy(nextWorkspace.strategy);
+        setSingleDateHandling(nextWorkspace.dateOptions.singleDateHandling);
+        setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
+        setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
+        setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
+        setExpandedDirectories(new Set([nextWorkspace.sourceDir.split(/[\\/]/).filter(Boolean).pop() ?? 'Source']));
+        setView(nextWorkspace.folders.length > 0 || nextWorkspace.strategy ? 'review' : 'setup');
         setBackendError(null);
 
         if (!groupingSessionState.backendSessionId) {
@@ -128,6 +298,7 @@ export const GroupingPage = () => {
   }, [
     canOpenWorkspace,
     compressionSessionState.backendSessionId,
+    compressionSessionState.status,
     destinationPath,
     groupingSessionState.backendSessionId,
     sourcePath
@@ -149,7 +320,11 @@ export const GroupingPage = () => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
 
     return workspace.items.filter((item) => {
-      const matchesFolder = activeFolderLabel === '__all__' || item.targetGroupLabel === activeFolderLabel;
+      const matchesFolder =
+        activeFolderLabel === '__all__' ||
+        (activeFolderLabel === '__preserved__' && item.preservedStructure) ||
+        (activeFolderLabel === '__unassigned__' && !item.preservedStructure && !item.targetGroupLabel) ||
+        item.targetGroupLabel === activeFolderLabel;
       const matchesSearch =
         !normalizedSearch ||
         item.fileName.toLowerCase().includes(normalizedSearch) ||
@@ -167,6 +342,41 @@ export const GroupingPage = () => {
     return workspace.items.filter((item) => selectedIds.has(item.id));
   }, [selectedIds, workspace]);
 
+  const directoryTree = useMemo(() => (workspace ? buildGroupingDirectoryTree(workspace) : null), [workspace]);
+
+  const directoryRows = useMemo(() => {
+    if (!directoryTree) {
+      return [];
+    }
+
+    return flattenDirectoryTree(directoryTree, expandedDirectories, preservedDirectories, reorganizedDirectories);
+  }, [directoryTree, expandedDirectories, preservedDirectories, reorganizedDirectories]);
+
+  const preservedCount = directoryRows.filter((row) => row.isPreserved).length;
+  const preservedItemsCount = workspace?.items.filter((item) => item.preservedStructure).length ?? 0;
+  const unassignedItemsCount =
+    workspace?.items.filter((item) => !item.preservedStructure && !item.targetGroupLabel).length ?? 0;
+  const preservedGroupLabel = useMemo(() => {
+    if (preservedDirectories.size === 1) {
+      return getPathName(Array.from(preservedDirectories)[0]);
+    }
+
+    return t('grouping.originalStructure');
+  }, [preservedDirectories, t]);
+  const canReorganize = Boolean(selectedStrategy && workspace) && !isReorganizing;
+
+  const activeFolderTitle = useMemo(() => {
+    if (activeFolderLabel === '__preserved__') {
+      return preservedGroupLabel;
+    }
+
+    if (activeFolderLabel === '__unassigned__') {
+      return t('grouping.noProposedFolder');
+    }
+
+    return activeFolder?.label ?? t('grouping.allMedia');
+  }, [activeFolder, activeFolderLabel, preservedGroupLabel, t]);
+
   const handleBack = () => {
     const from = (location.state as { from?: string } | null)?.from;
 
@@ -176,6 +386,79 @@ export const GroupingPage = () => {
     }
 
     navigate('/compression');
+  };
+
+  const selectStrategy = (strategy: GroupingStrategy) => {
+    setSelectedStrategy((current) => (current === strategy ? null : strategy));
+  };
+
+  const toggleDirectoryExpansion = (path: string) => {
+    setExpandedDirectories((current) => {
+      const next = new Set(current);
+
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+
+      return next;
+    });
+  };
+
+  const setDirectoryStructureMode = (path: string, mode: 'preserve' | 'reorganize') => {
+    setPreservedDirectories((current) => {
+      const next = new Set(current);
+      if (mode === 'preserve') {
+        next.add(path);
+      } else {
+        next.delete(path);
+      }
+      return next;
+    });
+
+    setReorganizedDirectories((current) => {
+      const next = new Set(current);
+      if (mode === 'reorganize') {
+        next.add(path);
+      } else {
+        next.delete(path);
+      }
+      return next;
+    });
+  };
+
+  const handleReorganize = async () => {
+    if (!workspace || !selectedStrategy) {
+      return;
+    }
+
+    setIsReorganizing(true);
+
+    try {
+      const nextWorkspace = await reorganizeGroupingWorkspaceRequest(workspace.sessionId, {
+        strategy: selectedStrategy,
+        dateOptions: { singleDateHandling },
+        sourceFolderOptions: { mode: sourceFolderMode },
+        preservedDirectories: Array.from(preservedDirectories).sort((left, right) => left.localeCompare(right)),
+        reorganizedDirectories: Array.from(reorganizedDirectories).sort((left, right) => left.localeCompare(right))
+      });
+
+      setWorkspace(nextWorkspace);
+      setSelectedStrategy(nextWorkspace.strategy);
+      setSingleDateHandling(nextWorkspace.dateOptions.singleDateHandling);
+      setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
+      setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
+      setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
+      setSelectedIds(new Set());
+      setActiveFolderLabel('__all__');
+      setView('review');
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : t('grouping.reorganizeError'));
+    } finally {
+      setIsReorganizing(false);
+    }
   };
 
   const handleCreateFolder = async () => {
@@ -357,9 +640,21 @@ export const GroupingPage = () => {
           <button className="btn btn-secondary" type="button" onClick={handleBack}>
             {t('grouping.back')}
           </button>
-          <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying}>
-            {isApplying ? t('grouping.applying') : t('grouping.apply')}
-          </button>
+          {view === 'setup' && (
+            <button className="btn btn-primary" type="button" onClick={() => void handleReorganize()} disabled={!canReorganize}>
+              {isReorganizing ? t('grouping.reorganizing') : t('grouping.reorganize')}
+            </button>
+          )}
+          {view === 'review' && (
+            <button className="btn btn-secondary" type="button" onClick={() => setView('setup')} disabled={!workspace || isApplying}>
+              {t('grouping.editSetup')}
+            </button>
+          )}
+          {view === 'review' && (
+            <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying}>
+              {isApplying ? t('grouping.applying') : t('grouping.apply')}
+            </button>
+          )}
           {groupingSessionState.status === 'completed' && (
             <button className="btn btn-secondary" type="button" onClick={() => navigate('/export')}>
               {t('grouping.continueExport')}
@@ -368,12 +663,132 @@ export const GroupingPage = () => {
         </div>
       </div>
 
-      {!canOpenWorkspace && (
-        <p className="error">{t('grouping.unavailable')}</p>
+      {isWaitingForWorkspacePrerequisites && !workspace && !backendError && (
+        <p className="empty-note">{t('grouping.loadingWorkspace')}</p>
+      )}
+      {!isWaitingForWorkspacePrerequisites && !workspace && !canOpenWorkspace && !backendError && (
+        <p className="empty-note">{t('grouping.unavailable')}</p>
       )}
       {backendError && <p className="error">{backendError}</p>}
 
-      <div className="grouping-toolbar">
+      {workspace && view === 'setup' && (
+        <div className="grouping-setup-layout">
+          <section className="page-card elevated grouping-setup-main">
+            <div className="grouping-section-head">
+              <div>
+                <p className="page-section-title">{t('grouping.setupRules')}</p>
+                <p className="page-summary-note">{t('grouping.setupRulesNote')}</p>
+              </div>
+            </div>
+
+            <div className="grouping-rule-list">
+              <button
+                className={`grouping-rule-chip ${selectedStrategy === 'date' ? 'is-active' : ''}`}
+                type="button"
+                aria-pressed={selectedStrategy === 'date'}
+                onClick={() => selectStrategy('date')}
+              >
+                {t('grouping.strategy.date')}
+              </button>
+              <button
+                className={`grouping-rule-chip ${selectedStrategy === 'source-folder' ? 'is-active' : ''}`}
+                type="button"
+                aria-pressed={selectedStrategy === 'source-folder'}
+                onClick={() => selectStrategy('source-folder')}
+              >
+                {t('grouping.strategy.sourceFolder')}
+              </button>
+            </div>
+
+            {selectedStrategy === 'date' && (
+              <div className="grouping-strategy-options">
+                <p className="page-summary-note">{t('grouping.dateStrategyPattern')}</p>
+                <label className="grouping-option-field">
+                  <span>{t('grouping.singleDateHandling')}</span>
+                  <select value={singleDateHandling} onChange={(event) => setSingleDateHandling(event.target.value as GroupingSingleDateHandling)}>
+                    <option value="daily-event">{t('grouping.singleDate.dailyEvent')}</option>
+                    <option value="year-unique">{t('grouping.singleDate.yearUnique')}</option>
+                    <option value="keep-original">{t('grouping.singleDate.keepOriginal')}</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {selectedStrategy === 'source-folder' && (
+              <div className="grouping-strategy-options">
+                <p className="page-summary-note">{t('grouping.sourceFolderStrategyNote')}</p>
+                <label className="grouping-option-field">
+                  <span>{t('grouping.sourceFolderMode')}</span>
+                  <select value={sourceFolderMode} onChange={(event) => setSourceFolderMode(event.target.value as GroupingSourceFolderMode)}>
+                    <option value="nearest-folder">{t('grouping.sourceFolder.nearest')}</option>
+                    <option value="relative-path">{t('grouping.sourceFolder.relative')}</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            <p className="page-summary-note">{selectedStrategy ? t('grouping.strategySelected') : t('grouping.noStrategySelected')}</p>
+          </section>
+
+          <section className="page-card elevated grouping-setup-main">
+            <p className="page-section-title">{t('grouping.setupFolders')}</p>
+            <p className="page-summary-note">{t('grouping.setupFoldersNote')}</p>
+
+            <ul className="grouping-directory-list">
+              {directoryRows.map((row) => (
+                <li
+                  className={`grouping-directory-row ${row.isPreserved ? 'is-preserved' : ''}`}
+                  key={row.path}
+                  style={{ paddingLeft: `${12 + row.depth * 18}px` }}
+                >
+                  <div className="grouping-directory-main">
+                    {row.hasChildren ? (
+                      <button className="selection-tree-toggle" type="button" onClick={() => toggleDirectoryExpansion(row.path)}>
+                        {row.isExpanded ? '-' : '+'}
+                      </button>
+                    ) : (
+                      <span className="selection-tree-toggle-spacer" aria-hidden="true" />
+                    )}
+                    <div className="selection-tree-copy">
+                      <div className="selection-row-head">
+                        <strong>{row.name}</strong>
+                        <span className="page-chip">{row.isPreserved ? t('grouping.keepStructure') : t('grouping.reorganizeMode')}</span>
+                        {row.isPreservedOverride && <span className="page-chip">{t('grouping.keepOverride')}</span>}
+                        {row.isPreserved && !row.isPreservedOverride && <span className="page-chip">{t('grouping.inherited')}</span>}
+                        {row.isReorganizedOverride && <span className="page-chip">{t('grouping.reorganizeOverride')}</span>}
+                      </div>
+                      <p className="selection-row-note">{row.path}</p>
+                    </div>
+                  </div>
+                  <div className="selection-tree-meta">
+                    <div className="selection-structure-toggle" aria-label={t('grouping.structureMode')}>
+                      <button className={row.isPreserved ? 'is-active' : ''} type="button" onClick={() => setDirectoryStructureMode(row.path, 'preserve')}>
+                        {t('grouping.keepStructure')}
+                      </button>
+                      <button className={!row.isPreserved ? 'is-active' : ''} type="button" onClick={() => setDirectoryStructureMode(row.path, 'reorganize')}>
+                        {t('grouping.reorganizeMode')}
+                      </button>
+                    </div>
+                    <span>{t('selection.fileCount', { count: row.fileCount })}</span>
+                    <span>{formatBytes(row.sizeBytes)}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <aside className="page-card elevated grouping-setup-side">
+            <p className="page-section-title">{t('grouping.setupSummary')}</p>
+            <p className="page-summary-note">{t('grouping.setupSummaryText', {
+              files: workspace.items.length,
+              preserved: preservedCount,
+              strategy: selectedStrategy ? 1 : 0
+            })}</p>
+          </aside>
+        </div>
+      )}
+
+      {workspace && view === 'review' && <div className="grouping-toolbar">
         <input
           className="grouping-search"
           value={searchTerm}
@@ -384,9 +799,9 @@ export const GroupingPage = () => {
         <button className="btn btn-secondary" type="button" onClick={() => void handleCreateFolder()} disabled={!workspace}>
           {t('grouping.newFolder')}
         </button>
-      </div>
+      </div>}
 
-      <div className="grouping-layout">
+      {workspace && view === 'review' && <div className="grouping-layout">
         <aside className="grouping-sidebar">
           <button
             className={`grouping-folder-button ${activeFolderLabel === '__all__' ? 'is-active' : ''}`}
@@ -398,6 +813,23 @@ export const GroupingPage = () => {
           </button>
 
           <div className="grouping-folder-list">
+            {preservedItemsCount > 0 && (
+              <div className={`grouping-folder-drop grouping-folder-drop-preserved ${activeFolderLabel === '__preserved__' ? 'is-active' : ''}`}>
+                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel('__preserved__')}>
+                  <span>{preservedGroupLabel}</span>
+                  <strong>{preservedItemsCount}</strong>
+                </button>
+              </div>
+            )}
+            {unassignedItemsCount > 0 && (
+              <div className={`grouping-folder-drop grouping-folder-drop-unassigned ${activeFolderLabel === '__unassigned__' ? 'is-active' : ''}`}>
+                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel('__unassigned__')}>
+                  <span>{t('grouping.noProposedFolder')}</span>
+                  <strong>{unassignedItemsCount}</strong>
+                </button>
+                <p className="grouping-folder-note">{t('grouping.noProposedFolderNote')}</p>
+              </div>
+            )}
             {workspace?.folders.map((folder) => (
               <div
                 key={folder.id}
@@ -487,7 +919,7 @@ export const GroupingPage = () => {
 
           <div className="grouping-main-head">
             <div>
-              <p className="page-section-title">{activeFolder?.label ?? t('grouping.allMedia')}</p>
+              <p className="page-section-title">{activeFolderTitle}</p>
               <p className="page-summary-note">{t('grouping.visibleFiles', { count: visibleItems.length })}</p>
             </div>
             <button className="btn btn-ghost" type="button" onClick={() => setSelectedIds(new Set(visibleItems.map((item) => item.id)))}>
@@ -526,6 +958,7 @@ export const GroupingPage = () => {
                     <div className="grouping-media-meta">
                       <strong title={item.fileName}>{item.fileName}</strong>
                       <span>{item.captureDate ?? t('grouping.noDate')} - {formatBytes(item.sizeBytes)}</span>
+                      {item.preservedStructure && <span>{t('grouping.preservedStructure')}</span>}
                     </div>
                   </article>
                 );
@@ -533,7 +966,7 @@ export const GroupingPage = () => {
             </div>
           )}
         </section>
-      </div>
+      </div>}
 
       {previewItem && mediaUrl && (
         <div className="grouping-modal" role="dialog" aria-modal="true">

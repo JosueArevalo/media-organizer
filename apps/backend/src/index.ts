@@ -27,6 +27,7 @@ import {
   getGroupingMediaPath,
   getGroupingWorkspace,
   listGroupingTemplates,
+  reorganizeGroupingWorkspace,
   renameGroupingFolder,
   updateGroupingTemplate
 } from './pipeline/grouping/groupingWorkspace.service.js';
@@ -257,7 +258,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
               sourceDir?: string;
               outputDir?: string;
               compressionSessionId?: string;
-              strategy?: 'date' | 'source-kind';
+              strategy?: 'date' | 'source-folder';
               autoRename?: boolean;
             }
           | null;
@@ -415,6 +416,51 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
       return;
     }
 
+    if (req.method === 'POST' && subPath === 'reorganize') {
+      void (async () => {
+        try {
+          const body = (await readRequestJson(req)) as
+            | {
+                rules?: Array<'date-event-multiple' | 'single-date-year-unique'>;
+                strategy?: 'date' | 'source-folder' | null;
+                dateOptions?: { singleDateHandling?: 'daily-event' | 'year-unique' | 'keep-original' };
+                sourceFolderOptions?: { mode?: 'nearest-folder' | 'relative-path' };
+                preservedDirectories?: string[];
+                reorganizedDirectories?: string[];
+              }
+            | null;
+
+          const workspace = reorganizeGroupingWorkspace(sessionId, {
+            rules: Array.isArray(body?.rules) ? body.rules : [],
+            strategy: body?.strategy ?? null,
+            dateOptions:
+              body?.dateOptions?.singleDateHandling === 'daily-event' ||
+              body?.dateOptions?.singleDateHandling === 'year-unique' ||
+              body?.dateOptions?.singleDateHandling === 'keep-original'
+                ? { singleDateHandling: body.dateOptions.singleDateHandling }
+                : undefined,
+            sourceFolderOptions:
+              body?.sourceFolderOptions?.mode === 'nearest-folder' || body?.sourceFolderOptions?.mode === 'relative-path'
+                ? { mode: body.sourceFolderOptions.mode }
+                : undefined,
+            preservedDirectories: Array.isArray(body?.preservedDirectories) ? body.preservedDirectories : [],
+            reorganizedDirectories: Array.isArray(body?.reorganizedDirectories) ? body.reorganizedDirectories : []
+          });
+
+          if (!workspace) {
+            sendJson(res, 404, { status: 'not_found' });
+            return;
+          }
+
+          sendJson(res, 200, workspace);
+        } catch (error) {
+          sendCaughtError(res, error, 'Could not reorganize workspace.');
+        }
+      })();
+
+      return;
+    }
+
     if (req.method === 'POST' && subPath === 'items' && subId === 'delete') {
       void (async () => {
         try {
@@ -523,6 +569,16 @@ const isMainModule = process.argv[1] ? import.meta.url === pathToFileURL(process
 
 if (isMainModule) {
   const server = createBackendServer();
+
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`[backend] port ${port} is already in use. Stop the existing backend process or change MEDIA_ORGANIZER_PORT.`);
+      process.exit(1);
+    }
+
+    console.error('[backend] failed to start:', error);
+    process.exit(1);
+  });
 
   server.listen(port, () => {
     console.log(`[backend] running at http://localhost:${port}`);

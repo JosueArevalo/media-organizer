@@ -138,7 +138,12 @@ export const startGroupingSession = (request: GroupingSessionRequest): GroupingS
     outputDir: request.outputDir,
     outputRoot,
     compressionSessionId: request.compressionSessionId ?? null,
-    strategy: request.strategy ?? 'date',
+    preservedDirectories: request.preservedDirectories ?? [],
+    reorganizedDirectories: request.reorganizedDirectories ?? [],
+    rules: request.rules ?? [],
+    strategy: request.strategy ?? null,
+    dateOptions: request.dateOptions ?? { singleDateHandling: 'year-unique' },
+    sourceFolderOptions: request.sourceFolderOptions ?? { mode: 'nearest-folder' },
     autoRename: request.autoRename ?? true,
     createdAt: timestamp
   };

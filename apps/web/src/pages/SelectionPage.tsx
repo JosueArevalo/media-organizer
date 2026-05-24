@@ -340,7 +340,12 @@ const flattenTree = (
   }
 
   const fileExcluded = isFileExcluded(entry.path, excludedFiles, includedFiles, ancestorExcluded);
-  rows.push({ entry, level: entry.depth, parentExcluded: ancestorExcluded, isExcluded: fileExcluded });
+  rows.push({
+    entry,
+    level: entry.depth,
+    parentExcluded: ancestorExcluded,
+    isExcluded: fileExcluded
+  });
   return rows;
 };
 
@@ -496,7 +501,15 @@ export const SelectionPage = () => {
       expandedDirectories,
       mode === 'files'
     );
-  }, [scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles, expandedDirectories, mode]);
+  }, [
+    scanState,
+    excludedDirectories,
+    excludedFiles,
+    includedDirectories,
+    includedFiles,
+    expandedDirectories,
+    mode
+  ]);
 
   useEffect(() => {
     if (scanState.status !== 'ready' || !scanState.root) {

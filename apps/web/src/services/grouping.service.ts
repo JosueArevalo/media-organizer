@@ -1,4 +1,16 @@
 export type GroupingFolderKind = 'proposed' | 'manual' | 'template';
+export type GroupingRuleId = 'date-event-multiple' | 'single-date-year-unique';
+export type GroupingStrategy = 'date' | 'source-folder';
+export type GroupingSingleDateHandling = 'daily-event' | 'year-unique' | 'keep-original';
+export type GroupingSourceFolderMode = 'nearest-folder' | 'relative-path';
+
+export type GroupingDateOptions = {
+  singleDateHandling: GroupingSingleDateHandling;
+};
+
+export type GroupingSourceFolderOptions = {
+  mode: GroupingSourceFolderMode;
+};
 
 export type GroupingWorkspaceFolder = {
   id: string;
@@ -17,6 +29,7 @@ export type GroupingWorkspaceItem = {
   sizeBytes: number;
   captureDate: string | null;
   targetGroupLabel: string | null;
+  preservedStructure: boolean;
 };
 
 export type GroupingFolderTemplate = {
@@ -31,6 +44,12 @@ export type GroupingWorkspace = {
   sourceDir: string;
   outputDir: string;
   compressionSessionId: string | null;
+  rules: GroupingRuleId[];
+  strategy: GroupingStrategy | null;
+  dateOptions: GroupingDateOptions;
+  sourceFolderOptions: GroupingSourceFolderOptions;
+  preservedDirectories: string[];
+  reorganizedDirectories: string[];
   folders: GroupingWorkspaceFolder[];
   items: GroupingWorkspaceItem[];
   templates: GroupingFolderTemplate[];
@@ -66,6 +85,23 @@ export const createGroupingWorkspaceRequest = async (payload: {
   compressionSessionId: string;
 }) =>
   requestJson<GroupingWorkspace>('/api/grouping/workspace', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+export const reorganizeGroupingWorkspaceRequest = async (
+  sessionId: string,
+  payload: {
+    rules?: GroupingRuleId[];
+    strategy: GroupingStrategy | null;
+    dateOptions?: GroupingDateOptions;
+    sourceFolderOptions?: GroupingSourceFolderOptions;
+    preservedDirectories: string[];
+    reorganizedDirectories: string[];
+  }
+) =>
+  requestJson<GroupingWorkspace>(`/api/grouping/${sessionId}/reorganize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)

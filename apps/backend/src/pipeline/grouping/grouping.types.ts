@@ -5,8 +5,26 @@ export type GroupingSessionRequest = {
   sourceDir: string;
   outputDir: string;
   compressionSessionId?: string;
-  strategy?: 'date' | 'source-kind';
+  preservedDirectories?: string[];
+  reorganizedDirectories?: string[];
+  rules?: GroupingRuleId[];
+  strategy?: GroupingStrategy | null;
+  dateOptions?: GroupingDateOptions;
+  sourceFolderOptions?: GroupingSourceFolderOptions;
   autoRename?: boolean;
+};
+
+export type GroupingRuleId = 'date-event-multiple' | 'single-date-year-unique';
+export type GroupingStrategy = 'date' | 'source-folder';
+export type GroupingSingleDateHandling = 'daily-event' | 'year-unique' | 'keep-original';
+export type GroupingSourceFolderMode = 'nearest-folder' | 'relative-path';
+
+export type GroupingDateOptions = {
+  singleDateHandling: GroupingSingleDateHandling;
+};
+
+export type GroupingSourceFolderOptions = {
+  mode: GroupingSourceFolderMode;
 };
 
 export type GroupingSessionManifest = {
@@ -15,7 +33,12 @@ export type GroupingSessionManifest = {
   outputDir: string;
   outputRoot: string;
   compressionSessionId: string | null;
-  strategy: 'date' | 'source-kind';
+  preservedDirectories: string[];
+  reorganizedDirectories: string[];
+  rules: GroupingRuleId[];
+  strategy: GroupingStrategy | null;
+  dateOptions: GroupingDateOptions;
+  sourceFolderOptions: GroupingSourceFolderOptions;
   autoRename: boolean;
   createdAt: string;
 };
