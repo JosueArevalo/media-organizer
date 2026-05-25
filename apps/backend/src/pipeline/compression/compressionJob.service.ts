@@ -20,6 +20,7 @@ export type CompressionSessionRequest = {
   imageQuality: number;
   imageProfileLabel: string;
   videoPresetLabel: string;
+  videoOutputFormatMode?: 'preserve' | 'mp4';
   imageToolCommand?: string;
   videoToolCommand?: string;
   imageMagickCommand?: string;
@@ -43,6 +44,7 @@ export type CompressionSessionManifest = {
   imageQuality: number;
   imageProfileLabel: string;
   videoPresetLabel: string;
+  videoOutputFormatMode: 'preserve' | 'mp4';
   imageToolCommand: string;
   videoToolCommand: string;
   imageMagickCommand: string;
@@ -174,6 +176,7 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
     imageQuality: request.imageQuality,
     imageProfileLabel: request.imageProfileLabel,
     videoPresetLabel: request.videoPresetLabel,
+    videoOutputFormatMode: request.videoOutputFormatMode === 'mp4' ? 'mp4' : 'preserve',
     imageToolCommand: resolvedImageCommand,
     videoToolCommand: resolvedVideoCommand,
     imageMagickCommand: resolvedImageMagickCommand,

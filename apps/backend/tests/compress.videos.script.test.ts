@@ -165,6 +165,158 @@ test('compress_videos emits start before completed item for selected videos', ()
   assert.ok(fs.existsSync(path.join(outputDir, 'clip.mp4')));
 });
 
+test('compress_videos preserves MOV extension by default', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-preserve-mov-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'clip.mov'), 'fake-video', 'utf8');
+
+  const pythonCommand = process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python';
+  const result = spawnSync(
+    pythonCommand,
+    [
+      scriptPath,
+      '--source-dir',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+      '--preset',
+      'Fast 1080p30',
+      '--encoder-command',
+      writeFakeVideoTool(toolsDir),
+      '--selection-scope-json',
+      ''
+    ],
+    {
+      encoding: 'utf8'
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+
+  const complete = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const item = complete?.items?.[0];
+
+  assert.equal(item?.operation, 'compress');
+  assert.ok(item?.output.endsWith('clip.mov'));
+  assert.equal(item?.command?.includes('--format'), false);
+  assert.ok(fs.existsSync(path.join(outputDir, 'clip.mov')));
+});
+
+test('compress_videos converts selected MOV outputs to MP4 when requested', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-mov-to-mp4-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'clip.mov'), 'fake-video', 'utf8');
+
+  const pythonCommand = process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python';
+  const result = spawnSync(
+    pythonCommand,
+    [
+      scriptPath,
+      '--source-dir',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+      '--preset',
+      'Fast 1080p30',
+      '--output-format-mode',
+      'mp4',
+      '--encoder-command',
+      writeFakeVideoTool(toolsDir),
+      '--selection-scope-json',
+      ''
+    ],
+    {
+      encoding: 'utf8'
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+
+  const complete = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const item = complete?.items?.[0];
+
+  assert.equal(item?.operation, 'compress');
+  assert.ok(item?.output.endsWith('clip.mp4'));
+  assert.ok(item?.command?.includes('--format'));
+  assert.ok(item?.command?.includes('av_mp4'));
+  assert.ok(fs.existsSync(path.join(outputDir, 'clip.mp4')));
+  assert.equal(fs.existsSync(path.join(outputDir, 'clip.mov')), false);
+});
+
+test('compress_videos keeps excluded MOV copies in their original container', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-copy-mov-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+  const sourceFile = path.join(sourceDir, 'clip.mov');
+  fs.writeFileSync(sourceFile, 'fake-video', 'utf8');
+
+  const pythonCommand = process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python';
+  const result = spawnSync(
+    pythonCommand,
+    [
+      scriptPath,
+      '--source-dir',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+      '--preset',
+      'Fast 1080p30',
+      '--output-format-mode',
+      'mp4',
+      '--encoder-command',
+      writeFakeVideoTool(toolsDir),
+      '--selection-scope-json',
+      JSON.stringify({
+        excludedDirectories: [],
+        excludedFiles: [sourceFile],
+        includedDirectories: [],
+        includedFiles: [],
+        updatedAt: 1
+      })
+    ],
+    {
+      encoding: 'utf8'
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+
+  const complete = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const item = complete?.items?.[0];
+
+  assert.equal(item?.operation, 'copy');
+  assert.ok(item?.output.endsWith('clip.mov'));
+  assert.equal(item?.command?.includes('--format'), false);
+  assert.ok(fs.existsSync(path.join(outputDir, 'clip.mov')));
+  assert.equal(fs.existsSync(path.join(outputDir, 'clip.mp4')), false);
+});
+
 test('compress_videos does not create HandBrake debug logs', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-no-debug-'));
   const sourceDir = path.join(tempRoot, 'source');

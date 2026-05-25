@@ -15,7 +15,8 @@ import { loadEncoderSettings, type EncoderSettingsSnapshot } from '../services/e
 import {
   loadCompressionSettings,
   saveCompressionSettings,
-  type CompressionImagePreset
+  type CompressionImagePreset,
+  type VideoOutputFormatMode
 } from '../services/compression-settings.store';
 import { completeCompressionSession, failCompressionSession, startCompressionSession, resetCompressionSession } from '../services/compression-job.store';
 import {
@@ -429,6 +430,7 @@ export const CompressionPage = () => {
   const [imagePreset, setImagePreset] = useState<ImagePresetId>(savedCompressionSettings.imagePreset);
   const [customQuality, setCustomQuality] = useState<number>(savedCompressionSettings.customQuality);
   const [videoPreset, setVideoPreset] = useState<string>(savedCompressionSettings.videoPreset);
+  const [videoOutputFormatMode, setVideoOutputFormatMode] = useState<VideoOutputFormatMode>(savedCompressionSettings.videoOutputFormatMode);
   const [videoPresets, setVideoPresets] = useState<HandBrakePresetOption[]>([]);
   const [videoPresetsState, setVideoPresetsState] = useState<VideoPresetsState>({ status: 'idle', error: null });
   const [mediaStatsState, setMediaStatsState] = useState<MediaStatsState>({ status: 'idle', data: null, error: null });
@@ -472,9 +474,10 @@ export const CompressionPage = () => {
     saveCompressionSettings({
       imagePreset,
       customQuality,
-      videoPreset
+      videoPreset,
+      videoOutputFormatMode
     });
-  }, [imagePreset, customQuality, videoPreset]);
+  }, [imagePreset, customQuality, videoPreset, videoOutputFormatMode]);
 
   useEffect(() => {
     let isActive = true;
@@ -843,6 +846,7 @@ export const CompressionPage = () => {
         imageQuality: effectiveImageQuality,
         imageProfileLabel: selectedImageProfileLabel,
         videoPresetLabel: selectedVideoProfileLabel,
+        videoOutputFormatMode,
         imageToolCommand: latestEncoderSettings.imageToolCommand,
         videoToolCommand: latestEncoderSettings.videoToolCommand,
         imageMagickCommand: latestEncoderSettings.imageMagickCommand,
@@ -1175,36 +1179,64 @@ export const CompressionPage = () => {
             )}
 
             {videoPresetsState.status === 'ready' && hasAvailableVideoPresets && (
-              <label className="compression-video-preset" htmlFor="video-preset-select">
-                <span className="page-option-label">
-                  <strong>{t('compression.presetLabel')}</strong> {t('compression.presetHelp')}
-                </span>
-                <select
-                  id="video-preset-select"
-                  className="compression-preset-select"
-                  value={videoPreset}
-                  onChange={(event) => setVideoPreset(event.target.value)}
-                >
-                  {Object.entries(
-                    videoPresets.reduce<Record<string, HandBrakePresetOption[]>>((groups, preset) => {
-                      if (!groups[preset.category]) {
-                        groups[preset.category] = [];
-                      }
+              <>
+                <label className="compression-video-preset" htmlFor="video-preset-select">
+                  <span className="page-option-label">
+                    <strong>{t('compression.presetLabel')}</strong> {t('compression.presetHelp')}
+                  </span>
+                  <select
+                    id="video-preset-select"
+                    className="compression-preset-select"
+                    value={videoPreset}
+                    onChange={(event) => setVideoPreset(event.target.value)}
+                  >
+                    {Object.entries(
+                      videoPresets.reduce<Record<string, HandBrakePresetOption[]>>((groups, preset) => {
+                        if (!groups[preset.category]) {
+                          groups[preset.category] = [];
+                        }
 
-                      groups[preset.category].push(preset);
-                      return groups;
-                    }, {})
-                  ).map(([category, presets]) => (
-                    <optgroup key={category} label={category}>
-                      {presets.map((preset) => (
-                        <option key={`${preset.category}:${preset.name}`} value={preset.name}>
-                          {preset.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </label>
+                        groups[preset.category].push(preset);
+                        return groups;
+                      }, {})
+                    ).map(([category, presets]) => (
+                      <optgroup key={category} label={category}>
+                        {presets.map((preset) => (
+                          <option key={`${preset.category}:${preset.name}`} value={preset.name}>
+                            {preset.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="page-option-list" role="radiogroup" aria-label={t('compression.videoOutputFormatLabel')}>
+                  <label className="page-option">
+                    <input
+                      type="radio"
+                      name="video-output-format"
+                      checked={videoOutputFormatMode === 'preserve'}
+                      onChange={() => setVideoOutputFormatMode('preserve')}
+                    />
+                    <span className="page-option-label">
+                      <strong>{t('compression.videoOutputPreserve')}</strong> {t('compression.videoOutputPreserveHelp')}
+                    </span>
+                  </label>
+
+                  <label className="page-option">
+                    <input
+                      type="radio"
+                      name="video-output-format"
+                      checked={videoOutputFormatMode === 'mp4'}
+                      onChange={() => setVideoOutputFormatMode('mp4')}
+                    />
+                    <span className="page-option-label">
+                      <strong>{t('compression.videoOutputMp4')}</strong> {t('compression.videoOutputMp4Help')}
+                    </span>
+                  </label>
+                </div>
+              </>
             )}
           </div>
         </div>

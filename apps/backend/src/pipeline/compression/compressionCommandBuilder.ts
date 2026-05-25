@@ -41,6 +41,8 @@ export const buildVideoCompressionCommand = (manifest: CompressionSessionManifes
     manifest.videoOutputDir,
     '--preset',
     manifest.videoPresetLabel,
+    '--output-format-mode',
+    manifest.videoOutputFormatMode,
     '--encoder-command',
     manifest.videoToolCommand,
     '--selection-scope-json',

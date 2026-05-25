@@ -67,6 +67,7 @@ type CompressionManifestData = {
     imageQuality: number;
     imageProfileLabel: string;
     videoPresetLabel: string;
+    videoOutputFormatMode?: 'preserve' | 'mp4';
     imageToolCommand: string;
     videoToolCommand: string;
     imageMagickCommand?: string;
@@ -649,6 +650,7 @@ export const executeCompressionSession = async (sessionId: string) => {
     imageQuality: checkpointData.manifest.imageQuality,
     imageProfileLabel: checkpointData.manifest.imageProfileLabel,
     videoPresetLabel: checkpointData.manifest.videoPresetLabel,
+    videoOutputFormatMode: checkpointData.manifest.videoOutputFormatMode ?? 'preserve',
     imageToolCommand: checkpointData.manifest.imageToolCommand,
     videoToolCommand: checkpointData.manifest.videoToolCommand,
     imageMagickCommand: checkpointData.manifest.imageMagickCommand ?? 'magick',
@@ -667,6 +669,7 @@ export const executeCompressionSession = async (sessionId: string) => {
     imageQuality: checkpointData.manifest.imageQuality,
     imageProfileLabel: checkpointData.manifest.imageProfileLabel,
     videoPresetLabel: checkpointData.manifest.videoPresetLabel,
+    videoOutputFormatMode: checkpointData.manifest.videoOutputFormatMode ?? 'preserve',
     imageToolCommand: checkpointData.manifest.imageToolCommand,
     videoToolCommand: checkpointData.manifest.videoToolCommand,
     imageMagickCommand: checkpointData.manifest.imageMagickCommand ?? 'magick',

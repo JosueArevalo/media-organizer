@@ -101,9 +101,14 @@ def should_compress(source_file: Path, scope) -> bool:
     return normalized in included_files
 
 
-def build_output_path(source_dir: Path, output_dir: Path, source_file: Path) -> Path:
+def build_output_path(source_dir: Path, output_dir: Path, source_file: Path, output_format_mode: str, operation: str) -> Path:
     relative_path = source_file.relative_to(source_dir)
-    return output_dir / relative_path
+    output_file = output_dir / relative_path
+
+    if operation == 'compress' and output_format_mode == 'mp4':
+        return output_file.with_suffix('.mp4')
+
+    return output_file
 
 
 def emit_event(payload: dict):
@@ -314,6 +319,7 @@ def main() -> int:
     parser.add_argument('--source-dir', required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--preset', default=DEFAULT_PRESET)
+    parser.add_argument('--output-format-mode', choices=['preserve', 'mp4'], default='preserve')
     parser.add_argument('--encoder-command', default='HandBrakeCLI')
     parser.add_argument('--selection-scope-json', default='')
     args = parser.parse_args()
@@ -328,7 +334,8 @@ def main() -> int:
     manifest = []
 
     for source_file in iter_video_files(source_dir):
-        output_file = build_output_path(source_dir, output_dir, source_file)
+        operation = 'compress' if should_compress(source_file, scope) else 'copy'
+        output_file = build_output_path(source_dir, output_dir, source_file, args.output_format_mode, operation)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         fallback_command = [
@@ -340,10 +347,12 @@ def main() -> int:
             '--preset',
             resolved_preset,
         ]
+        if args.output_format_mode == 'mp4' and operation == 'compress':
+            fallback_command.extend(['--format', 'av_mp4'])
+
         command = append_hw_decode(fallback_command, hw_decode)
         status = 'completed'
         error_message = None
-        operation = 'compress' if should_compress(source_file, scope) else 'copy'
         skipped = False
         started_at = now_ms()
 
