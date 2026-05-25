@@ -58,6 +58,24 @@ type MediaStatsState =
   | { status: 'ready'; data: MediaStats; error: null }
   | { status: 'error'; data: null; error: string };
 
+type CompressionProgressItem = {
+  id: string;
+  sourcePath: string;
+  status: 'completed' | 'failed';
+  operation: 'compress' | 'copy';
+  startedAt?: number;
+  finishedAt?: number;
+  durationMs?: number;
+  skipped?: boolean;
+};
+
+type CompressionActiveItem = {
+  id: string;
+  sourcePath: string;
+  operation: 'compress' | 'copy';
+  startedAt?: number;
+};
+
 const IMAGE_PRESETS: Array<{ id: Exclude<ImagePresetId, 'custom'>; labelKey: TranslationKey; quality: number; noteKey: TranslationKey }> = [
   { id: 'balanced', labelKey: 'compression.preset.balanced', quality: 80, noteKey: 'compression.preset.balancedNote' },
   { id: 'high', labelKey: 'compression.preset.high', quality: 90, noteKey: 'compression.preset.highNote' },
@@ -88,6 +106,28 @@ const formatBytes = (bytes: number) => {
 
   return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 };
+
+const formatDuration = (milliseconds?: number) => {
+  if (typeof milliseconds !== 'number' || !Number.isFinite(milliseconds) || milliseconds < 0) {
+    return '';
+  }
+
+  if (milliseconds < 1000) {
+    return '<1s';
+  }
+
+  const totalSeconds = Math.round(milliseconds / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+};
+
+const getFileLabel = (filePath: string) => filePath.split(/[\\/]/).pop() || filePath;
 
 const getMediaKind = (fileName: string, mimeType = '', fileType = ''): 'image' | 'video' | 'other' => {
   const normalizedType = fileType.toLowerCase();
@@ -407,8 +447,14 @@ export const CompressionPage = () => {
     total: number;
     completed: number;
     failed: number;
-    currentlyProcessing: Array<{ id: string; sourcePath: string }>;
-    processedItems: Array<{ id: string; sourcePath: string; status: 'completed' | 'failed' }>;
+    currentlyProcessing: CompressionActiveItem[];
+    processedItems: CompressionProgressItem[];
+    totalCompress: number;
+    totalCopy: number;
+    completedCompress: number;
+    completedCopy: number;
+    failedCompress: number;
+    failedCopy: number;
   } | null>(null);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const completionTimerRef = useRef<number | null>(null);
@@ -602,6 +648,46 @@ export const CompressionPage = () => {
     };
   }, [compressionSessionState.backendSessionId, compressionSessionState.status]);
 
+  useEffect(() => {
+    if (
+      !compressionSessionState.backendSessionId ||
+      (compressionSessionState.status !== 'completed' && compressionSessionState.status !== 'failed')
+    ) {
+      return;
+    }
+
+    let isActive = true;
+
+    void getCompressionProgressRequest(compressionSessionState.backendSessionId)
+      .then((progress) => {
+        if (!isActive) {
+          return;
+        }
+
+        setProgressData({
+          status: progress.status as 'running' | 'completed' | 'failed' | 'cancelled',
+          total: progress.total,
+          completed: progress.completed,
+          failed: progress.failed,
+          currentlyProcessing: progress.currentlyProcessing,
+          processedItems: progress.processedItems,
+          totalCompress: progress.totalCompress,
+          totalCopy: progress.totalCopy,
+          completedCompress: progress.completedCompress,
+          completedCopy: progress.completedCopy,
+          failedCompress: progress.failedCompress,
+          failedCopy: progress.failedCopy
+        });
+      })
+      .catch(() => {
+        // Completed local snapshots can outlive backend cleanup; leave the page usable.
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [compressionSessionState.backendSessionId, compressionSessionState.status]);
+
   const imageEstimatedSavedBytes = useMemo(() => {
     if (mediaStatsState.status !== 'ready') {
       return 0;
@@ -783,7 +869,13 @@ export const CompressionPage = () => {
             completed: progress.completed,
             failed: progress.failed,
             currentlyProcessing: progress.currentlyProcessing,
-            processedItems: progress.processedItems
+            processedItems: progress.processedItems,
+            totalCompress: progress.totalCompress,
+            totalCopy: progress.totalCopy,
+            completedCompress: progress.completedCompress,
+            completedCopy: progress.completedCopy,
+            failedCompress: progress.failedCompress,
+            failedCopy: progress.failedCopy
           });
 
           const status = progress.status;
@@ -897,7 +989,7 @@ export const CompressionPage = () => {
         )}
       </div>
 
-      {isCompressionRunning && progressData && (
+      {(isCompressionRunning || progressData) && progressData && (
         <div className="page-card compression-progress-card">
           <p className="page-section-title">{t('compression.progressTitle')}</p>
           {progressData.total === 0 && estimatedTotalMediaCount > 0 && (
@@ -913,13 +1005,22 @@ export const CompressionPage = () => {
             </div>
             <div className="progress-stat">
               <span className="progress-label">{t('compression.completed')}</span>
-              <span className="progress-value" style={{ color: '#10b981' }}>{progressData.completed}</span>
+              <span className="progress-value" style={{ color: '#10b981' }}>{progressData.completed} / {progressData.total > 0 ? progressData.total : estimatedTotalMediaCount}</span>
             </div>
             <div className="progress-stat">
               <span className="progress-label">{t('compression.failedLabel')}</span>
               <span className="progress-value" style={{ color: progressData.failed > 0 ? '#ef4444' : '#6b7280' }}>{progressData.failed}</span>
             </div>
           </div>
+
+          <p className="page-summary-note">
+            {t('compression.operationBreakdown', {
+              compressed: progressData.completedCompress,
+              totalCompress: progressData.totalCompress,
+              copied: progressData.completedCopy,
+              totalCopy: progressData.totalCopy
+            })}
+          </p>
 
           <div className="compression-progress-bar">
             <div 
@@ -946,15 +1047,26 @@ export const CompressionPage = () => {
             </p>
           )}
 
-          {progressData.currentlyProcessing.length > 0 && (
+          {progressData.status === 'running' && (
             <div className="compression-currently-processing">
               <p className="compression-processing-label">{t('compression.processing')}</p>
               <div className="compression-processing-list">
-                {progressData.currentlyProcessing.slice(0, 2).map((item) => (
-                  <div key={item.id} className="compression-processing-item">
-                    📄 {item.sourcePath.split('/').pop() || item.sourcePath}
+                {progressData.currentlyProcessing.length > 0 ? (
+                  progressData.currentlyProcessing.slice(0, 2).map((item) => (
+                    <div key={item.id} className="compression-processing-item">
+                      {t(item.operation === 'compress' ? 'compression.compressingItem' : 'compression.copyingItem', {
+                        name: getFileLabel(item.sourcePath)
+                      })}
+                      {item.startedAt ? ` - ${formatDuration(Date.now() - item.startedAt)}` : ''}
+                    </div>
+                  ))
+                ) : (
+                  <div className="compression-processing-item">
+                    {progressData.completed + progressData.failed >= progressData.total
+                      ? t('compression.finalizing')
+                      : t('compression.preparingNextItem')}
                   </div>
-                ))}
+                )}
               </div>
             </div>
           )}
@@ -977,7 +1089,14 @@ export const CompressionPage = () => {
                         {item.status === 'completed' ? '✓' : '✗'}
                       </span>
                       <span className="compression-log-name">
-                        {item.sourcePath.split('/').pop() || item.sourcePath}
+                        {t(item.skipped && item.operation === 'copy'
+                          ? 'compression.logCopySkipped'
+                          : item.operation === 'compress'
+                            ? 'compression.logCompressed'
+                            : 'compression.logCopied', {
+                          name: getFileLabel(item.sourcePath)
+                        })}
+                        {typeof item.durationMs === 'number' ? ` - ${formatDuration(item.durationMs)}` : ''}
                       </span>
                     </div>
                   ))

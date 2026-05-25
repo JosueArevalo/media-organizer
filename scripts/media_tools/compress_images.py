@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -125,6 +126,31 @@ def resolve_unique_output_path(output_file: Path, used_outputs: set[str]) -> Pat
 
 def emit_event(payload: dict):
     print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def has_same_file_metadata(source_file: Path, output_file: Path) -> bool:
+    if not output_file.exists():
+        return False
+
+    try:
+        source_stat = source_file.stat()
+        output_stat = output_file.stat()
+    except OSError:
+        return False
+
+    return source_stat.st_size == output_stat.st_size and source_stat.st_mtime_ns == output_stat.st_mtime_ns
+
+
+def copy_if_changed(source_file: Path, output_file: Path) -> bool:
+    if has_same_file_metadata(source_file, output_file):
+        return True
+
+    shutil.copy2(source_file, output_file)
+    return False
 
 
 def iter_image_files(source_dir: Path):
@@ -264,9 +290,24 @@ def main() -> int:
         status = 'completed'
         error_message = None
         warning_message = None
+        operation = 'compress' if selected_for_compression and extension in JPEG_EXTENSIONS.union(HEIC_EXTENSIONS) else 'copy'
+        skipped = False
+        started_at = now_ms()
+
+        start_item = {
+            'source': str(source_file),
+            'output': str(output_file),
+            'command': command,
+            'operation': operation,
+            'startedAt': started_at,
+        }
+        emit_event({
+            'type': 'start',
+            'item': start_item,
+        })
 
         if not selected_for_compression:
-            shutil.copy2(source_file, output_file)
+            skipped = copy_if_changed(source_file, output_file)
         elif extension in JPEG_EXTENSIONS:
             try:
                 command = run_cjpeg(args.encoder_command, args.quality, source_file, output_file)
@@ -303,20 +344,26 @@ def main() -> int:
                 stderr = (error.stderr or '').strip()
                 error_message = stderr or f"HEIC conversion failed for {source_file}"
         elif extension in COPY_ONLY_EXTENSIONS:
-            shutil.copy2(source_file, output_file)
+            skipped = copy_if_changed(source_file, output_file)
             warning_message = f"{extension.upper().lstrip('.')} files are copied without compression in this version."
         else:
-            shutil.copy2(source_file, output_file)
+            skipped = copy_if_changed(source_file, output_file)
             warning_message = f"{extension or 'Unknown'} files are copied without compression in this version."
 
         if status == 'failed' and source_file.suffix.lower() == output_file.suffix.lower():
             shutil.copy2(source_file, output_file)
 
+        finished_at = now_ms()
         item = {
             'source': str(source_file),
             'output': str(output_file),
             'command': command,
             'status': status,
+            'operation': operation,
+            'startedAt': started_at,
+            'finishedAt': finished_at,
+            'durationMs': finished_at - started_at,
+            'skipped': skipped,
             'error': error_message,
             'warning': warning_message,
         }

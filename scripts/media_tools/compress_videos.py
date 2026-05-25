@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import ctypes.wintypes
 import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 
 VIDEO_EXTENSIONS = {'.mp4', '.mov', '.m4v', '.avi', '.mkv'}
 DEFAULT_PRESET = 'Fast 1080p30'
+
+ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
+PROCESS_POWER_THROTTLING = 4
+PROCESS_POWER_THROTTLING_CURRENT_VERSION = 1
+PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 0x1
 
 
 def normalize_path(value: str) -> str:
@@ -102,6 +110,128 @@ def emit_event(payload: dict):
     print(json.dumps(payload, ensure_ascii=False), flush=True)
 
 
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def has_same_file_metadata(source_file: Path, output_file: Path) -> bool:
+    if not output_file.exists():
+        return False
+
+    try:
+        source_stat = source_file.stat()
+        output_stat = output_file.stat()
+    except OSError:
+        return False
+
+    return source_stat.st_size == output_stat.st_size and source_stat.st_mtime_ns == output_stat.st_mtime_ns
+
+
+def copy_if_changed(source_file: Path, output_file: Path) -> bool:
+    if has_same_file_metadata(source_file, output_file):
+        return True
+
+    shutil.copy2(source_file, output_file)
+    return False
+
+
+def is_handbrake_performance_mode_enabled() -> bool:
+    return os.name == 'nt'
+
+
+class ProcessPowerThrottlingState(ctypes.Structure):
+    _fields_ = [
+        ('Version', ctypes.c_ulong),
+        ('ControlMask', ctypes.c_ulong),
+        ('StateMask', ctypes.c_ulong),
+    ]
+
+
+def disable_windows_power_throttling(process_handle) -> None:
+    if os.name != 'nt':
+        return
+
+    state = ProcessPowerThrottlingState(
+        Version=PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask=PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        StateMask=0,
+    )
+
+    ctypes.windll.kernel32.SetProcessInformation(
+        ctypes.wintypes.HANDLE(process_handle),
+        PROCESS_POWER_THROTTLING,
+        ctypes.byref(state),
+        ctypes.sizeof(state),
+    )
+
+
+def apply_windows_performance_mode(process: subprocess.Popen) -> None:
+    if not is_handbrake_performance_mode_enabled():
+        return
+
+    try:
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.wintypes.HANDLE(process._handle), ABOVE_NORMAL_PRIORITY_CLASS)
+        disable_windows_power_throttling(process._handle)
+    except Exception:
+        # Performance hints are best-effort; compression must keep working if Windows rejects them.
+        return
+
+
+def handbrake_creationflags() -> int:
+    if not is_handbrake_performance_mode_enabled():
+        return 0
+
+    return ABOVE_NORMAL_PRIORITY_CLASS
+
+
+def resolve_handbrake_hw_decode() -> str | None:
+    return 'qsv' if os.name == 'nt' else None
+
+
+def append_hw_decode(command: list[str], hw_decode: str | None) -> list[str]:
+    if not hw_decode:
+        return command
+
+    return [*command, '--enable-hw-decoding', hw_decode]
+
+
+def run_handbrake_process(command: list[str], *, capture: bool) -> subprocess.CompletedProcess[str]:
+    stdout = subprocess.PIPE if capture else subprocess.DEVNULL
+    stderr = subprocess.PIPE if capture else subprocess.DEVNULL
+    process = subprocess.Popen(
+        command,
+        stdout=stdout,
+        stderr=stderr,
+        text=True,
+        creationflags=handbrake_creationflags(),
+    )
+    apply_windows_performance_mode(process)
+    stdout_text, stderr_text = process.communicate()
+
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, command, output=stdout_text, stderr=stderr_text)
+
+    return subprocess.CompletedProcess(command, process.returncode, stdout_text, stderr_text)
+
+
+def run_handbrake(command: list[str], fallback_command: list[str] | None):
+    try:
+        run_handbrake_process(command, capture=False)
+        return
+    except subprocess.CalledProcessError as first_error:
+        if fallback_command is None:
+            result = subprocess.run(command, check=False, capture_output=True, text=True)
+            stderr = (result.stderr or result.stdout or '').strip()
+            raise subprocess.CalledProcessError(result.returncode, command, output=result.stdout, stderr=stderr) from first_error
+
+    try:
+        run_handbrake_process(fallback_command, capture=False)
+    except subprocess.CalledProcessError as fallback_error:
+        result = subprocess.run(fallback_command, check=False, capture_output=True, text=True)
+        stderr = (result.stderr or result.stdout or '').strip()
+        raise subprocess.CalledProcessError(result.returncode, fallback_command, output=result.stdout, stderr=stderr) from fallback_error
+
+
 def iter_video_files(source_dir: Path):
     for root, _, files in os.walk(source_dir):
         root_path = Path(root)
@@ -192,6 +322,7 @@ def main() -> int:
     output_dir = Path(args.output_dir).resolve()
     scope = resolve_scope(source_dir, load_scope(args.selection_scope_json))
     resolved_preset = resolve_preset(args.encoder_command, args.preset)
+    hw_decode = resolve_handbrake_hw_decode()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = []
@@ -200,7 +331,7 @@ def main() -> int:
         output_file = build_output_path(source_dir, output_dir, source_file)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        command = [
+        fallback_command = [
             args.encoder_command,
             '-i',
             str(source_file),
@@ -209,15 +340,29 @@ def main() -> int:
             '--preset',
             resolved_preset,
         ]
-
+        command = append_hw_decode(fallback_command, hw_decode)
         status = 'completed'
         error_message = None
+        operation = 'compress' if should_compress(source_file, scope) else 'copy'
+        skipped = False
+        started_at = now_ms()
 
-        if not should_compress(source_file, scope):
-            shutil.copy2(source_file, output_file)
+        emit_event({
+            'type': 'start',
+            'item': {
+                'source': str(source_file),
+                'output': str(output_file),
+                'command': command,
+                'operation': operation,
+                'startedAt': started_at,
+            },
+        })
+
+        if operation == 'copy':
+            skipped = copy_if_changed(source_file, output_file)
         else:
             try:
-                subprocess.run(command, check=True, capture_output=True, text=True)
+                run_handbrake(command, fallback_command if hw_decode else None)
             except FileNotFoundError:
                 status = 'failed'
                 error_message = f"Video encoder command not found: {args.encoder_command}"
@@ -229,11 +374,17 @@ def main() -> int:
         if status == 'failed':
             shutil.copy2(source_file, output_file)
 
+        finished_at = now_ms()
         item = {
             'source': str(source_file),
             'output': str(output_file),
             'command': command,
             'status': status,
+            'operation': operation,
+            'startedAt': started_at,
+            'finishedAt': finished_at,
+            'durationMs': finished_at - started_at,
+            'skipped': skipped,
             'error': error_message,
         }
 

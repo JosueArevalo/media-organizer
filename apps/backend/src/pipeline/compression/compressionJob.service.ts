@@ -298,12 +298,25 @@ export interface CompressionProgressData {
   currentlyProcessing: Array<{
     id: string;
     sourcePath: string;
+    operation: 'compress' | 'copy';
+    startedAt?: number;
   }>;
   processedItems: Array<{
     id: string;
     sourcePath: string;
     status: 'completed' | 'failed';
+    operation: 'compress' | 'copy';
+    startedAt?: number;
+    finishedAt?: number;
+    durationMs?: number;
+    skipped?: boolean;
   }>;
+  totalCompress: number;
+  totalCopy: number;
+  completedCompress: number;
+  completedCopy: number;
+  failedCompress: number;
+  failedCopy: number;
 }
 
 export const getCompressionProgress = (sessionId: string): CompressionProgressData | null => {
@@ -326,12 +339,66 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   let totalCount = 0;
   let checkpointCompletedCount: number | null = null;
   let checkpointFailedCount: number | null = null;
+  let totalCompressCount = 0;
+  let totalCopyCount = 0;
+  let checkpointCompletedCompressCount: number | null = null;
+  let checkpointCompletedCopyCount: number | null = null;
+  let checkpointFailedCompressCount: number | null = null;
+  let checkpointFailedCopyCount: number | null = null;
+  let activeItems: Array<{ id: string; sourcePath: string; operation: 'compress' | 'copy'; startedAt?: number }> = [];
+  let checkpointProcessedItems: CompressionProgressData['processedItems'] = [];
   if (checkpoint?.payload_json) {
     try {
       const parsed = JSON.parse(checkpoint.payload_json);
       totalCount = parsed.totalCount ?? 0;
       checkpointCompletedCount = parsed.summary?.completedItems ?? null;
       checkpointFailedCount = parsed.summary?.failedItems ?? null;
+      totalCompressCount = parsed.summary?.totalCompressCount ?? 0;
+      totalCopyCount = parsed.summary?.totalCopyCount ?? 0;
+      checkpointCompletedCompressCount = parsed.summary?.completedCompressCount ?? null;
+      checkpointCompletedCopyCount = parsed.summary?.completedCopyCount ?? null;
+      checkpointFailedCompressCount = parsed.summary?.failedCompressCount ?? null;
+      checkpointFailedCopyCount = parsed.summary?.failedCopyCount ?? null;
+      activeItems = Array.isArray(parsed.activeItems)
+        ? parsed.activeItems
+            .filter((item: { id?: unknown; sourcePath?: unknown; operation?: unknown }) =>
+              typeof item.id === 'string' &&
+              typeof item.sourcePath === 'string' &&
+              (item.operation === 'compress' || item.operation === 'copy')
+            )
+            .map((item: { id: string; sourcePath: string; operation: 'compress' | 'copy'; startedAt?: unknown }) => ({
+              id: item.id,
+              sourcePath: item.sourcePath,
+              operation: item.operation,
+              ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {})
+            }))
+        : [];
+      checkpointProcessedItems = Array.isArray(parsed.processedItems)
+        ? parsed.processedItems
+            .filter((item: { source?: unknown; status?: unknown; operation?: unknown }) =>
+              typeof item.source === 'string' &&
+              (item.status === 'completed' || item.status === 'failed') &&
+              (item.operation === 'compress' || item.operation === 'copy')
+            )
+            .map((item: {
+              source: string;
+              status: 'completed' | 'failed';
+              operation: 'compress' | 'copy';
+              startedAt?: unknown;
+              finishedAt?: unknown;
+              durationMs?: unknown;
+              skipped?: unknown;
+            }) => ({
+              id: item.source,
+              sourcePath: item.source,
+              status: item.status,
+              operation: item.operation,
+              ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {}),
+              ...(typeof item.finishedAt === 'number' ? { finishedAt: item.finishedAt } : {}),
+              ...(typeof item.durationMs === 'number' ? { durationMs: item.durationMs } : {}),
+              ...(typeof item.skipped === 'boolean' ? { skipped: item.skipped } : {})
+            }))
+        : [];
       console.log(`[getCompressionProgress] sessionId=${sessionId} totalCount=${totalCount}`);
       console.log(`[getCompressionProgress] checkpoint payload keys:`, Object.keys(parsed));
     } catch (e) {
@@ -347,23 +414,43 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
     .prepare(
       `
       SELECT mi.id, mi.source_path, iss.status
+      , COALESCE(idc.selected_for_compression, 0) AS selected_for_compression
       FROM item_stage_status iss
       JOIN media_items mi ON iss.item_id = mi.id
+      LEFT JOIN item_decisions idc ON idc.item_id = mi.id AND idc.session_id = iss.session_id
       WHERE iss.session_id = ? AND iss.stage = 'compress' AND iss.status IN ('completed', 'failed')
       ORDER BY iss.updated_at ASC
     `
     )
-    .all(sessionId) as Array<{ id: string; source_path: string; status: string }>;
+    .all(sessionId) as Array<{ id: string; source_path: string; status: string; selected_for_compression: number }>;
 
   // Get completed and failed counts
   let completedCount = 0;
   let failedCount = 0;
+  let completedCompressCount = 0;
+  let completedCopyCount = 0;
+  let failedCompressCount = 0;
+  let failedCopyCount = 0;
 
   for (const item of allProcessedItems) {
+    const operation = item.selected_for_compression ? 'compress' : 'copy';
+
     if (item.status === 'completed') {
       completedCount += 1;
+
+      if (operation === 'compress') {
+        completedCompressCount += 1;
+      } else {
+        completedCopyCount += 1;
+      }
     } else if (item.status === 'failed') {
       failedCount += 1;
+
+      if (operation === 'compress') {
+        failedCompressCount += 1;
+      } else {
+        failedCopyCount += 1;
+      }
     }
   }
 
@@ -372,19 +459,22 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
     failedCount = checkpointFailedCount ?? failedCount;
   }
 
-  // Get a few recently processed items for "currently processing" display (most recent)
-  const recentItems = db
-    .prepare(
-      `
-      SELECT mi.id, mi.source_path
-      FROM item_stage_status iss
-      JOIN media_items mi ON iss.item_id = mi.id
-      WHERE iss.session_id = ? AND iss.stage = 'compress'
-      ORDER BY iss.updated_at DESC
-      LIMIT 3
-    `
-    )
-    .all(sessionId) as Array<{ id: string; source_path: string }>;
+  completedCompressCount = checkpointCompletedCompressCount ?? completedCompressCount;
+  completedCopyCount = checkpointCompletedCopyCount ?? completedCopyCount;
+  failedCompressCount = checkpointFailedCompressCount ?? failedCompressCount;
+  failedCopyCount = checkpointFailedCopyCount ?? failedCopyCount;
+
+  if (totalCount > 0 && totalCompressCount === 0 && totalCopyCount === 0) {
+    totalCompressCount = completedCompressCount + failedCompressCount;
+    totalCopyCount = Math.max(0, totalCount - totalCompressCount);
+  }
+
+  const databaseProcessedItems = allProcessedItems.map((item) => ({
+    id: item.id,
+    sourcePath: item.source_path,
+    status: item.status as 'completed' | 'failed',
+    operation: item.selected_for_compression ? 'compress' as const : 'copy' as const
+  }));
 
   return {
     sessionId,
@@ -392,15 +482,14 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
     total: totalCount,
     completed: completedCount,
     failed: failedCount,
-    currentlyProcessing: recentItems.map((item) => ({
-      id: item.id,
-      sourcePath: item.source_path
-    })),
-    processedItems: allProcessedItems.map((item) => ({
-      id: item.id,
-      sourcePath: item.source_path,
-      status: item.status as 'completed' | 'failed'
-    }))
+    currentlyProcessing: activeItems,
+    processedItems: checkpointProcessedItems.length > 0 ? checkpointProcessedItems : databaseProcessedItems,
+    totalCompress: totalCompressCount,
+    totalCopy: totalCopyCount,
+    completedCompress: completedCompressCount,
+    completedCopy: completedCopyCount,
+    failedCompress: failedCompressCount,
+    failedCopy: failedCopyCount
   };
 };
 
@@ -448,9 +537,11 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
       JSON.stringify({
         ...checkpointPayload,
         summary: {
+          ...checkpointPayload.summary,
           completedItems: checkpointPayload.summary?.completedItems ?? 0,
           failedItems: Math.max(1, checkpointPayload.summary?.failedItems ?? 0)
         },
+        activeItems: [],
         fatalError: error.message
       }),
       timestamp,
