@@ -5,6 +5,7 @@ export type CompressionSessionRequest = {
   imageQuality: number;
   imageProfileLabel: string;
   videoPresetLabel: string;
+  videoOutputFormatMode?: 'preserve' | 'mp4';
   imageToolCommand?: string;
   videoToolCommand?: string;
   imageMagickCommand?: string;

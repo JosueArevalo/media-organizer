@@ -30,16 +30,18 @@ test('loadCompressionSettings returns defaults without localStorage data', () =>
   assert.equal(settings.imagePreset, 'balanced');
   assert.equal(settings.customQuality, 72);
   assert.equal(settings.videoPreset, 'Fast 1080p30');
+  assert.equal(settings.videoOutputFormatMode, 'preserve');
   assert.equal(settings.updatedAt, 0);
 });
 
-test('saveCompressionSettings persists custom quality choices', () => {
+test('saveCompressionSettings persists custom quality and video format choices', () => {
   installLocalStorage();
 
   saveCompressionSettings({
     imagePreset: 'custom',
     customQuality: 73,
-    videoPreset: 'HQ 1080p30 Surround'
+    videoPreset: 'HQ 1080p30 Surround',
+    videoOutputFormatMode: 'mp4'
   });
 
   const settings = loadCompressionSettings();
@@ -47,6 +49,7 @@ test('saveCompressionSettings persists custom quality choices', () => {
   assert.equal(settings.imagePreset, 'custom');
   assert.equal(settings.customQuality, 73);
   assert.equal(settings.videoPreset, 'HQ 1080p30 Surround');
+  assert.equal(settings.videoOutputFormatMode, 'mp4');
   assert.ok(settings.updatedAt > 0);
 });
 
@@ -55,7 +58,8 @@ test('loadCompressionSettings normalizes invalid custom quality values', () => {
   storage.set('media-organizer-compression-settings', JSON.stringify({
     imagePreset: 'custom',
     customQuality: 173,
-    videoPreset: 'Fast 720p30'
+    videoPreset: 'Fast 720p30',
+    videoOutputFormatMode: 'avi'
   }));
 
   const settings = loadCompressionSettings();
@@ -63,4 +67,5 @@ test('loadCompressionSettings normalizes invalid custom quality values', () => {
   assert.equal(settings.imagePreset, 'custom');
   assert.equal(settings.customQuality, 100);
   assert.equal(settings.videoPreset, 'Fast 720p30');
+  assert.equal(settings.videoOutputFormatMode, 'preserve');
 });

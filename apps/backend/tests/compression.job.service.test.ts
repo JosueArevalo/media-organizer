@@ -82,11 +82,13 @@ test('startCompressionSession creates a resumable session and output scaffold', 
   const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8')) as {
     imageToolCommand: string;
     videoToolCommand: string;
+    videoOutputFormatMode: string;
     imageMagickCommand: string;
     exifToolCommand: string;
   };
   assert.equal(manifest.imageToolCommand, 'cjpeg');
   assert.equal(manifest.videoToolCommand, 'HandBrakeCLI');
+  assert.equal(manifest.videoOutputFormatMode, 'preserve');
   assert.ok(['magick', 'magick.exe'].includes(path.basename(manifest.imageMagickCommand).toLowerCase()));
   assert.equal(manifest.exifToolCommand, '');
 

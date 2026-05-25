@@ -64,6 +64,7 @@ test('compression session route forwards optional HEIC tool commands into the ma
       imageQuality: 80,
       imageProfileLabel: 'Balanced',
       videoPresetLabel: 'Fast 1080p30',
+      videoOutputFormatMode: 'mp4',
       imageToolCommand: 'cjpeg-static.exe',
       videoToolCommand: 'HandBrakeCLI.exe',
       imageMagickCommand: 'D:\\Tools\\ImageMagick\\magick.exe',
@@ -82,9 +83,11 @@ test('compression session route forwards optional HEIC tool commands into the ma
     manifest: {
       imageMagickCommand: string;
       exifToolCommand: string;
+      videoOutputFormatMode: string;
     };
   };
 
   assert.equal(payload.manifest.imageMagickCommand, 'D:\\Tools\\ImageMagick\\magick.exe');
   assert.equal(payload.manifest.exifToolCommand, 'D:\\Tools\\ExifTool\\exiftool.exe');
+  assert.equal(payload.manifest.videoOutputFormatMode, 'mp4');
 });

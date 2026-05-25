@@ -1,9 +1,11 @@
 export type CompressionImagePreset = 'balanced' | 'high' | 'aggressive' | 'custom';
+export type VideoOutputFormatMode = 'preserve' | 'mp4';
 
 export type CompressionSettingsSnapshot = {
   imagePreset: CompressionImagePreset;
   customQuality: number;
   videoPreset: string;
+  videoOutputFormatMode: VideoOutputFormatMode;
   updatedAt: number;
 };
 
@@ -11,6 +13,7 @@ const STORAGE_KEY = 'media-organizer-compression-settings';
 const DEFAULT_VIDEO_PRESET = 'Fast 1080p30';
 
 const IMAGE_PRESETS = new Set<CompressionImagePreset>(['balanced', 'high', 'aggressive', 'custom']);
+const VIDEO_OUTPUT_FORMAT_MODES = new Set<VideoOutputFormatMode>(['preserve', 'mp4']);
 
 const clampQuality = (value: number) => {
   if (Number.isNaN(value)) {
@@ -24,6 +27,7 @@ const createDefaultSnapshot = (): CompressionSettingsSnapshot => ({
   imagePreset: 'balanced',
   customQuality: 72,
   videoPreset: DEFAULT_VIDEO_PRESET,
+  videoOutputFormatMode: 'preserve',
   updatedAt: 0
 });
 
@@ -38,11 +42,15 @@ const normalizeSnapshot = (value: Partial<CompressionSettingsSnapshot> | null): 
   const videoPreset = typeof value?.videoPreset === 'string' && value.videoPreset.trim().length > 0
     ? value.videoPreset
     : defaultSnapshot.videoPreset;
+  const videoOutputFormatMode = VIDEO_OUTPUT_FORMAT_MODES.has(value?.videoOutputFormatMode as VideoOutputFormatMode)
+    ? value?.videoOutputFormatMode as VideoOutputFormatMode
+    : defaultSnapshot.videoOutputFormatMode;
 
   return {
     imagePreset,
     customQuality: clampQuality(customQuality),
     videoPreset,
+    videoOutputFormatMode,
     updatedAt: value?.updatedAt ?? defaultSnapshot.updatedAt
   };
 };
