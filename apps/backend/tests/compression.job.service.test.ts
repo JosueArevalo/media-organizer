@@ -27,7 +27,7 @@ if "%~1"=="--preset-list" (
   echo     Fast 1080p30
   exit /b 0
 )
-timeout /t ${delaySeconds} /nobreak >nul
+powershell.exe -NoProfile -Command "Start-Sleep -Milliseconds ${delayMilliseconds}"
 copy /Y "%~2" "%~4" >nul
 exit /b 0
 `

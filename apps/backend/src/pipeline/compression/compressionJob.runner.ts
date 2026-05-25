@@ -45,6 +45,7 @@ type ActiveCompressionItem = {
   id: string;
   sourcePath: string;
   operation: 'compress' | 'copy';
+  startedAt?: number;
 };
 
 type SelectionScope = {
