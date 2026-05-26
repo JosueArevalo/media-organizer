@@ -1063,6 +1063,11 @@ body {
   max-width: 320px;
 }
 
+.compression-video-options {
+  align-content: start;
+  min-height: 110px;
+}
+
 .compression-preset-select {
   border-radius: 8px;
   border: 1px solid var(--line);

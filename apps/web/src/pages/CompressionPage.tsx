@@ -1172,11 +1172,11 @@ export const CompressionPage = () => {
           </div>
         </div>
 
-        <div className="page-card">
+        <div className="page-card compression-video-card">
           <h3 className="page-section-title">🎬 {t('compression.videoTitle')}</h3>
           <p className="page-summary-note">{t('compression.videoNote')}</p>
 
-          <div className="page-option-list">
+          <div className="page-option-list compression-video-options">
             {videoPresetsState.status === 'idle' && (
               <p className="page-summary-note">{t('compression.configureHandBrake')}</p>
             )}
