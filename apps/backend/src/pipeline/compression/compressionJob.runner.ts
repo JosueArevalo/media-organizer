@@ -87,6 +87,30 @@ type OperationCounts = {
   failedCopyCount: number;
 };
 
+const getFileSize = (filePath: string) => {
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return 0;
+  }
+};
+
+const calculateCompletedSizeMetrics = (items: ScriptResultItem[]) => {
+  const completedItems = items.filter((item) => item.status === 'completed');
+
+  if (completedItems.length === 0) {
+    return { originalBytes: null, finalBytes: null };
+  }
+
+  return completedItems.reduce<{ originalBytes: number; finalBytes: number }>(
+    (totals, item) => ({
+      originalBytes: totals.originalBytes + getFileSize(item.source),
+      finalBytes: totals.finalBytes + getFileSize(item.output)
+    }),
+    { originalBytes: 0, finalBytes: 0 }
+  );
+};
+
 const executeCommand = async (
   command: string,
   args: string[],
@@ -483,6 +507,7 @@ const updateSessionAndCheckpoint = (
   );
 
   const mediaCounts = getPersistedMediaCounts(sessionId);
+  const sizeMetrics = calculateCompletedSizeMetrics([...payload.image.items, ...payload.video.items]);
   upsertExecutionHistory({
     sessionId,
     name: session?.name ?? null,
@@ -498,6 +523,8 @@ const updateSessionAndCheckpoint = (
     videoItems: mediaCounts.videoItems || payload.video.items.length,
     completedItems: payload.completedCount,
     failedItems: payload.failedCount,
+    originalBytes: sizeMetrics.originalBytes,
+    finalBytes: sizeMetrics.finalBytes,
     imageProfileLabel: payload.manifest.imageProfileLabel,
     videoPresetLabel: payload.manifest.videoPresetLabel,
     errorSummary: collectFailedItems(payload.image, payload.video)

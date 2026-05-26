@@ -37,6 +37,8 @@ export type ExecutionHistoryInput = {
   videoItems: number;
   completedItems: number;
   failedItems: number;
+  originalBytes?: number | null;
+  finalBytes?: number | null;
   imageProfileLabel: string | null;
   videoPresetLabel: string | null;
   errorSummary: Array<{ source: string; error: string | null }>;
@@ -59,6 +61,8 @@ export type ExecutionHistoryRecord = {
   videoItems: number;
   completedItems: number;
   failedItems: number;
+  originalBytes: number | null;
+  finalBytes: number | null;
   imageProfileLabel: string | null;
   videoPresetLabel: string | null;
   errorSummary: Array<{ source: string; error: string | null }>;
@@ -103,6 +107,8 @@ type ExecutionHistoryRow = {
   video_items: number;
   completed_items: number;
   failed_items: number;
+  original_bytes: number | null;
+  final_bytes: number | null;
   image_profile_label: string | null;
   video_preset_label: string | null;
   error_summary_json: string | null;
@@ -209,6 +215,8 @@ const toExecution = (row: ExecutionHistoryRow): ExecutionHistoryRecord => ({
   videoItems: row.video_items,
   completedItems: row.completed_items,
   failedItems: row.failed_items,
+  originalBytes: row.original_bytes,
+  finalBytes: row.final_bytes,
   imageProfileLabel: row.image_profile_label,
   videoPresetLabel: row.video_preset_label,
   errorSummary: parseErrorSummary(row.error_summary_json),
@@ -241,6 +249,8 @@ const listExecutionRows = () => {
           video_items,
           completed_items,
           failed_items,
+          original_bytes,
+          final_bytes,
           image_profile_label,
           video_preset_label,
           error_summary_json,
@@ -283,11 +293,13 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
         video_items,
         completed_items,
         failed_items,
+        original_bytes,
+        final_bytes,
         image_profile_label,
         video_preset_label,
         error_summary_json,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
         name = excluded.name,
         source_dir = excluded.source_dir,
@@ -302,6 +314,8 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
         video_items = excluded.video_items,
         completed_items = excluded.completed_items,
         failed_items = excluded.failed_items,
+        original_bytes = excluded.original_bytes,
+        final_bytes = excluded.final_bytes,
         image_profile_label = excluded.image_profile_label,
         video_preset_label = excluded.video_preset_label,
         error_summary_json = excluded.error_summary_json
@@ -322,6 +336,8 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
     input.videoItems,
     input.completedItems,
     input.failedItems,
+    input.originalBytes ?? null,
+    input.finalBytes ?? null,
     input.imageProfileLabel,
     input.videoPresetLabel,
     JSON.stringify(input.errorSummary.slice(0, 10)),
@@ -476,6 +492,8 @@ export const getDashboardSummary = (): DashboardSummary => {
           videoItems: 0,
           completedItems: 0,
           failedItems: 0,
+          originalBytes: null,
+          finalBytes: null,
           imageProfileLabel: null,
           videoPresetLabel: null,
           errorSummary: [],

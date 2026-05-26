@@ -44,12 +44,16 @@ test('dashboard history can be listed and deleted independently', async () => {
     videoItems: 1,
     completedItems: 3,
     failedItems: 0,
+    originalBytes: 3000,
+    finalBytes: 2100,
     imageProfileLabel: 'Balanced',
     videoPresetLabel: 'Fast 1080p30',
     errorSummary: []
   });
 
   assert.equal(listExecutionHistory().length, 1);
+  assert.equal(listExecutionHistory()[0].originalBytes, 3000);
+  assert.equal(listExecutionHistory()[0].finalBytes, 2100);
   assert.equal(getDashboardSummary().totals.filesProcessed, 3);
   assert.equal(deleteExecutionHistory(execution.id), true);
   assert.equal(listExecutionHistory().length, 0);
@@ -118,6 +122,8 @@ test('dashboard serializes verification snapshots and defaults old executions to
   assert.deepEqual(verified?.verification.destination, { total: 2, images: 1, videos: 1, unknown: 0 });
   assert.equal(legacy?.verification.status, 'not_verified');
   assert.deepEqual(legacy?.verification.expected, { total: 0, images: 0, videos: 0, unknown: 0 });
+  assert.equal(legacy?.originalBytes, null);
+  assert.equal(legacy?.finalBytes, null);
 });
 
 test('runtime reset tables do not remove execution history', async () => {

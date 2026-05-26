@@ -34,7 +34,7 @@ const formatDateTime = (value: string | null) => {
   }).format(date);
 };
 
-const formatDuration = (start: string, end: string | null) => {
+const formatDuration = (start: string, end: string | null, t: (key: TranslationKey) => string) => {
   const startMs = new Date(start).getTime();
   const endMs = end ? new Date(end).getTime() : Date.now();
 
@@ -42,17 +42,60 @@ const formatDuration = (start: string, end: string | null) => {
     return '-';
   }
 
-  const minutes = Math.max(1, Math.round((endMs - startMs) / 60000));
-  if (minutes < 60) {
-    return `${minutes} min`;
+  const totalSeconds = Math.max(0, Math.round((endMs - startMs) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+
+  if (hours > 0) {
+    parts.push(`${hours} ${t(hours === 1 ? 'dashboard.duration.hour' : 'dashboard.duration.hours')}`);
   }
 
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes ? `${hours} h ${remainingMinutes} min` : `${hours} h`;
+  if (minutes > 0 || hours > 0) {
+    parts.push(`${minutes} ${t(minutes === 1 ? 'dashboard.duration.minute' : 'dashboard.duration.minutes')}`);
+  }
+
+  if (seconds > 0 || parts.length === 0) {
+    parts.push(`${seconds} ${t(seconds === 1 ? 'dashboard.duration.second' : 'dashboard.duration.seconds')}`);
+  }
+
+  return parts.join(' ');
 };
 
 const basename = (value: string) => value.split(/[\\/]/).filter(Boolean).pop() ?? value;
+
+const formatBytes = (value: number | null) => {
+  if (value === null) {
+    return '-';
+  }
+
+  if (value <= 0) {
+    return '0 MB';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const size = value / 1024 ** exponent;
+  const decimals = exponent < 2 || size >= 10 ? 0 : 1;
+
+  return `${size.toFixed(decimals)} ${units[exponent]}`;
+};
+
+const formatSizeDelta = (originalBytes: number | null, finalBytes: number | null) => {
+  if (originalBytes === null || finalBytes === null || originalBytes <= 0) {
+    return '-';
+  }
+
+  const delta = originalBytes - finalBytes;
+  const percentage = Math.abs((delta / originalBytes) * 100).toFixed(1);
+
+  if (delta >= 0) {
+    return `${formatBytes(delta)} (${percentage}%)`;
+  }
+
+  return `+${formatBytes(Math.abs(delta))} (${percentage}%)`;
+};
 
 const STATUS_LABEL_KEYS: Record<ExecutionStatus, TranslationKey> = {
   running: 'dashboard.status.running',
@@ -428,10 +471,13 @@ export const DashboardPage = () => {
                   {isExpanded && (
                     <div className="dashboard-execution-details">
                       <div className="dashboard-detail-grid">
-                        <p><strong>{t('dashboard.started')}</strong><br />{formatDateTime(execution.startedAt)}</p>
-                        <p><strong>{t('dashboard.finished')}</strong><br />{formatDateTime(execution.finishedAt)}</p>
-                        <p><strong>{t('dashboard.duration')}</strong><br />{formatDuration(execution.startedAt, execution.finishedAt)}</p>
+                        <p><strong>{t('dashboard.compressionStarted')}</strong><br />{formatDateTime(execution.startedAt)}</p>
+                        <p><strong>{t('dashboard.compressionFinished')}</strong><br />{formatDateTime(execution.finishedAt)}</p>
+                        <p><strong>{t('dashboard.compressionDuration')}</strong><br />{formatDuration(execution.startedAt, execution.finishedAt, t)}</p>
                         <p><strong>{t('dashboard.media')}</strong><br />{execution.imageItems} {t('dashboard.photos')} / {execution.videoItems} {t('dashboard.videos')}</p>
+                        <p><strong>{t('dashboard.originalSize')}</strong><br />{formatBytes(execution.originalBytes)}</p>
+                        <p><strong>{t('dashboard.finalSize')}</strong><br />{formatBytes(execution.finalBytes)}</p>
+                        <p><strong>{t('dashboard.savedSize')}</strong><br />{formatSizeDelta(execution.originalBytes, execution.finalBytes)}</p>
                         <p><strong>{t('dashboard.source')}</strong><br />{execution.sourceDir}</p>
                         <p><strong>{t('dashboard.destination')}</strong><br />{execution.outputRoot ?? execution.outputDir}</p>
                         <p><strong>{t('dashboard.presets')}</strong><br />{execution.imageProfileLabel ?? '-'} / {execution.videoPresetLabel ?? '-'}</p>
