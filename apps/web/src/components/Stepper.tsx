@@ -8,6 +8,7 @@ export type StepConfig = {
   description: string;
   path: string;
   state: 'active' | 'pending' | 'locked' | 'completed';
+  isNavigable?: boolean;
 };
 
 
@@ -45,8 +46,8 @@ export const Stepper = ({ steps }: StepperProps) => {
 
         return (
           <div key={step.id}>
-            {step.state === 'locked' ? (
-              <div className={className} aria-disabled="true" title={t('workflow.lockedTitle')}>
+            {step.state === 'locked' || step.isNavigable === false ? (
+              <div className={className} aria-disabled="true" title={step.state === 'locked' ? t('workflow.lockedTitle') : undefined}>
                 {content}
               </div>
             ) : (

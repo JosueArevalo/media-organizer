@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { StatCard } from '../components/StatCard';
+import { Link, useNavigate } from 'react-router-dom';
+import { useCompressionSessionState } from '../hooks/useCompressionJobState';
+import { useExportJobState } from '../hooks/useExportJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
+import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation, type TranslationKey } from '../i18n';
+import { resetRuntimeStateWithBackend } from '../services/app-maintenance.store';
 import { loadEncoderSettings } from '../services/encoder-settings.store';
 import {
   deleteDashboardExecution,
@@ -12,8 +15,8 @@ import {
   type BackendHealth,
   type DashboardExecution,
   type DashboardSummary,
-  type ExecutionVerification,
-  type ExecutionStatus
+  type ExecutionStatus,
+  type ExecutionVerification
 } from '../services/dashboard.service';
 
 const formatDateTime = (value: string | null) => {
@@ -32,7 +35,7 @@ const formatDateTime = (value: string | null) => {
   }).format(date);
 };
 
-const formatDuration = (start: string, end: string | null) => {
+const formatDuration = (start: string, end: string | null, t: (key: TranslationKey) => string) => {
   const startMs = new Date(start).getTime();
   const endMs = end ? new Date(end).getTime() : Date.now();
 
@@ -40,17 +43,60 @@ const formatDuration = (start: string, end: string | null) => {
     return '-';
   }
 
-  const minutes = Math.max(1, Math.round((endMs - startMs) / 60000));
-  if (minutes < 60) {
-    return `${minutes} min`;
+  const totalSeconds = Math.max(0, Math.round((endMs - startMs) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+
+  if (hours > 0) {
+    parts.push(`${hours} ${t(hours === 1 ? 'dashboard.duration.hour' : 'dashboard.duration.hours')}`);
   }
 
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes ? `${hours} h ${remainingMinutes} min` : `${hours} h`;
+  if (minutes > 0 || hours > 0) {
+    parts.push(`${minutes} ${t(minutes === 1 ? 'dashboard.duration.minute' : 'dashboard.duration.minutes')}`);
+  }
+
+  if (seconds > 0 || parts.length === 0) {
+    parts.push(`${seconds} ${t(seconds === 1 ? 'dashboard.duration.second' : 'dashboard.duration.seconds')}`);
+  }
+
+  return parts.join(' ');
 };
 
 const basename = (value: string) => value.split(/[\\/]/).filter(Boolean).pop() ?? value;
+
+const formatBytes = (value: number | null) => {
+  if (value === null) {
+    return '-';
+  }
+
+  if (value <= 0) {
+    return '0 MB';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const size = value / 1024 ** exponent;
+  const decimals = exponent < 2 || size >= 10 ? 0 : 1;
+
+  return `${size.toFixed(decimals)} ${units[exponent]}`;
+};
+
+const formatSizeDelta = (originalBytes: number | null, finalBytes: number | null) => {
+  if (originalBytes === null || finalBytes === null || originalBytes <= 0) {
+    return '-';
+  }
+
+  const delta = originalBytes - finalBytes;
+  const percentage = Math.abs((delta / originalBytes) * 100).toFixed(1);
+
+  if (delta >= 0) {
+    return `${formatBytes(delta)} (${percentage}%)`;
+  }
+
+  return `+${formatBytes(Math.abs(delta))} (${percentage}%)`;
+};
 
 const STATUS_LABEL_KEYS: Record<ExecutionStatus, TranslationKey> = {
   running: 'dashboard.status.running',
@@ -69,11 +115,14 @@ const statusClassName = (status: ExecutionStatus) => `dashboard-status dashboard
 
 const getExecutionTitle = (execution: DashboardExecution) => execution.name || basename(execution.sourceDir) || execution.sessionId;
 
-const VerificationSummary = ({ verification, compact = false }: { verification: ExecutionVerification; compact?: boolean }) => {
+const hasRealVerification = (verification: ExecutionVerification | null | undefined) =>
+  Boolean(verification?.verifiedAt && verification.expected.total > 0);
+
+const VerificationSummary = ({ verification }: { verification: ExecutionVerification }) => {
   const { t } = useTranslation();
 
   return (
-    <div className={`verification-panel verification-panel-${verification.status} ${compact ? 'verification-panel-compact' : ''}`}>
+    <div className={`verification-panel verification-panel-${verification.status}`}>
       <div className="verification-head">
         <div>
           <p className="page-section-title">{t('verification.title')}</p>
@@ -119,7 +168,11 @@ const VerificationSummary = ({ verification, compact = false }: { verification: 
 
 export const DashboardPage = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { sourceSelection, destinationSelection } = useFolderSelections();
+  const compressionSessionState = useCompressionSessionState();
+  const groupingSessionState = useGroupingSessionState();
+  const exportJobState = useExportJobState();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [executions, setExecutions] = useState<DashboardExecution[]>([]);
   const [health, setHealth] = useState<BackendHealth | null>(null);
@@ -127,6 +180,7 @@ export const DashboardPage = () => {
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [expandedExecutionId, setExpandedExecutionId] = useState<string | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
+  const [isStartingNewSession, setIsStartingNewSession] = useState(false);
   const [hasConfiguredEncoders, setHasConfiguredEncoders] = useState(true);
 
   const refreshDashboard = async () => {
@@ -141,16 +195,14 @@ export const DashboardPage = () => {
   useEffect(() => {
     let isActive = true;
 
-    void refreshDashboard()
+    refreshDashboard()
       .then(() => {
-        if (isActive) {
-          setDashboardError(null);
-        }
+        if (!isActive) return;
+        setDashboardError(null);
       })
       .catch((error) => {
-        if (isActive) {
-          setDashboardError(error instanceof Error ? error.message : t('dashboard.loadError'));
-        }
+        if (!isActive) return;
+        setDashboardError(error instanceof Error ? error.message : t('dashboard.loadError'));
       });
 
     getBackendHealth()
@@ -172,47 +224,197 @@ export const DashboardPage = () => {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [t]);
+
+  const currentState = (() => {
+    if (exportJobState.status === 'running' || exportJobState.status === 'paused') {
+      return {
+        title: t('dashboard.workflow.exportRunningTitle'),
+        description: t('dashboard.workflow.exportRunningDescription'),
+        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+      };
+    }
+
+    if (exportJobState.status === 'failed') {
+      return {
+        title: t('dashboard.workflow.exportFailedTitle'),
+        description: exportJobState.errorMessage ?? t('dashboard.workflow.exportFailedDescription'),
+        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+      };
+    }
+
+    if (exportJobState.status === 'completed') {
+      return {
+        title: t('dashboard.workflow.exportCompletedTitle'),
+        description: t('dashboard.workflow.exportCompletedDescription'),
+        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+      };
+    }
+
+    if (groupingSessionState.status === 'completed') {
+      return {
+        title: t('dashboard.workflow.groupingCompletedTitle'),
+        description: t('dashboard.workflow.groupingCompletedDescription', {
+          destination: groupingSessionState.outputRootLabel ?? destinationSelection?.path ?? '-'
+        }),
+        action: { to: '/export', label: t('dashboard.action.openExport') }
+      };
+    }
+
+    if (groupingSessionState.status === 'running' || groupingSessionState.status === 'paused') {
+      return {
+        title: t('dashboard.workflow.groupingRunningTitle'),
+        description: t('dashboard.workflow.groupingRunningDescription'),
+        action: { to: '/grouping', label: t('dashboard.action.openGrouping') }
+      };
+    }
+
+    if (groupingSessionState.status === 'failed') {
+      return {
+        title: t('dashboard.workflow.groupingFailedTitle'),
+        description: groupingSessionState.errorMessage ?? t('dashboard.workflow.groupingFailedDescription'),
+        action: { to: '/grouping', label: t('dashboard.action.openGrouping') }
+      };
+    }
+
+    if (compressionSessionState.status === 'running') {
+      return {
+        title: t('dashboard.workflow.compressionRunningTitle'),
+        description: t('dashboard.workflow.compressionRunningDescription'),
+        action: { to: '/compression', label: t('dashboard.action.openProgress') }
+      };
+    }
+
+    if (compressionSessionState.status === 'completed') {
+      return {
+        title: t('dashboard.workflow.compressionCompletedTitle'),
+        description: t('dashboard.workflow.compressionCompletedDescription'),
+        action: { to: '/grouping', label: t('dashboard.action.openGrouping') }
+      };
+    }
+
+    if (compressionSessionState.status === 'failed') {
+      return {
+        title: t('dashboard.workflow.compressionFailedTitle'),
+        description: compressionSessionState.errorMessage ?? t('dashboard.workflow.compressionFailedDescription'),
+        action: { to: '/compression', label: t('dashboard.action.openProgress') }
+      };
+    }
+
+    if (!sourceSelection || !destinationSelection) {
+      return {
+        title: t('dashboard.workflow.chooseFoldersTitle'),
+        description: t('dashboard.workflow.chooseFoldersDescription'),
+        action: { to: '/import', label: t('dashboard.action.chooseFolders') }
+      };
+    }
+
+    if (!hasConfiguredEncoders) {
+      return {
+        title: t('dashboard.workflow.configureToolsTitle'),
+        description: t('dashboard.workflow.configureToolsDescription'),
+        action: { to: '/settings', label: t('dashboard.action.configureTools') }
+      };
+    }
+
+    return {
+      title: t('dashboard.workflow.readyTitle'),
+      description: t('dashboard.workflow.readyDescription'),
+      action: { to: '/selection', label: t('dashboard.action.reviewSelection') }
+    };
+  })();
 
   const localAlerts = useMemo(() => {
-    const alerts = [...(summary?.alerts ?? [])];
+    const alerts: Array<{ id: string; level: 'info' | 'warning' | 'error'; message: string }> = [];
 
     if (healthError) {
-      alerts.unshift({
+      alerts.push({
         id: 'backend-offline',
-        level: 'error' as const,
+        level: 'error',
         message: t('dashboard.alert.backendOffline')
       });
     }
 
-    if (!hasConfiguredEncoders) {
+    if (!hasConfiguredEncoders && sourceSelection && destinationSelection && compressionSessionState.status === 'idle') {
       alerts.push({
         id: 'encoders-missing',
-        level: 'warning' as const,
+        level: 'warning',
         message: t('dashboard.alert.encodersMissing')
       });
     }
 
+    if (compressionSessionState.status === 'failed' && compressionSessionState.errorMessage) {
+      alerts.push({
+        id: 'compression-failed',
+        level: 'error',
+        message: compressionSessionState.errorMessage
+      });
+    }
+
+    if (groupingSessionState.status === 'failed' && groupingSessionState.errorMessage) {
+      alerts.push({
+        id: 'grouping-failed',
+        level: 'error',
+        message: groupingSessionState.errorMessage
+      });
+    }
+
+    if (exportJobState.status === 'failed' && exportJobState.errorMessage) {
+      alerts.push({
+        id: 'export-failed',
+        level: 'error',
+        message: exportJobState.errorMessage
+      });
+    }
+
     return alerts;
-  }, [hasConfiguredEncoders, healthError, summary?.alerts, t]);
+  }, [
+    compressionSessionState.errorMessage,
+    compressionSessionState.status,
+    destinationSelection,
+    exportJobState.errorMessage,
+    exportJobState.status,
+    groupingSessionState.errorMessage,
+    groupingSessionState.status,
+    hasConfiguredEncoders,
+    healthError,
+    sourceSelection,
+    t
+  ]);
 
-  const nextAction = (() => {
-    if (summary?.currentExecution?.status === 'running') {
-      return { to: '/compression', label: t('dashboard.action.openProgress') };
+  const highlightedVerification = summary?.lastExecution?.groupingStatus === 'completed' && hasRealVerification(summary.lastExecution.verification)
+    ? summary.lastExecution.verification
+    : null;
+
+  const canStartNewSession =
+    groupingSessionState.status === 'completed' ||
+    exportJobState.status === 'running' ||
+    exportJobState.status === 'paused' ||
+    exportJobState.status === 'completed' ||
+    exportJobState.status === 'failed';
+
+  const handleStartNewSession = async () => {
+    const confirmed = window.confirm(t('dashboard.newSessionConfirm'));
+    if (!confirmed) {
+      return;
     }
 
-    if (!hasConfiguredEncoders) {
-      return { to: '/settings', label: t('dashboard.action.configureTools') };
+    setIsStartingNewSession(true);
+    setDashboardError(null);
+
+    try {
+      await resetRuntimeStateWithBackend();
+      navigate('/import', { replace: true });
+    } catch (error) {
+      setDashboardError(
+        t('dashboard.newSessionError', {
+          message: error instanceof Error ? error.message : t('dashboard.unknownError')
+        })
+      );
+    } finally {
+      setIsStartingNewSession(false);
     }
-
-    if (!sourceSelection || !destinationSelection) {
-      return { to: '/import', label: t('dashboard.action.chooseFolders') };
-    }
-
-    return { to: '/compression', label: t('dashboard.action.startCompression') };
-  })();
-
-  const highlightedVerification = summary?.currentExecution?.verification ?? summary?.lastExecution?.verification ?? null;
+  };
 
   const handleDeleteExecution = async (executionId: string) => {
     const confirmed = window.confirm(t('dashboard.deleteConfirm'));
@@ -239,27 +441,24 @@ export const DashboardPage = () => {
       <section className="panel panel-highlight dashboard-hero">
         <div>
           <p className="panel-kicker">{t('dashboard.status')}</p>
-          <h2 className="panel-title">{summary?.currentExecution ? t('dashboard.currentTitle') : t('dashboard.readyTitle')}</h2>
-          <p className="panel-description">
-            {summary?.currentExecution
-              ? t('dashboard.currentDescription', { name: getExecutionTitle(summary.currentExecution) })
-              : summary?.lastExecution
-                ? t('dashboard.lastDescription', { name: getExecutionTitle(summary.lastExecution), status: t(STATUS_LABEL_KEYS[summary.lastExecution.status]) })
-                : t('dashboard.emptyDescription')}
-          </p>
+          <h2 className="panel-title">{currentState.title}</h2>
+          <p className="panel-description">{currentState.description}</p>
         </div>
         <div className="action-row">
-          <Link to={nextAction.to} className="btn btn-primary">
-            {nextAction.label}
+          <Link to={currentState.action.to} className="btn btn-primary">
+            {currentState.action.label}
           </Link>
+          {canStartNewSession && (
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => void handleStartNewSession()}
+              disabled={isStartingNewSession}
+            >
+              {isStartingNewSession ? t('dashboard.action.startingNewSession') : t('dashboard.action.startNewSession')}
+            </button>
+          )}
         </div>
-      </section>
-
-      <section className="stats-grid" aria-label={t('dashboard.stats.aria')}>
-        <StatCard title={t('dashboard.stats.executions')} value={`${summary?.totals.executions ?? 0}`} hint={t('dashboard.stats.executionsHint')} />
-        <StatCard title={t('dashboard.stats.completed')} value={`${summary?.totals.completedExecutions ?? 0}`} hint={t('dashboard.stats.completedHint')} />
-        <StatCard title={t('dashboard.stats.filesProcessed')} value={`${summary?.totals.filesProcessed ?? 0}`} hint={t('dashboard.stats.filesProcessedHint')} />
-        <StatCard title={t('dashboard.stats.failedItems')} value={`${summary?.totals.failedItems ?? 0}`} hint={t('dashboard.stats.failedItemsHint')} />
       </section>
 
       {dashboardError && <p className="error">{dashboardError}</p>}
@@ -315,16 +514,19 @@ export const DashboardPage = () => {
                   {isExpanded && (
                     <div className="dashboard-execution-details">
                       <div className="dashboard-detail-grid">
-                        <p><strong>{t('dashboard.started')}</strong><br />{formatDateTime(execution.startedAt)}</p>
-                        <p><strong>{t('dashboard.finished')}</strong><br />{formatDateTime(execution.finishedAt)}</p>
-                        <p><strong>{t('dashboard.duration')}</strong><br />{formatDuration(execution.startedAt, execution.finishedAt)}</p>
+                        <p><strong>{t('dashboard.compressionStarted')}</strong><br />{formatDateTime(execution.startedAt)}</p>
+                        <p><strong>{t('dashboard.compressionFinished')}</strong><br />{formatDateTime(execution.finishedAt)}</p>
+                        <p><strong>{t('dashboard.compressionDuration')}</strong><br />{formatDuration(execution.startedAt, execution.finishedAt, t)}</p>
                         <p><strong>{t('dashboard.media')}</strong><br />{execution.imageItems} {t('dashboard.photos')} / {execution.videoItems} {t('dashboard.videos')}</p>
+                        <p><strong>{t('dashboard.originalSize')}</strong><br />{formatBytes(execution.originalBytes)}</p>
+                        <p><strong>{t('dashboard.finalSize')}</strong><br />{formatBytes(execution.finalBytes)}</p>
+                        <p><strong>{t('dashboard.savedSize')}</strong><br />{formatSizeDelta(execution.originalBytes, execution.finalBytes)}</p>
                         <p><strong>{t('dashboard.source')}</strong><br />{execution.sourceDir}</p>
                         <p><strong>{t('dashboard.destination')}</strong><br />{execution.outputRoot ?? execution.outputDir}</p>
                         <p><strong>{t('dashboard.presets')}</strong><br />{execution.imageProfileLabel ?? '-'} / {execution.videoPresetLabel ?? '-'}</p>
                         <p><strong>{t('dashboard.grouping')}</strong><br />{execution.groupingStatus ? `${t(STATUS_LABEL_KEYS[execution.groupingStatus])} (${execution.groupingCompletedItems}/${execution.groupingTotalItems})` : t('dashboard.groupingNone')}</p>
                       </div>
-                      <VerificationSummary verification={execution.verification} compact />
+                      {hasRealVerification(execution.verification) && <VerificationSummary verification={execution.verification} />}
                       {execution.errorSummary.length > 0 && (
                         <div className="dashboard-error-summary">
                           <strong>{t('dashboard.errors')}</strong>

@@ -5,7 +5,7 @@ import {
   type EncoderSettingsSnapshot
 } from '../services/encoder-settings.store';
 import { loadFolderSelections } from '../services/folder-selection.store';
-import { resetAllPersistentAppState } from '../services/app-maintenance.store';
+import { resetRuntimeStateWithBackend } from '../services/app-maintenance.store';
 import {
   COMPLETION_NOTIFICATION_EVENT_KEYS,
   loadCompletionNotificationSettings,
@@ -401,23 +401,7 @@ const SettingsPage = () => {
     setIsResettingState(true);
 
     try {
-      await resetAllPersistentAppState();
-
-      const response = await fetch('/api/system/maintenance/reset-persistent-state', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          confirmation: 'RESET_STATE'
-        })
-      });
-
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error(body || `Request failed with status ${response.status}`);
-      }
-
+      await resetRuntimeStateWithBackend();
       setMaintenanceMessage({
         type: 'success',
         text: t('settings.resetCompleted')

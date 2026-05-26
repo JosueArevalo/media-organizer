@@ -37,6 +37,8 @@ export type ExecutionHistoryInput = {
   videoItems: number;
   completedItems: number;
   failedItems: number;
+  originalBytes?: number | null;
+  finalBytes?: number | null;
   imageProfileLabel: string | null;
   videoPresetLabel: string | null;
   errorSummary: Array<{ source: string; error: string | null }>;
@@ -59,6 +61,8 @@ export type ExecutionHistoryRecord = {
   videoItems: number;
   completedItems: number;
   failedItems: number;
+  originalBytes: number | null;
+  finalBytes: number | null;
   imageProfileLabel: string | null;
   videoPresetLabel: string | null;
   errorSummary: Array<{ source: string; error: string | null }>;
@@ -103,6 +107,8 @@ type ExecutionHistoryRow = {
   video_items: number;
   completed_items: number;
   failed_items: number;
+  original_bytes: number | null;
+  final_bytes: number | null;
   image_profile_label: string | null;
   video_preset_label: string | null;
   error_summary_json: string | null;
@@ -209,6 +215,8 @@ const toExecution = (row: ExecutionHistoryRow): ExecutionHistoryRecord => ({
   videoItems: row.video_items,
   completedItems: row.completed_items,
   failedItems: row.failed_items,
+  originalBytes: row.original_bytes,
+  finalBytes: row.final_bytes,
   imageProfileLabel: row.image_profile_label,
   videoPresetLabel: row.video_preset_label,
   errorSummary: parseErrorSummary(row.error_summary_json),
@@ -241,6 +249,8 @@ const listExecutionRows = () => {
           video_items,
           completed_items,
           failed_items,
+          original_bytes,
+          final_bytes,
           image_profile_label,
           video_preset_label,
           error_summary_json,
@@ -283,11 +293,13 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
         video_items,
         completed_items,
         failed_items,
+        original_bytes,
+        final_bytes,
         image_profile_label,
         video_preset_label,
         error_summary_json,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
         name = excluded.name,
         source_dir = excluded.source_dir,
@@ -302,6 +314,8 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
         video_items = excluded.video_items,
         completed_items = excluded.completed_items,
         failed_items = excluded.failed_items,
+        original_bytes = excluded.original_bytes,
+        final_bytes = excluded.final_bytes,
         image_profile_label = excluded.image_profile_label,
         video_preset_label = excluded.video_preset_label,
         error_summary_json = excluded.error_summary_json
@@ -322,6 +336,8 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
     input.videoItems,
     input.completedItems,
     input.failedItems,
+    input.originalBytes ?? null,
+    input.finalBytes ?? null,
     input.imageProfileLabel,
     input.videoPresetLabel,
     JSON.stringify(input.errorSummary.slice(0, 10)),
@@ -418,7 +434,7 @@ const getActiveRuntimeSession = (): SessionRecord | null => {
       `
         SELECT id, name, source_dir, output_dir, status, created_at, updated_at, last_opened_at
         FROM sessions
-        WHERE status IN ('draft', 'scanned', 'ready', 'running', 'paused')
+        WHERE status IN ('running', 'paused')
         ORDER BY datetime(updated_at) DESC
         LIMIT 1
       `
@@ -457,7 +473,7 @@ export const getDashboardSummary = (): DashboardSummary => {
   const executions = listExecutionRows().map(toExecution);
   const activeRuntimeSession = getActiveRuntimeSession();
   const currentExecution =
-    executions.find((execution) => execution.status === 'running') ??
+    executions.find((execution) => execution.status === 'running' || execution.groupingStatus === 'running') ??
     (activeRuntimeSession
       ? {
           id: activeRuntimeSession.id,
@@ -476,6 +492,8 @@ export const getDashboardSummary = (): DashboardSummary => {
           videoItems: 0,
           completedItems: 0,
           failedItems: 0,
+          originalBytes: null,
+          finalBytes: null,
           imageProfileLabel: null,
           videoPresetLabel: null,
           errorSummary: [],
@@ -484,9 +502,9 @@ export const getDashboardSummary = (): DashboardSummary => {
           groupingCompletedItems: 0,
           groupingFailedItems: 0,
           verification: createNotVerifiedSnapshot(null)
-        }
+      }
       : null);
-  const lastExecution = executions.find((execution) => execution.status !== 'running') ?? executions[0] ?? null;
+  const lastExecution = executions.find((execution) => execution.id !== currentExecution?.id && execution.status !== 'running') ?? executions[0] ?? null;
   const failedExecutions = executions.filter((execution) => execution.status === 'failed').length;
   const alerts: DashboardSummary['alerts'] = [];
 
@@ -498,15 +516,15 @@ export const getDashboardSummary = (): DashboardSummary => {
     });
   }
 
-  if (lastExecution?.status === 'failed') {
+  if (currentExecution?.status === 'failed') {
     alerts.push({
-      id: 'last-failed',
+      id: 'current-failed',
       level: 'error',
-      message: 'The last execution finished with errors.'
+      message: 'The current workflow has errors.'
     });
   }
 
-  if (executions.some((execution) => execution.failedItems > 0 || execution.groupingFailedItems > 0)) {
+  if (currentExecution && (currentExecution.failedItems > 0 || currentExecution.groupingFailedItems > 0)) {
     alerts.push({
       id: 'failed-items',
       level: 'warning',

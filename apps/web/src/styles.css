@@ -1134,6 +1134,24 @@ body {
   accent-color: var(--accent);
 }
 
+.compression-controls-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.compression-controls-fieldset:disabled .page-option,
+.compression-controls-fieldset:disabled .compression-custom-quality,
+.compression-controls-fieldset:disabled .compression-video-preset {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.compression-controls-fieldset:disabled input,
+.compression-controls-fieldset:disabled select {
+  cursor: not-allowed;
+}
+
 .page-option-label {
   font-size: 13px;
   color: var(--text-muted);
@@ -1697,6 +1715,11 @@ body {
   background: rgba(20, 184, 166, 0.16);
   color: var(--text);
   font-weight: 700;
+}
+
+.selection-structure-toggle button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .selection-tree-file {
@@ -2321,6 +2344,12 @@ body {
   font-weight: 700;
 }
 
+.grouping-rule-chip:disabled,
+.grouping-option-field select:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .grouping-strategy-options {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2499,7 +2528,9 @@ body {
   padding: 5px 7px;
 }
 
-.grouping-folder-actions button:disabled {
+.grouping-folder-actions button:disabled,
+.grouping-section-head button:disabled,
+.grouping-template-row button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -2578,6 +2609,15 @@ body {
 .grouping-media-card:hover {
   transform: translateY(-1px);
   box-shadow: var(--soft-shadow);
+}
+
+.grouping-workspace.is-read-only .grouping-media-card {
+  cursor: default;
+}
+
+.grouping-workspace.is-read-only .grouping-media-card:hover {
+  transform: none;
+  box-shadow: none;
 }
 
 .grouping-media-card.is-selected {

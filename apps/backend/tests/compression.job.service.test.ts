@@ -210,6 +210,13 @@ test('executeCompressionSession counts copied excluded media in progress while p
   assert.equal(result.completedCount, 1);
   assert.equal(result.failedCount, 1);
 
+  const { listExecutionHistory } = await import('../src/dashboard/dashboard.service.js?compression-size-metrics=1');
+  const execution = listExecutionHistory().find((item) => item.sessionId === started.session.id);
+  const copiedSourceSize = fs.statSync(path.join(scopedSourceDir, 'exclude', 'copied.jpg')).size;
+  const copiedOutputSize = fs.statSync(path.join(started.outputRoot, 'exclude', 'copied.jpg')).size;
+  assert.equal(execution?.originalBytes, copiedSourceSize);
+  assert.equal(execution?.finalBytes, copiedOutputSize);
+
   const progress = getCompressionProgress(started.session.id);
   assert.ok(progress);
   assert.equal(progress?.total, 2);
