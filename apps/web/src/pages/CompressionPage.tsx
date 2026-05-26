@@ -799,6 +799,22 @@ export const CompressionPage = () => {
 
     return null;
   })();
+  const compressionSessionMessage = (() => {
+    if (compressionSessionState.status === 'running') {
+      return t('compression.running');
+    }
+
+    if (compressionSessionState.status === 'completed') {
+      return t('compression.complete');
+    }
+
+    if (compressionSessionState.status === 'failed') {
+      return null;
+    }
+
+    return compressionSetupMessage ?? t('compression.idle');
+  })();
+  const compressionSessionWarningMessage = toolWarnings.join(' ');
   const handleStartCompression = async () => {
     if (!destinationSelection || !sourceSelection || mediaStatsState.status === 'error') {
       return;
@@ -954,29 +970,24 @@ export const CompressionPage = () => {
         <p className="page-subtitle">{t('compression.subtitle')}</p>
       </div>
 
-      <div className="page-card">
+      <div className="page-card compression-session-card">
         <p className="page-section-title">{t('compression.session')}</p>
-        <p className="page-summary-note">
-          {t('compression.outputs', { destination: destinationPath ? ` (${destinationPath})` : '' })}
-        </p>
-        {!canStartRealCompression && compressionSetupMessage && (
-          <p className="page-summary-note">
-            {compressionSetupMessage}
+        <div className="compression-session-lines">
+          <p className="page-summary-note compression-session-line">
+            {t('compression.outputs', { destination: destinationPath ? ` (${destinationPath})` : '' })}
           </p>
-        )}
-        {toolWarnings.map((warning) => (
-          <p className="page-summary-note compression-warning" key={warning}>
-            {warning}
+          <p className="page-summary-note compression-session-line">
+            {compressionSessionMessage}
           </p>
-        ))}
+          <p className="page-summary-note compression-session-line compression-warning">
+            {compressionSessionWarningMessage}
+          </p>
+        </div>
         {backendError && (
           <pre className="error compression-error-details">
             {backendError}
           </pre>
         )}
-        {compressionSessionState.status === 'idle' && <p className="page-summary-note">{t('compression.idle')}</p>}
-        {compressionSessionState.status === 'running' && <p className="page-summary-note">{t('compression.running')}</p>}
-        {compressionSessionState.status === 'completed' && <p className="page-summary-note">{t('compression.complete')}</p>}
         {compressionSessionState.status === 'failed' && (
           <div className="compression-error-section">
             <p className="error">

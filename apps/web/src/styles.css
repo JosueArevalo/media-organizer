@@ -1095,6 +1095,22 @@ body {
   align-self: flex-start;
 }
 
+.compression-session-lines {
+  display: grid;
+  grid-template-rows: repeat(3, 14px);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.compression-session-lines .compression-session-line {
+  margin: 0;
+  min-width: 0;
+  line-height: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .compression-warning {
   color: #b45309;
   font-weight: 500;
