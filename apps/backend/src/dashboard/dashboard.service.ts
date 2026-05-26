@@ -5,6 +5,23 @@ import type { SessionRecord } from '../state/dto/state.types.js';
 
 type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
+export type VerificationCounts = {
+  total: number;
+  images: number;
+  videos: number;
+  unknown: number;
+};
+
+export type ExecutionVerificationStatus = 'ok' | 'mismatch' | 'not_verified';
+
+export type ExecutionVerification = {
+  status: ExecutionVerificationStatus;
+  expected: VerificationCounts;
+  destination: VerificationCounts;
+  verifiedAt: string | null;
+  outputRoot: string | null;
+};
+
 export type ExecutionHistoryInput = {
   sessionId: string;
   name: string | null;
@@ -49,6 +66,7 @@ export type ExecutionHistoryRecord = {
   groupingTotalItems: number;
   groupingCompletedItems: number;
   groupingFailedItems: number;
+  verification: ExecutionVerification;
 };
 
 export type DashboardSummary = {
@@ -92,7 +110,23 @@ type ExecutionHistoryRow = {
   grouping_total_items: number;
   grouping_completed_items: number;
   grouping_failed_items: number;
+  verification_json: string | null;
 };
+
+const EMPTY_COUNTS: VerificationCounts = {
+  total: 0,
+  images: 0,
+  videos: 0,
+  unknown: 0
+};
+
+export const createNotVerifiedSnapshot = (outputRoot: string | null = null): ExecutionVerification => ({
+  status: 'not_verified',
+  expected: { ...EMPTY_COUNTS },
+  destination: { ...EMPTY_COUNTS },
+  verifiedAt: null,
+  outputRoot
+});
 
 const toStatus = (status: string): ExecutionStatus => {
   if (status === 'completed' || status === 'failed' || status === 'cancelled') {
@@ -121,6 +155,43 @@ const parseErrorSummary = (value: string | null): Array<{ source: string; error:
   }
 };
 
+const isVerificationCounts = (value: unknown): value is VerificationCounts => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<VerificationCounts>;
+  return (
+    typeof candidate.total === 'number' &&
+    typeof candidate.images === 'number' &&
+    typeof candidate.videos === 'number' &&
+    typeof candidate.unknown === 'number'
+  );
+};
+
+const parseVerification = (value: string | null, outputRoot: string | null): ExecutionVerification => {
+  if (!value) {
+    return createNotVerifiedSnapshot(outputRoot);
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<ExecutionVerification>;
+    const status = parsed.status === 'ok' || parsed.status === 'mismatch' || parsed.status === 'not_verified'
+      ? parsed.status
+      : 'not_verified';
+
+    return {
+      status,
+      expected: isVerificationCounts(parsed.expected) ? parsed.expected : { ...EMPTY_COUNTS },
+      destination: isVerificationCounts(parsed.destination) ? parsed.destination : { ...EMPTY_COUNTS },
+      verifiedAt: typeof parsed.verifiedAt === 'string' ? parsed.verifiedAt : null,
+      outputRoot: typeof parsed.outputRoot === 'string' ? parsed.outputRoot : outputRoot
+    };
+  } catch {
+    return createNotVerifiedSnapshot(outputRoot);
+  }
+};
+
 const toExecution = (row: ExecutionHistoryRow): ExecutionHistoryRecord => ({
   id: row.id,
   sessionId: row.session_id,
@@ -144,7 +215,8 @@ const toExecution = (row: ExecutionHistoryRow): ExecutionHistoryRecord => ({
   groupingStatus: row.grouping_status,
   groupingTotalItems: row.grouping_total_items,
   groupingCompletedItems: row.grouping_completed_items,
-  groupingFailedItems: row.grouping_failed_items
+  groupingFailedItems: row.grouping_failed_items,
+  verification: parseVerification(row.verification_json, row.output_root)
 });
 
 const listExecutionRows = () => {
@@ -175,7 +247,8 @@ const listExecutionRows = () => {
           grouping_status,
           grouping_total_items,
           grouping_completed_items,
-          grouping_failed_items
+          grouping_failed_items,
+          verification_json
         FROM execution_history
         ORDER BY datetime(updated_at) DESC
       `
@@ -310,6 +383,22 @@ export const updateGroupingExecutionSummary = (input: {
   );
 };
 
+export const updateExecutionVerification = (compressionSessionId: string | null, verification: ExecutionVerification) => {
+  if (!compressionSessionId) {
+    return;
+  }
+
+  runMigrations();
+  const db = getDb();
+  db.prepare(
+    `
+      UPDATE execution_history
+      SET verification_json = ?, updated_at = ?
+      WHERE session_id = ?
+    `
+  ).run(JSON.stringify(verification), verification.verifiedAt ?? new Date().toISOString(), compressionSessionId);
+};
+
 export const listExecutionHistory = (): ExecutionHistoryRecord[] => {
   runMigrations();
   return listExecutionRows().map(toExecution);
@@ -393,7 +482,8 @@ export const getDashboardSummary = (): DashboardSummary => {
           groupingStatus: null,
           groupingTotalItems: 0,
           groupingCompletedItems: 0,
-          groupingFailedItems: 0
+          groupingFailedItems: 0,
+          verification: createNotVerifiedSnapshot(null)
         }
       : null);
   const lastExecution = executions.find((execution) => execution.status !== 'running') ?? executions[0] ?? null;

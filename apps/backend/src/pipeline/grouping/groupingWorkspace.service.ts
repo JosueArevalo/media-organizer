@@ -4,7 +4,12 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from '../../state/db.js';
 import { runMigrations } from '../../state/migrations/runMigrations.js';
 import type { MediaType } from '../../state/dto/state.types.js';
-import { updateGroupingExecutionSummary } from '../../dashboard/dashboard.service.js';
+import {
+  updateExecutionVerification,
+  updateGroupingExecutionSummary,
+  type ExecutionVerification,
+  type VerificationCounts
+} from '../../dashboard/dashboard.service.js';
 import { startGroupingSession } from './groupingJob.service.js';
 import type {
   GroupingDateOptions,
@@ -99,6 +104,9 @@ const MEDIA_EXTENSIONS = new Set([
   '.mkv'
 ]);
 
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif']);
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv']);
+
 const nowIso = () => new Date().toISOString();
 
 const normalizePath = (value: string) => path.resolve(value);
@@ -189,6 +197,114 @@ const getProposalDate = (row: MediaRow): Date | null => {
 };
 
 const getOutputPath = (outputDir: string, relativePath: string) => path.join(outputDir, relativePath);
+
+const createEmptyVerificationCounts = (): VerificationCounts => ({
+  total: 0,
+  images: 0,
+  videos: 0,
+  unknown: 0
+});
+
+const incrementCounts = (counts: VerificationCounts, mediaType: MediaType) => {
+  counts.total += 1;
+
+  if (mediaType === 'image') {
+    counts.images += 1;
+    return;
+  }
+
+  if (mediaType === 'video') {
+    counts.videos += 1;
+    return;
+  }
+
+  counts.unknown += 1;
+};
+
+const classifyFilePath = (filePath: string): MediaType => {
+  const extension = path.extname(filePath).toLowerCase();
+
+  if (IMAGE_EXTENSIONS.has(extension)) {
+    return 'image';
+  }
+
+  if (VIDEO_EXTENSIONS.has(extension)) {
+    return 'video';
+  }
+
+  return 'unknown';
+};
+
+const scanDestinationCounts = (directoryPath: string): VerificationCounts => {
+  const counts = createEmptyVerificationCounts();
+
+  if (!fs.existsSync(directoryPath)) {
+    return counts;
+  }
+
+  const walk = (currentPath: string) => {
+    for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
+      if (entry.name === '.media-organizer') {
+        continue;
+      }
+
+      const entryPath = path.join(currentPath, entry.name);
+
+      if (entry.isDirectory()) {
+        walk(entryPath);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      incrementCounts(counts, classifyFilePath(entryPath));
+    }
+  };
+
+  walk(directoryPath);
+  return counts;
+};
+
+const countWorkspaceItems = (items: GroupingWorkspaceItem[]): VerificationCounts => {
+  const counts = createEmptyVerificationCounts();
+
+  for (const item of items) {
+    incrementCounts(counts, item.mediaType);
+  }
+
+  return counts;
+};
+
+const countsMatch = (left: VerificationCounts, right: VerificationCounts) =>
+  left.total === right.total &&
+  left.images === right.images &&
+  left.videos === right.videos &&
+  left.unknown === right.unknown;
+
+const verifyWorkspaceDestination = (workspace: GroupingWorkspace, verifiedAt: string): ExecutionVerification => {
+  const expected = countWorkspaceItems(workspace.items);
+  const destination = scanDestinationCounts(workspace.outputDir);
+
+  return {
+    status: countsMatch(expected, destination) ? 'ok' : 'mismatch',
+    expected,
+    destination,
+    verifiedAt,
+    outputRoot: workspace.outputDir
+  };
+};
+
+export const verifyGroupingWorkspaceDestination = (sessionId: string, verifiedAt = nowIso()): ExecutionVerification | null => {
+  const workspace = getGroupingWorkspace(sessionId);
+
+  if (!workspace) {
+    return null;
+  }
+
+  return verifyWorkspaceDestination(workspace, verifiedAt);
+};
 
 const getCompressionSourceSessionId = (groupingSessionId: string) => {
   const db = getDb();
@@ -1170,13 +1286,32 @@ export const applyGroupingWorkspace = (sessionId: string) => {
     updatedAt: timestamp
   });
 
+  const verification = nextStatus === 'completed'
+    ? verifyGroupingWorkspaceDestination(sessionId, timestamp) ?? {
+        status: 'not_verified' as const,
+        expected: countWorkspaceItems(workspace.items),
+        destination: createEmptyVerificationCounts(),
+        verifiedAt: null,
+        outputRoot: workspace.outputDir
+      }
+    : {
+        status: 'not_verified' as const,
+        expected: countWorkspaceItems(workspace.items),
+        destination: createEmptyVerificationCounts(),
+        verifiedAt: null,
+        outputRoot: workspace.outputDir
+      };
+
+  updateExecutionVerification(workspace.compressionSessionId, verification);
+
   return {
     sessionId,
     status: nextStatus,
     movedItems: moved.length,
     deletedItems: deleted.length,
     failedItems: failed.total,
-    sourceSessionId
+    sourceSessionId,
+    verification
   };
 };
 

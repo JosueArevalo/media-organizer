@@ -55,12 +55,28 @@ export type GroupingWorkspace = {
   templates: GroupingFolderTemplate[];
 };
 
+export type VerificationCounts = {
+  total: number;
+  images: number;
+  videos: number;
+  unknown: number;
+};
+
+export type ExecutionVerification = {
+  status: 'ok' | 'mismatch' | 'not_verified';
+  expected: VerificationCounts;
+  destination: VerificationCounts;
+  verifiedAt: string | null;
+  outputRoot: string | null;
+};
+
 export type GroupingApplyResponse = {
   sessionId: string;
   status: 'completed' | 'failed';
   movedItems: number;
   deletedItems?: number;
   failedItems: number;
+  verification: ExecutionVerification;
 };
 
 const readErrorBody = async (response: Response) => {

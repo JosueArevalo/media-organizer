@@ -34,7 +34,8 @@ test('initial migration creates core state tables', async () => {
     '004_grouping_workspace.sql',
     '005_execution_history.sql',
     '006_export_jobs.sql',
-    '007_network_destinations.sql'
+    '007_network_destinations.sql',
+    '008_execution_verification.sql'
   ]);
 
   const db = getDb();
@@ -62,7 +63,8 @@ test('initial migration creates core state tables', async () => {
     '004_grouping_workspace.sql',
     '005_execution_history.sql',
     '006_export_jobs.sql',
-    '007_network_destinations.sql'
+    '007_network_destinations.sql',
+    '008_execution_verification.sql'
   ]);
 });
 
@@ -179,7 +181,8 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '004_grouping_workspace.sql',
     '005_execution_history.sql',
     '006_export_jobs.sql',
-    '007_network_destinations.sql'
+    '007_network_destinations.sql',
+    '008_execution_verification.sql'
   ]);
 
   const tableNames = db
@@ -227,6 +230,7 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '004_grouping_workspace.sql',
     '005_execution_history.sql',
     '006_export_jobs.sql',
-    '007_network_destinations.sql'
+    '007_network_destinations.sql',
+    '008_execution_verification.sql'
   ]);
 });
