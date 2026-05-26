@@ -247,6 +247,8 @@ export const GroupingPage = () => {
   const destinationPath = destinationSelection?.path ?? '';
   const hasWorkspacePrerequisites = Boolean(sourcePath && destinationPath && compressionSessionState.backendSessionId);
   const canOpenWorkspace = hasWorkspacePrerequisites && compressionSessionState.status === 'completed';
+  const isGroupingCompleted = groupingSessionState.status === 'completed';
+  const canMutateGrouping = !isGroupingCompleted;
   const isWaitingForWorkspacePrerequisites =
     isLoadingFolderSelections || (hasWorkspacePrerequisites && compressionSessionState.status === 'running');
 
@@ -328,6 +330,15 @@ export const GroupingPage = () => {
     sourcePath
   ]);
 
+  useEffect(() => {
+    if (!isGroupingCompleted) {
+      return;
+    }
+
+    setSelectedIds(new Set());
+    setView('review');
+  }, [isGroupingCompleted]);
+
   const activeFolder = useMemo(() => {
     if (!workspace || activeFolderLabel === '__all__') {
       return null;
@@ -387,7 +398,7 @@ export const GroupingPage = () => {
 
     return t('grouping.originalStructure');
   }, [preservedDirectories, t]);
-  const canReorganize = Boolean(selectedStrategy && workspace) && !isReorganizing;
+  const canReorganize = Boolean(selectedStrategy && workspace) && !isReorganizing && canMutateGrouping;
 
   const activeFolderTitle = useMemo(() => {
     if (activeFolderLabel === '__preserved__') {
@@ -402,6 +413,10 @@ export const GroupingPage = () => {
   }, [activeFolder, activeFolderLabel, preservedGroupLabel, t]);
 
   const handleBack = () => {
+    if (isGroupingCompleted) {
+      return;
+    }
+
     const from = (location.state as { from?: string } | null)?.from;
 
     if (from && from !== location.pathname) {
@@ -413,6 +428,10 @@ export const GroupingPage = () => {
   };
 
   const selectStrategy = (strategy: GroupingStrategy) => {
+    if (!canMutateGrouping) {
+      return;
+    }
+
     setSelectedStrategy((current) => (current === strategy ? null : strategy));
   };
 
@@ -431,6 +450,10 @@ export const GroupingPage = () => {
   };
 
   const setDirectoryStructureMode = (path: string, mode: 'preserve' | 'reorganize') => {
+    if (!canMutateGrouping) {
+      return;
+    }
+
     setPreservedDirectories((current) => {
       const next = new Set(current);
       if (mode === 'preserve') {
@@ -453,7 +476,7 @@ export const GroupingPage = () => {
   };
 
   const handleReorganize = async () => {
-    if (!workspace || !selectedStrategy) {
+    if (!workspace || !selectedStrategy || !canMutateGrouping) {
       return;
     }
 
@@ -490,7 +513,7 @@ export const GroupingPage = () => {
   };
 
   const handleCreateFolder = async () => {
-    if (!workspace) return;
+    if (!workspace || !canMutateGrouping) return;
 
     const label = window.prompt(t('grouping.folderNamePrompt'));
     if (!label?.trim()) return;
@@ -504,7 +527,7 @@ export const GroupingPage = () => {
   };
 
   const handleRenameFolder = async (folder: GroupingWorkspaceFolder) => {
-    if (!workspace) return;
+    if (!workspace || !canMutateGrouping) return;
 
     const label = window.prompt(t('grouping.newFolderNamePrompt'), folder.label);
     if (!label?.trim() || label === folder.label) return;
@@ -519,7 +542,7 @@ export const GroupingPage = () => {
   };
 
   const handleDeleteFolder = async (folder: GroupingWorkspaceFolder) => {
-    if (!workspace) return;
+    if (!workspace || !canMutateGrouping) return;
 
     try {
       await deleteGroupingFolderRequest(workspace.sessionId, folder.id);
@@ -531,7 +554,7 @@ export const GroupingPage = () => {
   };
 
   const moveItemsToFolder = async (itemIds: string[], targetGroupLabel: string) => {
-    if (!workspace || itemIds.length === 0) return;
+    if (!workspace || itemIds.length === 0 || !canMutateGrouping) return;
 
     try {
       const nextWorkspace = await assignGroupingItemsRequest(workspace.sessionId, itemIds, targetGroupLabel);
@@ -548,7 +571,7 @@ export const GroupingPage = () => {
   };
 
   const handleDeleteSelected = async () => {
-    if (!workspace || selectedIds.size === 0) return;
+    if (!workspace || selectedIds.size === 0 || !canMutateGrouping) return;
 
     const confirmed = window.confirm(t('grouping.deleteSelectedConfirm'));
 
@@ -567,6 +590,10 @@ export const GroupingPage = () => {
   };
 
   const handleItemClick = (item: GroupingWorkspaceItem, event: MouseEvent) => {
+    if (!canMutateGrouping) {
+      return;
+    }
+
     setSelectedIds((current) => {
       const next = new Set(event.shiftKey || event.ctrlKey || event.metaKey ? current : []);
 
@@ -581,6 +608,8 @@ export const GroupingPage = () => {
   };
 
   const handleCreateTemplate = async () => {
+    if (!canMutateGrouping) return;
+
     const name = window.prompt(t('grouping.templateNamePrompt'));
     if (!name?.trim()) return;
 
@@ -596,6 +625,8 @@ export const GroupingPage = () => {
   };
 
   const handleToggleTemplate = async (template: GroupingFolderTemplate) => {
+    if (!canMutateGrouping) return;
+
     try {
       const response = await updateGroupingTemplateRequest(template.id, { enabled: !template.enabled });
       setWorkspace((current) => (current ? { ...current, templates: response.templates } : current));
@@ -605,6 +636,8 @@ export const GroupingPage = () => {
   };
 
   const handleDeleteTemplate = async (template: GroupingFolderTemplate) => {
+    if (!canMutateGrouping) return;
+
     try {
       await deleteGroupingTemplateRequest(template.id);
       setWorkspace((current) =>
@@ -616,7 +649,7 @@ export const GroupingPage = () => {
   };
 
   const handleCreateFolderFromTemplate = async (template: GroupingFolderTemplate) => {
-    if (!workspace) return;
+    if (!workspace || !canMutateGrouping) return;
 
     try {
       await createGroupingFolderFromTemplateRequest(workspace.sessionId, template.id);
@@ -627,7 +660,7 @@ export const GroupingPage = () => {
   };
 
   const handleApply = async () => {
-    if (!workspace) return;
+    if (!workspace || !canMutateGrouping) return;
 
     setIsApplying(true);
 
@@ -659,7 +692,7 @@ export const GroupingPage = () => {
   const mediaUrl = previewItem && workspace ? buildGroupingMediaUrl(workspace.sessionId, previewItem.id) : null;
 
   return (
-    <div className="grouping-workspace page-stack">
+    <div className={`grouping-workspace page-stack ${isGroupingCompleted ? 'is-read-only' : ''}`}>
       <div className="page-header grouping-header">
         <div>
           <h2 className="page-title">{t('grouping.title')}</h2>
@@ -670,7 +703,7 @@ export const GroupingPage = () => {
           </p>
         </div>
         <div className="grouping-header-actions">
-          <button className="btn btn-secondary" type="button" onClick={handleBack}>
+          <button className="btn btn-secondary" type="button" onClick={handleBack} disabled={isGroupingCompleted}>
             {t('grouping.back')}
           </button>
           {view === 'setup' && (
@@ -679,16 +712,16 @@ export const GroupingPage = () => {
             </button>
           )}
           {view === 'review' && (
-            <button className="btn btn-secondary" type="button" onClick={() => setView('setup')} disabled={!workspace || isApplying}>
+            <button className="btn btn-secondary" type="button" onClick={() => setView('setup')} disabled={!workspace || isApplying || isGroupingCompleted}>
               {t('grouping.editSetup')}
             </button>
           )}
           {view === 'review' && (
-            <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying}>
+            <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying || isGroupingCompleted}>
               {isApplying ? t('grouping.applying') : t('grouping.apply')}
             </button>
           )}
-          {groupingSessionState.status === 'completed' && (
+          {isGroupingCompleted && (
             <button className="btn btn-secondary" type="button" onClick={() => navigate('/export')}>
               {t('grouping.continueExport')}
             </button>
@@ -771,6 +804,7 @@ export const GroupingPage = () => {
                 type="button"
                 aria-pressed={selectedStrategy === 'date'}
                 onClick={() => selectStrategy('date')}
+                disabled={!canMutateGrouping}
               >
                 {t('grouping.strategy.date')}
               </button>
@@ -779,6 +813,7 @@ export const GroupingPage = () => {
                 type="button"
                 aria-pressed={selectedStrategy === 'source-folder'}
                 onClick={() => selectStrategy('source-folder')}
+                disabled={!canMutateGrouping}
               >
                 {t('grouping.strategy.sourceFolder')}
               </button>
@@ -789,7 +824,11 @@ export const GroupingPage = () => {
                 <p className="page-summary-note">{t('grouping.dateStrategyPattern')}</p>
                 <label className="grouping-option-field">
                   <span>{t('grouping.singleDateHandling')}</span>
-                  <select value={singleDateHandling} onChange={(event) => setSingleDateHandling(event.target.value as GroupingSingleDateHandling)}>
+                  <select
+                    value={singleDateHandling}
+                    onChange={(event) => setSingleDateHandling(event.target.value as GroupingSingleDateHandling)}
+                    disabled={!canMutateGrouping}
+                  >
                     <option value="daily-event">{t('grouping.singleDate.dailyEvent')}</option>
                     <option value="year-unique">{t('grouping.singleDate.yearUnique')}</option>
                     <option value="keep-original">{t('grouping.singleDate.keepOriginal')}</option>
@@ -803,7 +842,11 @@ export const GroupingPage = () => {
                 <p className="page-summary-note">{t('grouping.sourceFolderStrategyNote')}</p>
                 <label className="grouping-option-field">
                   <span>{t('grouping.sourceFolderMode')}</span>
-                  <select value={sourceFolderMode} onChange={(event) => setSourceFolderMode(event.target.value as GroupingSourceFolderMode)}>
+                  <select
+                    value={sourceFolderMode}
+                    onChange={(event) => setSourceFolderMode(event.target.value as GroupingSourceFolderMode)}
+                    disabled={!canMutateGrouping}
+                  >
                     <option value="nearest-folder">{t('grouping.sourceFolder.nearest')}</option>
                     <option value="relative-path">{t('grouping.sourceFolder.relative')}</option>
                   </select>
@@ -846,10 +889,20 @@ export const GroupingPage = () => {
                   </div>
                   <div className="selection-tree-meta">
                     <div className="selection-structure-toggle" aria-label={t('grouping.structureMode')}>
-                      <button className={row.isPreserved ? 'is-active' : ''} type="button" onClick={() => setDirectoryStructureMode(row.path, 'preserve')}>
+                      <button
+                        className={row.isPreserved ? 'is-active' : ''}
+                        type="button"
+                        onClick={() => setDirectoryStructureMode(row.path, 'preserve')}
+                        disabled={!canMutateGrouping}
+                      >
                         {t('grouping.keepStructure')}
                       </button>
-                      <button className={!row.isPreserved ? 'is-active' : ''} type="button" onClick={() => setDirectoryStructureMode(row.path, 'reorganize')}>
+                      <button
+                        className={!row.isPreserved ? 'is-active' : ''}
+                        type="button"
+                        onClick={() => setDirectoryStructureMode(row.path, 'reorganize')}
+                        disabled={!canMutateGrouping}
+                      >
                         {t('grouping.reorganizeMode')}
                       </button>
                     </div>
@@ -880,7 +933,7 @@ export const GroupingPage = () => {
           placeholder={t('grouping.searchPlaceholder')}
           type="search"
         />
-        <button className="btn btn-secondary" type="button" onClick={() => void handleCreateFolder()} disabled={!workspace}>
+        <button className="btn btn-secondary" type="button" onClick={() => void handleCreateFolder()} disabled={!workspace || isGroupingCompleted}>
           {t('grouping.newFolder')}
         </button>
       </div>}
@@ -918,24 +971,26 @@ export const GroupingPage = () => {
               <div
                 key={folder.id}
                 className={`grouping-folder-drop ${activeFolderLabel === folder.label ? 'is-active' : ''}`}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const ids = event.dataTransfer.getData('application/json');
-                  if (ids) {
-                    void moveItemsToFolder(JSON.parse(ids) as string[], folder.label);
-                  }
-                }}
+                onDragOver={canMutateGrouping ? (event) => event.preventDefault() : undefined}
+                onDrop={canMutateGrouping
+                  ? (event) => {
+                      event.preventDefault();
+                      const ids = event.dataTransfer.getData('application/json');
+                      if (ids) {
+                        void moveItemsToFolder(JSON.parse(ids) as string[], folder.label);
+                      }
+                    }
+                  : undefined}
               >
                 <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel(folder.label)}>
                   <span>{folder.label}</span>
                   <strong>{folder.itemCount}</strong>
                 </button>
                 <div className="grouping-folder-actions">
-                  <button type="button" onClick={() => void handleRenameFolder(folder)} title={t('grouping.renameTitle')}>
+                  <button type="button" onClick={() => void handleRenameFolder(folder)} disabled={isGroupingCompleted} title={t('grouping.renameTitle')}>
                     {t('grouping.rename')}
                   </button>
-                  <button type="button" onClick={() => void handleDeleteFolder(folder)} disabled={folder.itemCount > 0} title={t('grouping.deleteTitle')}>
+                  <button type="button" onClick={() => void handleDeleteFolder(folder)} disabled={isGroupingCompleted || folder.itemCount > 0} title={t('grouping.deleteTitle')}>
                     {t('grouping.delete')}
                   </button>
                 </div>
@@ -946,20 +1001,20 @@ export const GroupingPage = () => {
           <div className="grouping-templates">
             <div className="grouping-section-head">
               <p className="page-section-title">{t('grouping.templates')}</p>
-              <button type="button" onClick={() => void handleCreateTemplate()}>
+              <button type="button" onClick={() => void handleCreateTemplate()} disabled={isGroupingCompleted}>
                 {t('grouping.add')}
               </button>
             </div>
             {workspace?.templates.length ? (
               workspace.templates.map((template) => (
                 <div key={template.id} className="grouping-template-row">
-                  <button type="button" onClick={() => void handleCreateFolderFromTemplate(template)} disabled={!template.enabled}>
+                  <button type="button" onClick={() => void handleCreateFolderFromTemplate(template)} disabled={isGroupingCompleted || !template.enabled}>
                     {template.name}
                   </button>
-                  <button type="button" onClick={() => void handleToggleTemplate(template)}>
+                  <button type="button" onClick={() => void handleToggleTemplate(template)} disabled={isGroupingCompleted}>
                     {template.enabled ? t('grouping.on') : t('grouping.off')}
                   </button>
-                  <button type="button" onClick={() => void handleDeleteTemplate(template)}>
+                  <button type="button" onClick={() => void handleDeleteTemplate(template)} disabled={isGroupingCompleted}>
                     {t('grouping.delete')}
                   </button>
                 </div>
@@ -982,7 +1037,7 @@ export const GroupingPage = () => {
                     void handleMoveSelected(event.target.value);
                   }
                 }}
-                disabled={!workspace}
+                disabled={!workspace || isGroupingCompleted}
               >
                 <option value="">{t('grouping.moveSelected')}</option>
                 {workspace?.folders.map((folder) => (
@@ -991,7 +1046,7 @@ export const GroupingPage = () => {
                   </option>
                 ))}
               </select>
-              <button className="btn btn-danger-secondary" type="button" onClick={() => void handleDeleteSelected()}>
+              <button className="btn btn-danger-secondary" type="button" onClick={() => void handleDeleteSelected()} disabled={isGroupingCompleted}>
                 {t('grouping.delete')}
               </button>
               <span className="grouping-selection-divider" aria-hidden="true" />
@@ -1006,7 +1061,7 @@ export const GroupingPage = () => {
               <p className="page-section-title">{activeFolderTitle}</p>
               <p className="page-summary-note">{t('grouping.visibleFiles', { count: visibleItems.length })}</p>
             </div>
-            <button className="btn btn-ghost" type="button" onClick={() => setSelectedIds(new Set(visibleItems.map((item) => item.id)))}>
+            <button className="btn btn-ghost" type="button" onClick={() => setSelectedIds(new Set(visibleItems.map((item) => item.id)))} disabled={isGroupingCompleted}>
               {t('grouping.selectVisible')}
             </button>
           </div>
@@ -1023,12 +1078,14 @@ export const GroupingPage = () => {
                   <article
                     key={item.id}
                     className={`grouping-media-card ${isSelected ? 'is-selected' : ''}`}
-                    draggable
-                    onClick={(event) => handleItemClick(item, event)}
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData('application/json', JSON.stringify(getSelectedDragPayload(item, selectedIds)));
-                      event.dataTransfer.effectAllowed = 'move';
-                    }}
+                    draggable={canMutateGrouping}
+                    onClick={canMutateGrouping ? (event) => handleItemClick(item, event) : undefined}
+                    onDragStart={canMutateGrouping
+                      ? (event) => {
+                          event.dataTransfer.setData('application/json', JSON.stringify(getSelectedDragPayload(item, selectedIds)));
+                          event.dataTransfer.effectAllowed = 'move';
+                        }
+                      : undefined}
                   >
                     <button className="grouping-media-preview" type="button" onDoubleClick={() => setPreviewItem(item)}>
                       {item.mediaType === 'image' ? (

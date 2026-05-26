@@ -15,8 +15,23 @@ import SettingsPage from './pages/SettingsPage';
 import { useGroupingSessionState } from './hooks/useGroupingJobState';
 import { useCompletionNotifications } from './hooks/useCompletionNotifications';
 
+const RedirectCompletedWorkflow = ({ children }: { children: JSX.Element }) => {
+  const groupingSessionState = useGroupingSessionState();
+
+  if (groupingSessionState.status === 'completed') {
+    return <Navigate to="/export" replace />;
+  }
+
+  return children;
+};
+
 const GuardedWorkflowStep = ({ children }: { children: JSX.Element }) => {
   const isImportStepComplete = useImportStepCompletion();
+  const groupingSessionState = useGroupingSessionState();
+
+  if (groupingSessionState.status === 'completed') {
+    return <Navigate to="/export" replace />;
+  }
 
   if (!isImportStepComplete) {
     return <Navigate to="/import" replace />;
@@ -53,7 +68,7 @@ const GuardedExportStep = ({ children }: { children: JSX.Element }) => {
     return <Navigate to="/compression" replace />;
   }
 
-  if (groupingSessionState.status !== 'completed' && !groupingSessionState.outputRootLabel) {
+  if (groupingSessionState.status !== 'completed') {
     return <Navigate to="/grouping" replace />;
   }
 
@@ -69,7 +84,14 @@ const App = () => {
         <Route element={<AppShell />}>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/import" element={<ImportPage />} />
+          <Route
+            path="/import"
+            element={
+              <RedirectCompletedWorkflow>
+                <ImportPage />
+              </RedirectCompletedWorkflow>
+            }
+          />
           <Route path="/settings" element={<SettingsPage />} />
           <Route
             path="/selection"
