@@ -873,6 +873,16 @@ body {
   margin-bottom: 8px;
 }
 
+.export-page-header {
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.export-back-button {
+  justify-self: end;
+  width: auto;
+}
+
 .page-title {
   margin: 0;
   font-size: 24px;
@@ -3167,5 +3177,13 @@ body {
 
   .network-header-actions {
     justify-content: flex-start;
+  }
+
+  .export-page-header {
+    grid-template-columns: 1fr;
+  }
+
+  .export-back-button {
+    justify-self: start;
   }
 }

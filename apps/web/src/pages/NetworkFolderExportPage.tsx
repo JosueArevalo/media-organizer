@@ -434,12 +434,12 @@ export const NetworkFolderExportPage = () => {
 
   return (
     <div className="page-stack export-page">
-      <div className="page-header">
+      <div className="page-header export-page-header">
         <div>
           <h2 className="page-title">{t('export.network.title')}</h2>
           <p className="page-subtitle">{t('export.network.subtitle')}</p>
         </div>
-        <button className="btn btn-secondary" type="button" onClick={() => navigate('/export')}>
+        <button className="btn btn-secondary export-back-button" type="button" onClick={() => navigate('/export')}>
           {t('export.backToProviders')}
         </button>
       </div>
@@ -525,7 +525,7 @@ export const NetworkFolderExportPage = () => {
             </div>
 
             <div className="network-export-tools">
-              <button className="btn btn-secondary" type="button" onClick={() => void handleSaveDestination()} disabled={isSavingDestination}>
+              <button className="btn btn-primary" type="button" onClick={() => void handleSaveDestination()} disabled={isSavingDestination}>
                 {isSavingDestination ? t('export.network.savingDestination') : t('export.network.saveDestination')}
               </button>
             </div>
