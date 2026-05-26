@@ -1,16 +1,38 @@
-import { useRef, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FolderPickerCard } from '../components/FolderPickerCard';
 import { useFolderSelections } from '../hooks/useFolderSelections';
-import { useTranslation } from '../i18n';
+import { useTranslation, type TranslationKey } from '../i18n';
 import { pickDirectoryRequest } from '../services/system-picker.service';
 import type { FolderSlot } from '../services/folder-selection.store';
+import {
+  validateImportFoldersLocally,
+  validateImportFoldersRequest,
+  type ImportValidationCode
+} from '../services/import-validation.service';
+
+const validationMessageKeys: Record<ImportValidationCode, TranslationKey> = {
+  missing_paths: 'import.validation.missingPaths',
+  relative_source: 'import.validation.relativeSource',
+  relative_destination: 'import.validation.relativeDestination',
+  same_path: 'import.validation.samePath',
+  destination_inside_source: 'import.validation.destinationInsideSource',
+  source_not_found: 'import.validation.sourceNotFound',
+  source_not_directory: 'import.validation.sourceNotDirectory',
+  source_not_readable: 'import.validation.sourceNotReadable',
+  destination_parent_not_found: 'import.validation.destinationParentNotFound',
+  destination_not_directory: 'import.validation.destinationNotDirectory',
+  destination_not_writable: 'import.validation.destinationNotWritable',
+  request_failed: 'import.validation.requestFailed'
+};
 
 export const ImportPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const sourcePathInputRef = useRef<HTMLInputElement>(null);
   const destinationPathInputRef = useRef<HTMLInputElement>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
   const {
     sourceSelection,
     destinationSelection,
@@ -23,17 +45,58 @@ export const ImportPage = () => {
     clearDestinationFolder
   } = useFolderSelections();
 
+  const sourcePath = sourceSelection?.path?.trim() ?? '';
+  const destinationPath = destinationSelection?.path?.trim() ?? '';
+  const localValidation = useMemo(
+    () => validateImportFoldersLocally(sourcePath, destinationPath),
+    [sourcePath, destinationPath]
+  );
   const canContinue = Boolean(
-    sourceSelection?.path?.trim() &&
-    destinationSelection?.path?.trim()
+    sourcePath &&
+    destinationPath &&
+    localValidation.ok &&
+    !isValidating
   );
 
-  const handleContinue = () => {
+  const getValidationMessage = (code: ImportValidationCode, fallback: string) =>
+    validationMessageKeys[code] ? t(validationMessageKeys[code]) : fallback;
+  const localValidationError = sourcePath && destinationPath && !localValidation.ok
+    ? getValidationMessage(localValidation.code, localValidation.message)
+    : null;
+  const displayedValidationError = validationError ?? localValidationError;
+
+  useEffect(() => {
+    setValidationError(null);
+  }, [sourcePath, destinationPath]);
+
+  const handleContinue = async () => {
+    setValidationError(null);
+
+    if (!localValidation.ok) {
+      setValidationError(getValidationMessage(localValidation.code, localValidation.message));
+      return;
+    }
+
     if (!canContinue) {
       return;
     }
 
-    navigate('/selection');
+    setIsValidating(true);
+
+    try {
+      const backendValidation = await validateImportFoldersRequest(sourcePath, destinationPath);
+
+      if (!backendValidation.ok) {
+        setValidationError(getValidationMessage(backendValidation.code, backendValidation.message));
+        return;
+      }
+
+      navigate('/selection');
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : t('import.validation.requestFailed'));
+    } finally {
+      setIsValidating(false);
+    }
   };
 
   const handleSourcePathInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -61,6 +124,8 @@ export const ImportPage = () => {
     if (result.status !== 'selected') {
       return result;
     }
+
+    setValidationError(null);
 
     if (slot === 'source') {
       await selectSourceFolderPath({
@@ -114,8 +179,20 @@ export const ImportPage = () => {
       </div>
 
       <div className="page-footer-actions">
-        <button className="btn btn-primary" type="button" onClick={handleContinue} disabled={!canContinue}>
-          {t('import.continue')}
+        <div className="import-validation-status" aria-live="polite">
+          {displayedValidationError && (
+            <p className="folder-picker-message folder-picker-message-error">
+              {displayedValidationError}
+            </p>
+          )}
+          {isValidating && (
+            <p className="folder-picker-message folder-picker-message-info">
+              {t('import.validation.validating')}
+            </p>
+          )}
+        </div>
+        <button className="btn btn-primary" type="button" onClick={() => void handleContinue()} disabled={!canContinue}>
+          {isValidating ? t('import.validation.validating') : t('import.continue')}
         </button>
       </div>
     </div>

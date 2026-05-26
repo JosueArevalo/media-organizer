@@ -1002,6 +1002,15 @@ body {
   gap: 8px;
 }
 
+.import-validation-status {
+  min-height: 42px;
+  min-width: min(100%, 520px);
+}
+
+.import-validation-status .folder-picker-message {
+  margin: 0;
+}
+
 .page-section-title {
   margin: 0 0 12px;
   font-size: 13px;
