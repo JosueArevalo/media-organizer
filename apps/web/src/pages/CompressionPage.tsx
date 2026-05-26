@@ -1222,7 +1222,7 @@ export const CompressionPage = () => {
                   </select>
                 </label>
 
-                <div className="page-option-list" role="radiogroup" aria-label={t('compression.videoOutputFormatLabel')}>
+                <div className="page-option-list compression-video-format-options" role="radiogroup" aria-label={t('compression.videoOutputFormatLabel')}>
                   <label className="page-option">
                     <input
                       type="radio"

@@ -1065,7 +1065,22 @@ body {
 
 .compression-video-options {
   align-content: start;
-  min-height: 110px;
+  min-height: 128px;
+}
+
+.compression-video-options > .page-summary-note {
+  margin: 0;
+}
+
+.compression-video-options .page-option {
+  min-height: 18px;
+}
+
+.compression-video-options .page-option-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .compression-preset-select {
