@@ -145,15 +145,11 @@ const executeCommand = async (
       const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
       stdoutReader.close();
 
-      console.log(`[executeCommand] command=${command} args=${JSON.stringify(args)} code=${code}`);
-      if (stderr) console.log(`[executeCommand] stderr=${stderr}`);
-
       if (code !== 0) {
         reject(new Error(`Compression script failed with code ${code}: ${stderr || 'No output provided.'}`));
         return;
       }
 
-      console.log(`[executeCommand] parsed ${items.length} items`);
       resolve({ items });
     });
   });
@@ -635,10 +631,6 @@ export const executeCompressionSession = async (sessionId: string) => {
     updatedAt: 0
   };
   const resolvedSelectionScope = resolveSelectionScope(checkpointData.manifest.sourceDir, selectionScope);
-
-  console.log(`[executeCompressionSession] Starting: session=${sessionId}`);
-  console.log(`[executeCompressionSession] sourceDir=${checkpointData.manifest.sourceDir}`);
-  console.log(`[executeCompressionSession] selectionScope=`, selectionScope);
 
   const imageCommand = buildImageCompressionCommand({
     sessionId,
