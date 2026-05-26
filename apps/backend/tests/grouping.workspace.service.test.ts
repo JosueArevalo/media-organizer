@@ -48,6 +48,8 @@ const seedCompressionSession = (relativePaths: string[]) => {
     const itemId = randomUUID();
     const sourcePath = path.join(sourceDir, relativePath);
     const outputPath = path.join(outputDir, relativePath);
+    const extension = path.extname(relativePath).toLowerCase();
+    const mediaType = ['.mp4', '.mov', '.m4v', '.avi', '.mkv'].includes(extension) ? 'video' : 'image';
 
     fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -68,9 +70,9 @@ const seedCompressionSession = (relativePaths: string[]) => {
           capture_time,
           created_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, 'image', 'camera', NULL, 100, NULL, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, 'camera', NULL, 100, NULL, ?, ?)
       `
-    ).run(itemId, compressionSessionId, sourcePath, relativePath, now, now);
+    ).run(itemId, compressionSessionId, sourcePath, relativePath, mediaType, now, now);
 
     db.prepare(
       `
@@ -457,6 +459,54 @@ test('deleteGroupingItems hides selected items and apply removes only destinatio
   const afterApply = getGroupingWorkspace(workspace.sessionId);
   assert.equal(afterApply?.items.some((item) => item.id === deletedItem.itemId), false);
   assert.equal(afterApply?.items.some((item) => item.id === keptItem.itemId), true);
+});
+
+test('applyGroupingWorkspace verifies expected media against destination files', async () => {
+  const { compressionSessionId } = seedCompressionSession(['photo.jpg', 'clip.mp4']);
+  const { applyGroupingWorkspace, createGroupingWorkspace } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  const result = applyGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(result?.verification.status, 'ok');
+  assert.deepEqual(result?.verification.expected, { total: 2, images: 1, videos: 1, unknown: 0 });
+  assert.deepEqual(result?.verification.destination, { total: 2, images: 1, videos: 1, unknown: 0 });
+});
+
+test('verifyGroupingWorkspaceDestination reports mismatch when a destination file is missing', async () => {
+  const { compressionSessionId } = seedCompressionSession(['photo.jpg', 'clip.mp4']);
+  const { createGroupingWorkspace, verifyGroupingWorkspaceDestination } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  fs.rmSync(path.join(outputDir, 'clip.mp4'));
+
+  const verification = verifyGroupingWorkspaceDestination(workspace.sessionId, '2026-05-26T10:00:00.000Z');
+
+  assert.equal(verification?.status, 'mismatch');
+  assert.deepEqual(verification?.expected, { total: 2, images: 1, videos: 1, unknown: 0 });
+  assert.deepEqual(verification?.destination, { total: 1, images: 1, videos: 0, unknown: 0 });
+});
+
+test('destination verification ignores excluded output items and metadata directory', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['keep.jpg', 'delete.jpg']);
+  const { createGroupingWorkspace, deleteGroupingItems, verifyGroupingWorkspaceDestination } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  const deletedItem = items.find((item) => item.relativePath === 'delete.jpg');
+  assert.ok(deletedItem);
+
+  deleteGroupingItems(workspace.sessionId, [deletedItem.itemId]);
+  fs.rmSync(path.join(outputDir, 'delete.jpg'));
+  fs.mkdirSync(path.join(outputDir, '.media-organizer'), { recursive: true });
+  fs.writeFileSync(path.join(outputDir, '.media-organizer', 'debug.txt'), 'ignored');
+
+  const verification = verifyGroupingWorkspaceDestination(workspace.sessionId, '2026-05-26T10:00:00.000Z');
+
+  assert.equal(verification?.status, 'ok');
+  assert.deepEqual(verification?.expected, { total: 1, images: 1, videos: 0, unknown: 0 });
+  assert.deepEqual(verification?.destination, { total: 1, images: 1, videos: 0, unknown: 0 });
 });
 
 test('applyGroupingWorkspace refuses paths outside the destination folder', async () => {

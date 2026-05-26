@@ -1,5 +1,20 @@
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
+export type VerificationCounts = {
+  total: number;
+  images: number;
+  videos: number;
+  unknown: number;
+};
+
+export type ExecutionVerification = {
+  status: 'ok' | 'mismatch' | 'not_verified';
+  expected: VerificationCounts;
+  destination: VerificationCounts;
+  verifiedAt: string | null;
+  outputRoot: string | null;
+};
+
 export type DashboardExecution = {
   id: string;
   sessionId: string;
@@ -24,6 +39,7 @@ export type DashboardExecution = {
   groupingTotalItems: number;
   groupingCompletedItems: number;
   groupingFailedItems: number;
+  verification: ExecutionVerification;
 };
 
 export type DashboardSummary = {

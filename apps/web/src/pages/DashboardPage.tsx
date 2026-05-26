@@ -12,6 +12,7 @@ import {
   type BackendHealth,
   type DashboardExecution,
   type DashboardSummary,
+  type ExecutionVerification,
   type ExecutionStatus
 } from '../services/dashboard.service';
 
@@ -58,9 +59,63 @@ const STATUS_LABEL_KEYS: Record<ExecutionStatus, TranslationKey> = {
   cancelled: 'dashboard.status.cancelled'
 };
 
+const VERIFICATION_STATUS_LABEL_KEYS: Record<ExecutionVerification['status'], TranslationKey> = {
+  ok: 'verification.status.ok',
+  mismatch: 'verification.status.mismatch',
+  not_verified: 'verification.status.not_verified'
+};
+
 const statusClassName = (status: ExecutionStatus) => `dashboard-status dashboard-status-${status}`;
 
 const getExecutionTitle = (execution: DashboardExecution) => execution.name || basename(execution.sourceDir) || execution.sessionId;
+
+const VerificationSummary = ({ verification, compact = false }: { verification: ExecutionVerification; compact?: boolean }) => {
+  const { t } = useTranslation();
+
+  return (
+    <div className={`verification-panel verification-panel-${verification.status} ${compact ? 'verification-panel-compact' : ''}`}>
+      <div className="verification-head">
+        <div>
+          <p className="page-section-title">{t('verification.title')}</p>
+          <p className="page-summary-note">
+            {verification.status === 'ok'
+              ? t('verification.okDescription')
+              : verification.status === 'mismatch'
+                ? t('verification.mismatchDescription')
+                : t('verification.notVerifiedDescription')}
+          </p>
+        </div>
+        <span className={`verification-status verification-status-${verification.status}`}>
+          {t(VERIFICATION_STATUS_LABEL_KEYS[verification.status])}
+        </span>
+      </div>
+      <div className="verification-grid">
+        <div>
+          <strong>{t('verification.expected')}</strong>
+          <span>{t('verification.counts', {
+            total: verification.expected.total,
+            images: verification.expected.images,
+            videos: verification.expected.videos,
+            unknown: verification.expected.unknown
+          })}</span>
+        </div>
+        <div>
+          <strong>{t('verification.destination')}</strong>
+          <span>{t('verification.counts', {
+            total: verification.destination.total,
+            images: verification.destination.images,
+            videos: verification.destination.videos,
+            unknown: verification.destination.unknown
+          })}</span>
+        </div>
+        <div>
+          <strong>{t('verification.verifiedAt')}</strong>
+          <span>{formatDateTime(verification.verifiedAt)}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const DashboardPage = () => {
   const { t } = useTranslation();
@@ -157,6 +212,8 @@ export const DashboardPage = () => {
     return { to: '/compression', label: t('dashboard.action.startCompression') };
   })();
 
+  const highlightedVerification = summary?.currentExecution?.verification ?? summary?.lastExecution?.verification ?? null;
+
   const handleDeleteExecution = async (executionId: string) => {
     const confirmed = window.confirm(t('dashboard.deleteConfirm'));
     if (!confirmed) {
@@ -206,6 +263,8 @@ export const DashboardPage = () => {
       </section>
 
       {dashboardError && <p className="error">{dashboardError}</p>}
+
+      {highlightedVerification && <VerificationSummary verification={highlightedVerification} />}
 
       {localAlerts.length > 0 && (
         <section className="panel dashboard-alerts">
@@ -265,6 +324,7 @@ export const DashboardPage = () => {
                         <p><strong>{t('dashboard.presets')}</strong><br />{execution.imageProfileLabel ?? '-'} / {execution.videoPresetLabel ?? '-'}</p>
                         <p><strong>{t('dashboard.grouping')}</strong><br />{execution.groupingStatus ? `${t(STATUS_LABEL_KEYS[execution.groupingStatus])} (${execution.groupingCompletedItems}/${execution.groupingTotalItems})` : t('dashboard.groupingNone')}</p>
                       </div>
+                      <VerificationSummary verification={execution.verification} compact />
                       {execution.errorSummary.length > 0 && (
                         <div className="dashboard-error-summary">
                           <strong>{t('dashboard.errors')}</strong>

@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
-import { useTranslation } from '../i18n';
+import { useTranslation, type TranslationKey } from '../i18n';
 import { notifyCompletion } from '../services/completion-notification.service';
 import { completeGroupingSession, failGroupingSession, startGroupingSession } from '../services/grouping-job.store';
 import {
@@ -27,7 +27,8 @@ import {
   type GroupingStrategy,
   type GroupingWorkspace,
   type GroupingWorkspaceFolder,
-  type GroupingWorkspaceItem
+  type GroupingWorkspaceItem,
+  type ExecutionVerification
 } from '../services/grouping.service';
 
 const formatBytes = (value: number) => {
@@ -38,6 +39,22 @@ const formatBytes = (value: number) => {
   const size = value / 1024 ** exponent;
 
   return `${size.toFixed(size >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+};
+
+const formatDateTime = (value: string | null) => {
+  if (!value) {
+    return '-';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(date);
 };
 
 const getSelectedDragPayload = (item: GroupingWorkspaceItem, selectedIds: Set<string>) => {
@@ -52,6 +69,11 @@ type GroupingView = 'setup' | 'review';
 
 const DEFAULT_SINGLE_DATE_HANDLING: GroupingSingleDateHandling = 'year-unique';
 const DEFAULT_SOURCE_FOLDER_MODE: GroupingSourceFolderMode = 'nearest-folder';
+const VERIFICATION_STATUS_KEYS: Record<ExecutionVerification['status'], TranslationKey> = {
+  ok: 'verification.status.ok',
+  mismatch: 'verification.status.mismatch',
+  not_verified: 'verification.status.not_verified'
+};
 
 type GroupingDirectoryNode = {
   name: string;
@@ -219,6 +241,7 @@ export const GroupingPage = () => {
   const [reorganizedDirectories, setReorganizedDirectories] = useState<Set<string>>(new Set());
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
   const [previewItem, setPreviewItem] = useState<GroupingWorkspaceItem | null>(null);
+  const [verification, setVerification] = useState<ExecutionVerification | null>(null);
 
   const sourcePath = sourceSelection?.path ?? '';
   const destinationPath = destinationSelection?.path ?? '';
@@ -610,6 +633,7 @@ export const GroupingPage = () => {
 
     try {
       const result = await applyGroupingWorkspaceRequest(workspace.sessionId);
+      setVerification(result.verification);
 
       if (result.status === 'completed') {
         completeGroupingSession();
@@ -679,6 +703,57 @@ export const GroupingPage = () => {
         <p className="empty-note">{t('grouping.unavailable')}</p>
       )}
       {backendError && <p className="error">{backendError}</p>}
+
+      {verification && (
+        <section className={`verification-panel verification-panel-${verification.status}`}>
+          <div className="verification-head">
+            <div>
+              <p className="page-section-title">{t('verification.title')}</p>
+              <p className="page-summary-note">
+                {verification.status === 'ok'
+                  ? t('verification.okDescription')
+                  : verification.status === 'mismatch'
+                    ? t('verification.mismatchDescription')
+                    : t('verification.notVerifiedDescription')}
+              </p>
+            </div>
+            <span className={`verification-status verification-status-${verification.status}`}>
+              {t(VERIFICATION_STATUS_KEYS[verification.status])}
+            </span>
+          </div>
+          <div className="verification-grid">
+            <div>
+              <strong>{t('verification.expected')}</strong>
+              <span>{t('verification.counts', {
+                total: verification.expected.total,
+                images: verification.expected.images,
+                videos: verification.expected.videos,
+                unknown: verification.expected.unknown
+              })}</span>
+            </div>
+            <div>
+              <strong>{t('verification.destination')}</strong>
+              <span>{t('verification.counts', {
+                total: verification.destination.total,
+                images: verification.destination.images,
+                videos: verification.destination.videos,
+                unknown: verification.destination.unknown
+              })}</span>
+            </div>
+            <div>
+              <strong>{t('verification.verifiedAt')}</strong>
+              <span>{formatDateTime(verification.verifiedAt)}</span>
+            </div>
+          </div>
+          {verification.status === 'mismatch' && (
+            <div className="verification-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => setView('review')}>
+                {t('verification.reviewAgain')}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
 
       {workspace && view === 'setup' && (
         <div className="grouping-setup-layout">
