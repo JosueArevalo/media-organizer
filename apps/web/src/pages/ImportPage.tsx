@@ -1,3 +1,4 @@
+import { useRef, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FolderPickerCard } from '../components/FolderPickerCard';
 import { useFolderSelections } from '../hooks/useFolderSelections';
@@ -8,6 +9,8 @@ import type { FolderSlot } from '../services/folder-selection.store';
 export const ImportPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const sourcePathInputRef = useRef<HTMLInputElement>(null);
+  const destinationPathInputRef = useRef<HTMLInputElement>(null);
   const {
     sourceSelection,
     destinationSelection,
@@ -31,6 +34,21 @@ export const ImportPage = () => {
     }
 
     navigate('/selection');
+  };
+
+  const handleSourcePathInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Tab' || event.shiftKey) {
+      return;
+    }
+
+    const destinationPathInput = destinationPathInputRef.current;
+
+    if (!destinationPathInput) {
+      return;
+    }
+
+    event.preventDefault();
+    destinationPathInput.focus();
   };
 
   const handleBrowseFolder = async (slot: FolderSlot) => {
@@ -78,6 +96,8 @@ export const ImportPage = () => {
           onPathChange={updateSourceFolderPath}
           onBrowse={() => handleBrowseFolder('source')}
           onClear={clearSourceFolder}
+          inputRef={sourcePathInputRef}
+          onPathInputKeyDown={handleSourcePathInputKeyDown}
         />
 
         <FolderPickerCard
@@ -89,6 +109,7 @@ export const ImportPage = () => {
           onPathChange={updateDestinationFolderPath}
           onBrowse={() => handleBrowseFolder('destination')}
           onClear={clearDestinationFolder}
+          inputRef={destinationPathInputRef}
         />
       </div>
 

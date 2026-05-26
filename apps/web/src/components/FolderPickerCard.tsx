@@ -17,6 +17,8 @@ type FolderPickerCardProps = {
   onPathChange: (path: string) => void;
   onBrowse: () => Promise<FolderBrowseResult>;
   onClear: () => void;
+  inputRef?: React.Ref<HTMLInputElement>;
+  onPathInputKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 };
 
 const formatTimestamp = (timestamp: number) =>
@@ -33,7 +35,9 @@ export const FolderPickerCard = ({
   isLoading,
   onPathChange,
   onBrowse,
-  onClear
+  onClear,
+  inputRef,
+  onPathInputKeyDown
 }: FolderPickerCardProps) => {
   const { t } = useTranslation();
   const [inputValue, setInputValue] = useState(selection?.path ?? '');
@@ -106,10 +110,12 @@ export const FolderPickerCard = ({
               <span className="folder-picker-path-label">{t('folder.pathLabel')}</span>
               <div className="folder-picker-input-group">
                 <input
+                  ref={inputRef}
                   className="folder-picker-path-input"
                   type="text"
                   value={inputValue}
                   onChange={(event) => handleInputChange(event.target.value)}
+                  onKeyDown={onPathInputKeyDown}
                   placeholder={t('folder.pathPlaceholder')}
                 />
                 {selection && (
