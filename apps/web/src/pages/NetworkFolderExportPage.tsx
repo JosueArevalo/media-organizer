@@ -11,6 +11,7 @@ import {
   createExportJobRequest,
   deleteNetworkDestinationRequest,
   getExportProgressRequest,
+  isValidUncPath,
   listNetworkDestinationsRequest,
   pauseExportJobRequest,
   retryFailedExportItemsRequest,
@@ -203,6 +204,12 @@ export const NetworkFolderExportPage = () => {
 
     if (!rootPath) {
       setBackendError(t('export.network.saveRootRequired'));
+      return;
+    }
+
+    if (!isValidUncPath(rootPath)) {
+      setBackendError(t('export.network.invalidUncPath'));
+      setIsAddLocationOpen(true);
       return;
     }
 
@@ -521,6 +528,7 @@ export const NetworkFolderExportPage = () => {
                   placeholder={t('export.network.rootPathPlaceholder')}
                   type="text"
                 />
+                <small className="field-hint">{t('export.network.rootPathHint')}</small>
               </label>
             </div>
 

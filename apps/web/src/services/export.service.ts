@@ -99,6 +99,18 @@ export type NetworkBrowseResult = {
   canCreateFolder: boolean;
 };
 
+export const isValidUncPath = (value: string) => {
+  const trimmed = value.trim();
+
+  if (!trimmed || trimmed.includes('/')) {
+    return false;
+  }
+
+  const segments = trimmed.replace(/\\+$/, '').split('\\').filter(Boolean);
+
+  return trimmed.startsWith('\\\\') && segments.length >= 1 && segments.every((segment) => segment !== '.' && segment !== '..');
+};
+
 const readErrorBody = async (response: Response) => {
   const body = await response.text();
 
