@@ -418,7 +418,7 @@ const getActiveRuntimeSession = (): SessionRecord | null => {
       `
         SELECT id, name, source_dir, output_dir, status, created_at, updated_at, last_opened_at
         FROM sessions
-        WHERE status IN ('draft', 'scanned', 'ready', 'running', 'paused')
+        WHERE status IN ('running', 'paused')
         ORDER BY datetime(updated_at) DESC
         LIMIT 1
       `
@@ -457,7 +457,7 @@ export const getDashboardSummary = (): DashboardSummary => {
   const executions = listExecutionRows().map(toExecution);
   const activeRuntimeSession = getActiveRuntimeSession();
   const currentExecution =
-    executions.find((execution) => execution.status === 'running') ??
+    executions.find((execution) => execution.status === 'running' || execution.groupingStatus === 'running') ??
     (activeRuntimeSession
       ? {
           id: activeRuntimeSession.id,
@@ -484,9 +484,9 @@ export const getDashboardSummary = (): DashboardSummary => {
           groupingCompletedItems: 0,
           groupingFailedItems: 0,
           verification: createNotVerifiedSnapshot(null)
-        }
+      }
       : null);
-  const lastExecution = executions.find((execution) => execution.status !== 'running') ?? executions[0] ?? null;
+  const lastExecution = executions.find((execution) => execution.id !== currentExecution?.id && execution.status !== 'running') ?? executions[0] ?? null;
   const failedExecutions = executions.filter((execution) => execution.status === 'failed').length;
   const alerts: DashboardSummary['alerts'] = [];
 
@@ -498,15 +498,15 @@ export const getDashboardSummary = (): DashboardSummary => {
     });
   }
 
-  if (lastExecution?.status === 'failed') {
+  if (currentExecution?.status === 'failed') {
     alerts.push({
-      id: 'last-failed',
+      id: 'current-failed',
       level: 'error',
-      message: 'The last execution finished with errors.'
+      message: 'The current workflow has errors.'
     });
   }
 
-  if (executions.some((execution) => execution.failedItems > 0 || execution.groupingFailedItems > 0)) {
+  if (currentExecution && (currentExecution.failedItems > 0 || currentExecution.groupingFailedItems > 0)) {
     alerts.push({
       id: 'failed-items',
       level: 'warning',

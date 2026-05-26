@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { StatCard } from '../components/StatCard';
+import { useCompressionSessionState } from '../hooks/useCompressionJobState';
+import { useExportJobState } from '../hooks/useExportJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
+import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation, type TranslationKey } from '../i18n';
 import { loadEncoderSettings } from '../services/encoder-settings.store';
 import {
@@ -12,8 +14,8 @@ import {
   type BackendHealth,
   type DashboardExecution,
   type DashboardSummary,
-  type ExecutionVerification,
-  type ExecutionStatus
+  type ExecutionStatus,
+  type ExecutionVerification
 } from '../services/dashboard.service';
 
 const formatDateTime = (value: string | null) => {
@@ -69,11 +71,14 @@ const statusClassName = (status: ExecutionStatus) => `dashboard-status dashboard
 
 const getExecutionTitle = (execution: DashboardExecution) => execution.name || basename(execution.sourceDir) || execution.sessionId;
 
-const VerificationSummary = ({ verification, compact = false }: { verification: ExecutionVerification; compact?: boolean }) => {
+const hasRealVerification = (verification: ExecutionVerification | null | undefined) =>
+  Boolean(verification?.verifiedAt && verification.expected.total > 0);
+
+const VerificationSummary = ({ verification }: { verification: ExecutionVerification }) => {
   const { t } = useTranslation();
 
   return (
-    <div className={`verification-panel verification-panel-${verification.status} ${compact ? 'verification-panel-compact' : ''}`}>
+    <div className={`verification-panel verification-panel-${verification.status}`}>
       <div className="verification-head">
         <div>
           <p className="page-section-title">{t('verification.title')}</p>
@@ -120,6 +125,9 @@ const VerificationSummary = ({ verification, compact = false }: { verification: 
 export const DashboardPage = () => {
   const { t } = useTranslation();
   const { sourceSelection, destinationSelection } = useFolderSelections();
+  const compressionSessionState = useCompressionSessionState();
+  const groupingSessionState = useGroupingSessionState();
+  const exportJobState = useExportJobState();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [executions, setExecutions] = useState<DashboardExecution[]>([]);
   const [health, setHealth] = useState<BackendHealth | null>(null);
@@ -141,16 +149,14 @@ export const DashboardPage = () => {
   useEffect(() => {
     let isActive = true;
 
-    void refreshDashboard()
+    refreshDashboard()
       .then(() => {
-        if (isActive) {
-          setDashboardError(null);
-        }
+        if (!isActive) return;
+        setDashboardError(null);
       })
       .catch((error) => {
-        if (isActive) {
-          setDashboardError(error instanceof Error ? error.message : t('dashboard.loadError'));
-        }
+        if (!isActive) return;
+        setDashboardError(error instanceof Error ? error.message : t('dashboard.loadError'));
       });
 
     getBackendHealth()
@@ -172,47 +178,167 @@ export const DashboardPage = () => {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [t]);
+
+  const currentState = (() => {
+    if (exportJobState.status === 'running' || exportJobState.status === 'paused') {
+      return {
+        title: t('dashboard.workflow.exportRunningTitle'),
+        description: t('dashboard.workflow.exportRunningDescription'),
+        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+      };
+    }
+
+    if (exportJobState.status === 'failed') {
+      return {
+        title: t('dashboard.workflow.exportFailedTitle'),
+        description: exportJobState.errorMessage ?? t('dashboard.workflow.exportFailedDescription'),
+        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+      };
+    }
+
+    if (exportJobState.status === 'completed') {
+      return {
+        title: t('dashboard.workflow.exportCompletedTitle'),
+        description: t('dashboard.workflow.exportCompletedDescription'),
+        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+      };
+    }
+
+    if (groupingSessionState.status === 'completed') {
+      return {
+        title: t('dashboard.workflow.groupingCompletedTitle'),
+        description: t('dashboard.workflow.groupingCompletedDescription', {
+          destination: groupingSessionState.outputRootLabel ?? destinationSelection?.path ?? '-'
+        }),
+        action: { to: '/export', label: t('dashboard.action.openExport') }
+      };
+    }
+
+    if (groupingSessionState.status === 'running' || groupingSessionState.status === 'paused') {
+      return {
+        title: t('dashboard.workflow.groupingRunningTitle'),
+        description: t('dashboard.workflow.groupingRunningDescription'),
+        action: { to: '/grouping', label: t('dashboard.action.openGrouping') }
+      };
+    }
+
+    if (groupingSessionState.status === 'failed') {
+      return {
+        title: t('dashboard.workflow.groupingFailedTitle'),
+        description: groupingSessionState.errorMessage ?? t('dashboard.workflow.groupingFailedDescription'),
+        action: { to: '/grouping', label: t('dashboard.action.openGrouping') }
+      };
+    }
+
+    if (compressionSessionState.status === 'running') {
+      return {
+        title: t('dashboard.workflow.compressionRunningTitle'),
+        description: t('dashboard.workflow.compressionRunningDescription'),
+        action: { to: '/compression', label: t('dashboard.action.openProgress') }
+      };
+    }
+
+    if (compressionSessionState.status === 'completed') {
+      return {
+        title: t('dashboard.workflow.compressionCompletedTitle'),
+        description: t('dashboard.workflow.compressionCompletedDescription'),
+        action: { to: '/grouping', label: t('dashboard.action.openGrouping') }
+      };
+    }
+
+    if (compressionSessionState.status === 'failed') {
+      return {
+        title: t('dashboard.workflow.compressionFailedTitle'),
+        description: compressionSessionState.errorMessage ?? t('dashboard.workflow.compressionFailedDescription'),
+        action: { to: '/compression', label: t('dashboard.action.openProgress') }
+      };
+    }
+
+    if (!sourceSelection || !destinationSelection) {
+      return {
+        title: t('dashboard.workflow.chooseFoldersTitle'),
+        description: t('dashboard.workflow.chooseFoldersDescription'),
+        action: { to: '/import', label: t('dashboard.action.chooseFolders') }
+      };
+    }
+
+    if (!hasConfiguredEncoders) {
+      return {
+        title: t('dashboard.workflow.configureToolsTitle'),
+        description: t('dashboard.workflow.configureToolsDescription'),
+        action: { to: '/settings', label: t('dashboard.action.configureTools') }
+      };
+    }
+
+    return {
+      title: t('dashboard.workflow.readyTitle'),
+      description: t('dashboard.workflow.readyDescription'),
+      action: { to: '/selection', label: t('dashboard.action.reviewSelection') }
+    };
+  })();
 
   const localAlerts = useMemo(() => {
-    const alerts = [...(summary?.alerts ?? [])];
+    const alerts: Array<{ id: string; level: 'info' | 'warning' | 'error'; message: string }> = [];
 
     if (healthError) {
-      alerts.unshift({
+      alerts.push({
         id: 'backend-offline',
-        level: 'error' as const,
+        level: 'error',
         message: t('dashboard.alert.backendOffline')
       });
     }
 
-    if (!hasConfiguredEncoders) {
+    if (!hasConfiguredEncoders && sourceSelection && destinationSelection && compressionSessionState.status === 'idle') {
       alerts.push({
         id: 'encoders-missing',
-        level: 'warning' as const,
+        level: 'warning',
         message: t('dashboard.alert.encodersMissing')
       });
     }
 
+    if (compressionSessionState.status === 'failed' && compressionSessionState.errorMessage) {
+      alerts.push({
+        id: 'compression-failed',
+        level: 'error',
+        message: compressionSessionState.errorMessage
+      });
+    }
+
+    if (groupingSessionState.status === 'failed' && groupingSessionState.errorMessage) {
+      alerts.push({
+        id: 'grouping-failed',
+        level: 'error',
+        message: groupingSessionState.errorMessage
+      });
+    }
+
+    if (exportJobState.status === 'failed' && exportJobState.errorMessage) {
+      alerts.push({
+        id: 'export-failed',
+        level: 'error',
+        message: exportJobState.errorMessage
+      });
+    }
+
     return alerts;
-  }, [hasConfiguredEncoders, healthError, summary?.alerts, t]);
+  }, [
+    compressionSessionState.errorMessage,
+    compressionSessionState.status,
+    destinationSelection,
+    exportJobState.errorMessage,
+    exportJobState.status,
+    groupingSessionState.errorMessage,
+    groupingSessionState.status,
+    hasConfiguredEncoders,
+    healthError,
+    sourceSelection,
+    t
+  ]);
 
-  const nextAction = (() => {
-    if (summary?.currentExecution?.status === 'running') {
-      return { to: '/compression', label: t('dashboard.action.openProgress') };
-    }
-
-    if (!hasConfiguredEncoders) {
-      return { to: '/settings', label: t('dashboard.action.configureTools') };
-    }
-
-    if (!sourceSelection || !destinationSelection) {
-      return { to: '/import', label: t('dashboard.action.chooseFolders') };
-    }
-
-    return { to: '/compression', label: t('dashboard.action.startCompression') };
-  })();
-
-  const highlightedVerification = summary?.currentExecution?.verification ?? summary?.lastExecution?.verification ?? null;
+  const highlightedVerification = summary?.lastExecution?.groupingStatus === 'completed' && hasRealVerification(summary.lastExecution.verification)
+    ? summary.lastExecution.verification
+    : null;
 
   const handleDeleteExecution = async (executionId: string) => {
     const confirmed = window.confirm(t('dashboard.deleteConfirm'));
@@ -239,27 +365,14 @@ export const DashboardPage = () => {
       <section className="panel panel-highlight dashboard-hero">
         <div>
           <p className="panel-kicker">{t('dashboard.status')}</p>
-          <h2 className="panel-title">{summary?.currentExecution ? t('dashboard.currentTitle') : t('dashboard.readyTitle')}</h2>
-          <p className="panel-description">
-            {summary?.currentExecution
-              ? t('dashboard.currentDescription', { name: getExecutionTitle(summary.currentExecution) })
-              : summary?.lastExecution
-                ? t('dashboard.lastDescription', { name: getExecutionTitle(summary.lastExecution), status: t(STATUS_LABEL_KEYS[summary.lastExecution.status]) })
-                : t('dashboard.emptyDescription')}
-          </p>
+          <h2 className="panel-title">{currentState.title}</h2>
+          <p className="panel-description">{currentState.description}</p>
         </div>
         <div className="action-row">
-          <Link to={nextAction.to} className="btn btn-primary">
-            {nextAction.label}
+          <Link to={currentState.action.to} className="btn btn-primary">
+            {currentState.action.label}
           </Link>
         </div>
-      </section>
-
-      <section className="stats-grid" aria-label={t('dashboard.stats.aria')}>
-        <StatCard title={t('dashboard.stats.executions')} value={`${summary?.totals.executions ?? 0}`} hint={t('dashboard.stats.executionsHint')} />
-        <StatCard title={t('dashboard.stats.completed')} value={`${summary?.totals.completedExecutions ?? 0}`} hint={t('dashboard.stats.completedHint')} />
-        <StatCard title={t('dashboard.stats.filesProcessed')} value={`${summary?.totals.filesProcessed ?? 0}`} hint={t('dashboard.stats.filesProcessedHint')} />
-        <StatCard title={t('dashboard.stats.failedItems')} value={`${summary?.totals.failedItems ?? 0}`} hint={t('dashboard.stats.failedItemsHint')} />
       </section>
 
       {dashboardError && <p className="error">{dashboardError}</p>}
@@ -324,7 +437,7 @@ export const DashboardPage = () => {
                         <p><strong>{t('dashboard.presets')}</strong><br />{execution.imageProfileLabel ?? '-'} / {execution.videoPresetLabel ?? '-'}</p>
                         <p><strong>{t('dashboard.grouping')}</strong><br />{execution.groupingStatus ? `${t(STATUS_LABEL_KEYS[execution.groupingStatus])} (${execution.groupingCompletedItems}/${execution.groupingTotalItems})` : t('dashboard.groupingNone')}</p>
                       </div>
-                      <VerificationSummary verification={execution.verification} compact />
+                      {hasRealVerification(execution.verification) && <VerificationSummary verification={execution.verification} />}
                       {execution.errorSummary.length > 0 && (
                         <div className="dashboard-error-summary">
                           <strong>{t('dashboard.errors')}</strong>
