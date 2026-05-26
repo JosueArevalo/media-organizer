@@ -48,3 +48,22 @@ export const resetAllPersistentAppState = async () => {
   resetGroupingSession();
   resetExportJobSnapshot();
 };
+
+export const resetRuntimeStateWithBackend = async () => {
+  await resetAllPersistentAppState();
+
+  const response = await fetch('/api/system/maintenance/reset-persistent-state', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      confirmation: 'RESET_STATE'
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Request failed with status ${response.status}`);
+  }
+};

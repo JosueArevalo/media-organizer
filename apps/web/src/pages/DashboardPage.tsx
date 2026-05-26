@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation, type TranslationKey } from '../i18n';
+import { resetRuntimeStateWithBackend } from '../services/app-maintenance.store';
 import { loadEncoderSettings } from '../services/encoder-settings.store';
 import {
   deleteDashboardExecution,
@@ -167,6 +168,7 @@ const VerificationSummary = ({ verification }: { verification: ExecutionVerifica
 
 export const DashboardPage = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { sourceSelection, destinationSelection } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
   const groupingSessionState = useGroupingSessionState();
@@ -178,6 +180,7 @@ export const DashboardPage = () => {
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [expandedExecutionId, setExpandedExecutionId] = useState<string | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
+  const [isStartingNewSession, setIsStartingNewSession] = useState(false);
   const [hasConfiguredEncoders, setHasConfiguredEncoders] = useState(true);
 
   const refreshDashboard = async () => {
@@ -383,6 +386,36 @@ export const DashboardPage = () => {
     ? summary.lastExecution.verification
     : null;
 
+  const canStartNewSession =
+    groupingSessionState.status === 'completed' ||
+    exportJobState.status === 'running' ||
+    exportJobState.status === 'paused' ||
+    exportJobState.status === 'completed' ||
+    exportJobState.status === 'failed';
+
+  const handleStartNewSession = async () => {
+    const confirmed = window.confirm(t('dashboard.newSessionConfirm'));
+    if (!confirmed) {
+      return;
+    }
+
+    setIsStartingNewSession(true);
+    setDashboardError(null);
+
+    try {
+      await resetRuntimeStateWithBackend();
+      navigate('/import', { replace: true });
+    } catch (error) {
+      setDashboardError(
+        t('dashboard.newSessionError', {
+          message: error instanceof Error ? error.message : t('dashboard.unknownError')
+        })
+      );
+    } finally {
+      setIsStartingNewSession(false);
+    }
+  };
+
   const handleDeleteExecution = async (executionId: string) => {
     const confirmed = window.confirm(t('dashboard.deleteConfirm'));
     if (!confirmed) {
@@ -415,6 +448,16 @@ export const DashboardPage = () => {
           <Link to={currentState.action.to} className="btn btn-primary">
             {currentState.action.label}
           </Link>
+          {canStartNewSession && (
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => void handleStartNewSession()}
+              disabled={isStartingNewSession}
+            >
+              {isStartingNewSession ? t('dashboard.action.startingNewSession') : t('dashboard.action.startNewSession')}
+            </button>
+          )}
         </div>
       </section>
 
