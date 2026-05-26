@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
@@ -11,6 +11,7 @@ import {
   createExportJobRequest,
   deleteNetworkDestinationRequest,
   getExportProgressRequest,
+  isValidUncPath,
   listNetworkDestinationsRequest,
   pauseExportJobRequest,
   retryFailedExportItemsRequest,
@@ -56,7 +57,7 @@ export const NetworkFolderExportPage = () => {
   const [destinations, setDestinations] = useState<NetworkDestination[]>([]);
   const [selectedDestinationId, setSelectedDestinationId] = useState('');
   const [saveName, setSaveName] = useState('');
-  const [saveRootPath, setSaveRootPath] = useState(exportJobState.destinationPath ?? '');
+  const [saveRootPath, setSaveRootPath] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberInWindows, setRememberInWindows] = useState(false);
@@ -66,6 +67,8 @@ export const NetworkFolderExportPage = () => {
   const [isSavingDestination, setIsSavingDestination] = useState(false);
   const [isDeletingDestination, setIsDeletingDestination] = useState(false);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
+  const [isAddLocationOpen, setIsAddLocationOpen] = useState(false);
+  const [isManualPathOpen, setIsManualPathOpen] = useState(false);
   const [browserResult, setBrowserResult] = useState<NetworkBrowseResult | null>(null);
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [isBrowsing, setIsBrowsing] = useState(false);
@@ -134,6 +137,10 @@ export const NetworkFolderExportPage = () => {
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
     [destinations, selectedDestinationId]
   );
+  const shouldShowAddLocation = destinations.length === 0 || isAddLocationOpen;
+  const hasSelectedDestination = Boolean(selectedDestination);
+  const selectedRootPath = selectedDestination?.rootPath ?? '';
+  const canBrowseNetworkFolder = Boolean(selectedRootPath || destinationPath.trim());
 
   const credentials = useMemo<NetworkCredentials | undefined>(() => {
     if (!username.trim() || !password) {
@@ -147,14 +154,40 @@ export const NetworkFolderExportPage = () => {
     };
   }, [password, rememberInWindows, username]);
 
+  const resetNetworkDestinationDraft = useCallback(() => {
+    setSelectedDestinationId('');
+    setSaveName('');
+    setSaveRootPath('');
+    setDestinationPath('');
+    setUsername('');
+    setPassword('');
+    setRememberInWindows(false);
+    setAuthMessage(null);
+    setAuthError(null);
+    setTargetTest(null);
+    setBrowserResult(null);
+    setBrowserError(null);
+    setNewFolderName('');
+    setIsBrowserOpen(false);
+    setIsManualPathOpen(false);
+    setIsAddLocationOpen(true);
+  }, []);
+
   const loadDestinations = useCallback(async () => {
     try {
       const result = await listNetworkDestinationsRequest();
       setDestinations(result.destinations);
+
+      if (result.destinations.length === 0) {
+        resetNetworkDestinationDraft();
+        return;
+      }
+
+      setIsAddLocationOpen(false);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.network.destinationsLoadError'));
     }
-  }, [t]);
+  }, [resetNetworkDestinationDraft, t]);
 
   useEffect(() => {
     void loadDestinations();
@@ -165,6 +198,7 @@ export const NetworkFolderExportPage = () => {
     const destination = destinations.find((item) => item.id === destinationId);
 
     if (!destination) {
+      resetNetworkDestinationDraft();
       return;
     }
 
@@ -173,16 +207,41 @@ export const NetworkFolderExportPage = () => {
     setDestinationPath(destination.rootPath);
     setUsername(destination.username ?? '');
     setPassword('');
+    setRememberInWindows(false);
     setTargetTest(null);
     setAuthMessage(null);
     setAuthError(null);
+    setBrowserResult(null);
+    setBrowserError(null);
+    setNewFolderName('');
+    setIsBrowserOpen(false);
+    setIsManualPathOpen(false);
+  };
+
+  const handleToggleAddLocation = () => {
+    setIsAddLocationOpen((current) => {
+      const nextIsOpen = !current;
+
+      if (nextIsOpen) {
+        setSaveName('');
+        setSaveRootPath('');
+      }
+
+      return nextIsOpen;
+    });
   };
 
   const handleSaveDestination = async () => {
-    const rootPath = saveRootPath.trim() || destinationPath.trim();
+    const rootPath = saveRootPath.trim();
 
     if (!rootPath) {
       setBackendError(t('export.network.saveRootRequired'));
+      return;
+    }
+
+    if (!isValidUncPath(rootPath)) {
+      setBackendError(t('export.network.invalidUncPath'));
+      setIsAddLocationOpen(true);
       return;
     }
 
@@ -198,12 +257,21 @@ export const NetworkFolderExportPage = () => {
       setSelectedDestinationId(saved.id);
       setSaveName(saved.name);
       setSaveRootPath(saved.rootPath);
+      setDestinationPath(saved.rootPath);
+      setTargetTest(null);
       setBackendError(null);
+      setIsAddLocationOpen(false);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.network.saveError'));
+      setIsAddLocationOpen(true);
     } finally {
       setIsSavingDestination(false);
     }
+  };
+
+  const handleSaveDestinationSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleSaveDestination();
   };
 
   const handleDeleteDestination = async () => {
@@ -215,10 +283,8 @@ export const NetworkFolderExportPage = () => {
 
     try {
       await deleteNetworkDestinationRequest(selectedDestination.id);
-      setSelectedDestinationId('');
-      setSaveName('');
-      setSaveRootPath('');
       await loadDestinations();
+      resetNetworkDestinationDraft();
       setBackendError(null);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.network.deleteError'));
@@ -236,7 +302,7 @@ export const NetworkFolderExportPage = () => {
     setIsAuthenticating(true);
 
     try {
-      const result = await authenticateNetworkPathRequest({ path: destinationPath.trim() || saveRootPath.trim(), credentials });
+      const result = await authenticateNetworkPathRequest({ path: destinationPath.trim() || selectedRootPath, credentials });
       setAuthMessage(result.message);
       setAuthError(null);
       setBackendError(null);
@@ -248,8 +314,13 @@ export const NetworkFolderExportPage = () => {
     }
   };
 
+  const handleAuthenticateSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleAuthenticate();
+  };
+
   const openBrowser = async () => {
-    const rootPath = saveRootPath.trim() || selectedDestination?.rootPath || destinationPath.trim();
+    const rootPath = selectedRootPath || destinationPath.trim();
 
     if (!rootPath) {
       setBrowserError(t('export.network.browserRootRequired'));
@@ -261,7 +332,7 @@ export const NetworkFolderExportPage = () => {
     await loadBrowserPath(rootPath, rootPath);
   };
 
-  const loadBrowserPath = async (pathToBrowse: string, rootPath = saveRootPath.trim() || selectedDestination?.rootPath || pathToBrowse) => {
+  const loadBrowserPath = async (pathToBrowse: string, rootPath = selectedRootPath || pathToBrowse) => {
     setIsBrowsing(true);
 
     try {
@@ -288,7 +359,7 @@ export const NetworkFolderExportPage = () => {
     setIsBrowsing(true);
 
     try {
-      const rootPath = saveRootPath.trim() || selectedDestination?.rootPath || browserResult.path;
+      const rootPath = selectedRootPath || browserResult.path;
       await createNetworkFolderRequest({
         parentPath: browserResult.path,
         folderName: newFolderName.trim(),
@@ -409,12 +480,12 @@ export const NetworkFolderExportPage = () => {
 
   return (
     <div className="page-stack export-page">
-      <div className="page-header">
+      <div className="page-header export-page-header">
         <div>
           <h2 className="page-title">{t('export.network.title')}</h2>
           <p className="page-subtitle">{t('export.network.subtitle')}</p>
         </div>
-        <button className="btn btn-secondary" type="button" onClick={() => navigate('/export')}>
+        <button className="btn btn-secondary export-back-button" type="button" onClick={() => navigate('/export')}>
           {t('export.backToProviders')}
         </button>
       </div>
@@ -422,81 +493,95 @@ export const NetworkFolderExportPage = () => {
       {!sourceRoot && <p className="error">{t('export.unavailable')}</p>}
       {backendError && <p className="error">{backendError}</p>}
 
-      <section className="settings-panel export-panel">
-        <div>
+      <section className="settings-panel export-panel network-export-flow">
+        <div className="network-step network-source-step">
           <p className="page-section-title">{t('export.sourceTitle')}</p>
           <p className="page-summary-note">{sourceRoot || t('export.noSource')}</p>
         </div>
 
-        <div className="network-destination-grid">
-          <label className="folder-path-control">
-            <span>{t('export.network.savedDestinations')}</span>
-            <select
-              className="folder-path-input"
-              value={selectedDestinationId}
-              onChange={(event) => handleSelectDestination(event.target.value)}
-            >
-              <option value="">{t('export.network.noSavedDestination')}</option>
+        <div className="network-step">
+          <div className="network-section-header">
+            <div>
+              <p className="page-section-title">{t('export.network.locationStep')}</p>
+              <p className="page-summary-note">{t('export.network.savedDestinationsNote')}</p>
+            </div>
+            <div className="network-header-actions">
+              {destinations.length > 0 && (
+                <button className="btn btn-secondary" type="button" onClick={handleToggleAddLocation}>
+                  {isAddLocationOpen ? t('export.network.hideAddLocation') : t('export.network.addAnotherLocation')}
+                </button>
+              )}
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => void handleDeleteDestination()}
+                disabled={!selectedDestination || isDeletingDestination}
+              >
+                {isDeletingDestination ? t('export.network.deletingDestination') : t('export.network.deleteDestination')}
+              </button>
+            </div>
+          </div>
+
+          {destinations.length === 0 ? (
+            <p className="network-empty-note">{t('export.network.noSavedDestinationNote')}</p>
+          ) : (
+            <div className="network-location-list" aria-label={t('export.network.savedDestinations')}>
               {destinations.map((destination) => (
-                <option key={destination.id} value={destination.id}>
-                  {destination.name} - {destination.rootPath}
-                </option>
+                <button
+                  key={destination.id}
+                  className={`network-location-card${destination.id === selectedDestinationId ? ' is-selected' : ''}`}
+                  type="button"
+                  onClick={() => handleSelectDestination(destination.id)}
+                >
+                  <strong>{destination.name}</strong>
+                  <span>{destination.rootPath}</span>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          )}
 
-          <label className="folder-path-control">
-            <span>{t('export.network.saveName')}</span>
-            <input
-              className="folder-path-input"
-              value={saveName}
-              onChange={(event) => setSaveName(event.target.value)}
-              placeholder={t('export.network.saveNamePlaceholder')}
-              type="text"
-            />
-          </label>
+          {shouldShowAddLocation && <form className="network-subsection" onSubmit={handleSaveDestinationSubmit}>
+            <div>
+              <p className="network-subsection-title">{t('export.network.addLocationTitle')}</p>
+              <p className="page-summary-note">{t('export.network.addLocationNote')}</p>
+            </div>
 
-          <label className="folder-path-control network-destination-root">
-            <span>{t('export.network.rootPath')}</span>
-            <input
-              className="folder-path-input"
-              value={saveRootPath}
-              onChange={(event) => setSaveRootPath(event.target.value)}
-              placeholder="\\\\192.168.0.148\\Xternal"
-              type="text"
-            />
-          </label>
+            <div className="network-destination-grid">
+              <label className="folder-path-control">
+                <span>{t('export.network.saveName')}</span>
+                <input
+                  className="folder-path-input"
+                  value={saveName}
+                  onChange={(event) => setSaveName(event.target.value)}
+                  placeholder={t('export.network.saveNamePlaceholder')}
+                  type="text"
+                />
+              </label>
+
+              <label className="folder-path-control">
+                <span>{t('export.network.rootPath')}</span>
+                <input
+                  className="folder-path-input"
+                  value={saveRootPath}
+                  onChange={(event) => setSaveRootPath(event.target.value)}
+                  placeholder={t('export.network.rootPathPlaceholder')}
+                  type="text"
+                />
+                <small className="field-hint">{t('export.network.rootPathHint')}</small>
+              </label>
+            </div>
+
+            <div className="network-export-tools">
+              <button className="btn btn-primary" type="submit" disabled={isSavingDestination}>
+                {isSavingDestination ? t('export.network.savingDestination') : t('export.network.saveDestination')}
+              </button>
+            </div>
+          </form>}
         </div>
 
-        <label className="folder-path-control">
-          <span>{t('export.destinationLabel')}</span>
-          <input
-            className="folder-path-input"
-            value={destinationPath}
-            onChange={(event) => {
-              setDestinationPath(event.target.value);
-              setTargetTest(null);
-            }}
-            placeholder="\\\\192.168.0.148\\photos\\2026"
-            type="text"
-          />
-        </label>
-
-        <div className="network-export-tools">
-          <button className="btn btn-secondary" type="button" onClick={() => void handleSaveDestination()} disabled={isSavingDestination}>
-            {isSavingDestination ? t('export.network.savingDestination') : t('export.network.saveDestination')}
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => void handleDeleteDestination()} disabled={!selectedDestination || isDeletingDestination}>
-            {isDeletingDestination ? t('export.network.deletingDestination') : t('export.network.deleteDestination')}
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => void openBrowser()}>
-            {t('export.network.browseFolders')}
-          </button>
-        </div>
-
-        <div className="network-auth-panel">
+        {hasSelectedDestination && <form className="network-step" onSubmit={handleAuthenticateSubmit}>
           <div>
-            <p className="page-section-title">{t('export.network.credentialsTitle')}</p>
+            <p className="page-section-title">{t('export.network.accessStep')}</p>
             <p className="page-summary-note">{t('export.network.credentialsNote')}</p>
           </div>
           <div className="network-auth-grid">
@@ -522,24 +607,60 @@ export const NetworkFolderExportPage = () => {
               />
             </label>
           </div>
-          <label className="network-checkbox">
-            <input
-              checked={rememberInWindows}
-              onChange={(event) => setRememberInWindows(event.target.checked)}
-              type="checkbox"
-            />
-            <span>{t('export.network.rememberInWindows')}</span>
-          </label>
-          <div className="network-export-tools">
-            <button className="btn btn-secondary" type="button" onClick={() => void handleAuthenticate()} disabled={isAuthenticating || !username.trim() || !password}>
+          <div className="network-auth-footer">
+            <label className="network-checkbox">
+              <input
+                checked={rememberInWindows}
+                onChange={(event) => setRememberInWindows(event.target.checked)}
+                type="checkbox"
+              />
+              <span>{t('export.network.rememberInWindows')}</span>
+            </label>
+            <button className="btn btn-secondary" type="submit" disabled={isAuthenticating || !username.trim() || !password}>
               {isAuthenticating ? t('export.network.authenticating') : t('export.network.authenticate')}
             </button>
           </div>
           {authMessage && <p className="success-message">{authMessage}</p>}
           {authError && <p className="error">{authError}</p>}
-        </div>
+        </form>}
 
-        <div className="export-actions">
+        {hasSelectedDestination && <div className="network-step network-export-folder">
+          <div>
+            <p className="page-section-title">{t('export.network.folderStep')}</p>
+            <p className="page-summary-note">{t('export.network.exportFolderNote')}</p>
+          </div>
+
+          <div className="network-path-summary">
+            <span>{destinationPath.trim() || t('export.network.noExportFolder')}</span>
+          </div>
+
+          <div className="network-export-tools">
+            <button className="btn btn-primary" type="button" onClick={() => void openBrowser()} disabled={!canBrowseNetworkFolder}>
+              {t('export.network.chooseFolder')}
+            </button>
+            <button className="btn btn-secondary" type="button" onClick={() => setIsManualPathOpen((current) => !current)}>
+              {isManualPathOpen ? t('export.network.hideManualPath') : t('export.network.editPathManually')}
+            </button>
+          </div>
+
+          {isManualPathOpen && (
+            <label className="folder-path-control">
+              <span>{t('export.destinationLabel')}</span>
+              <input
+                className="folder-path-input"
+                value={destinationPath}
+                onChange={(event) => {
+                  setDestinationPath(event.target.value);
+                  setTargetTest(null);
+                }}
+                placeholder={t('export.network.destinationPathPlaceholder')}
+                type="text"
+              />
+            </label>
+          )}
+        </div>}
+
+        {hasSelectedDestination && <div className="export-actions network-final-actions">
           <button className="btn btn-secondary" type="button" onClick={() => void handleTestTarget()} disabled={!destinationPath.trim() || isTesting}>
             {isTesting ? t('export.testing') : t('export.testTarget')}
           </button>
@@ -552,7 +673,7 @@ export const NetworkFolderExportPage = () => {
           <button className="btn btn-secondary" type="button" onClick={() => void handleRetryFailed()} disabled={!backendJobId || !progress?.failed}>
             {t('export.retryFailed')}
           </button>
-        </div>
+        </div>}
 
         {targetTest && (
           <div className={targetTest.ok ? 'success-message' : 'error'}>

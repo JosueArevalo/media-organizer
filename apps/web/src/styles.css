@@ -873,6 +873,16 @@ body {
   margin-bottom: 8px;
 }
 
+.export-page-header {
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.export-back-button {
+  justify-self: end;
+  width: auto;
+}
+
 .page-title {
   margin: 0;
   font-size: 24px;
@@ -2685,6 +2695,7 @@ body {
 }
 
 .folder-path-control {
+  align-content: start;
   display: grid;
   gap: 8px;
 }
@@ -2711,14 +2722,128 @@ body {
   border-color: var(--accent);
 }
 
+.field-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .export-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
+.network-export-flow {
+  gap: 0;
+  padding: 0;
+}
+
+.network-step {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.network-step:last-child {
+  border-bottom: 0;
+}
+
+.network-source-step {
+  gap: 4px;
+}
+
+.network-subsection {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.network-subsection-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.network-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.network-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.network-location-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.network-location-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  min-height: 74px;
+  padding: 12px;
+  text-align: left;
+}
+
+.network-location-card:hover,
+.network-location-card.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+.network-location-card strong,
+.network-location-card span,
+.network-path-summary span,
+.network-empty-state span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.network-location-card span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.network-empty-state,
+.network-path-summary {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-muted);
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.network-empty-state strong {
+  color: var(--text);
+}
+
+.network-empty-note {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin: 0;
+}
+
 .network-destination-grid,
 .network-auth-grid {
+  align-items: start;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -2743,6 +2868,23 @@ body {
   padding: 14px;
   display: grid;
   gap: 12px;
+}
+
+.network-auth-footer {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.network-final-actions {
+  padding: 16px 18px;
+}
+
+.network-export-flow > .success-message,
+.network-export-flow > .error {
+  margin: 0 18px 16px;
 }
 
 .network-checkbox {
@@ -3034,5 +3176,22 @@ body {
   .network-destination-grid,
   .network-auth-grid {
     grid-template-columns: 1fr;
+  }
+
+  .network-section-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .network-header-actions {
+    justify-content: flex-start;
+  }
+
+  .export-page-header {
+    grid-template-columns: 1fr;
+  }
+
+  .export-back-button {
+    justify-self: start;
   }
 }
