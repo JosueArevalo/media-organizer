@@ -73,6 +73,28 @@ const blockedReasonLabelKeys: Record<CompletionNotificationBlockedReason, Transl
   'notification-permission-denied': 'settings.notifications.blocked.notificationPermissionDenied'
 };
 
+const toolDownloadLinks: Record<ToolKey, {
+  url: string;
+  ariaLabel: TranslationKey;
+}> = {
+  image: {
+    url: 'https://github.com/garyzyg/mozjpeg-windows/releases',
+    ariaLabel: 'settings.downloadImageAria'
+  },
+  imagemagick: {
+    url: 'https://imagemagick.org/download/',
+    ariaLabel: 'settings.downloadImageMagickAria'
+  },
+  exiftool: {
+    url: 'https://exiftool.org/',
+    ariaLabel: 'settings.downloadExifToolAria'
+  },
+  video: {
+    url: 'https://handbrake.fr/downloads2.php',
+    ariaLabel: 'settings.downloadVideoAria'
+  }
+};
+
 const SettingsPage = () => {
   const { t } = useTranslation();
   const [settings, setSettings] = useState<EncoderSettingsSnapshot>({
@@ -255,6 +277,27 @@ const SettingsPage = () => {
     settings.videoToolCommand !== savedSettings.videoToolCommand ||
     settings.imageMagickCommand !== savedSettings.imageMagickCommand ||
     settings.exifToolCommand !== savedSettings.exifToolCommand;
+
+  const renderDownloadLink = (tool: ToolKey) => {
+    if (settings[getToolField(tool)].trim()) {
+      return null;
+    }
+
+    const downloadLink = toolDownloadLinks[tool];
+
+    return (
+      <a
+        className="path-btn path-btn-download"
+        href={downloadLink.url}
+        target="_blank"
+        rel="noreferrer noopener"
+        aria-label={t(downloadLink.ariaLabel)}
+        title={t(downloadLink.ariaLabel)}
+      >
+        {t('settings.download')}
+      </a>
+    );
+  };
 
   const saveNotificationSettings = (nextSettings: Omit<CompletionNotificationSettings, 'updatedAt'>) => {
     const saved = saveCompletionNotificationSettings(nextSettings);
@@ -479,6 +522,7 @@ const SettingsPage = () => {
                 >
                   {t('settings.browse')}
                 </button>
+                {renderDownloadLink('image')}
                 {settings.imageToolCommand && (
                   <button
                     className="path-btn path-btn-clear"
@@ -514,6 +558,7 @@ const SettingsPage = () => {
                 >
                   {t('settings.browse')}
                 </button>
+                {renderDownloadLink('imagemagick')}
                 {settings.imageMagickCommand && (
                   <button
                     className="path-btn path-btn-clear"
@@ -549,6 +594,7 @@ const SettingsPage = () => {
                 >
                   {t('settings.browse')}
                 </button>
+                {renderDownloadLink('exiftool')}
                 {settings.exifToolCommand && (
                   <button
                     className="path-btn path-btn-clear"
@@ -584,6 +630,7 @@ const SettingsPage = () => {
                 >
                   {t('settings.browse')}
                 </button>
+                {renderDownloadLink('video')}
                 {settings.videoToolCommand && (
                   <button
                     className="path-btn path-btn-clear"
