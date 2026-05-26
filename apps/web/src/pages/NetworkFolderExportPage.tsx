@@ -57,7 +57,7 @@ export const NetworkFolderExportPage = () => {
   const [destinations, setDestinations] = useState<NetworkDestination[]>([]);
   const [selectedDestinationId, setSelectedDestinationId] = useState('');
   const [saveName, setSaveName] = useState('');
-  const [saveRootPath, setSaveRootPath] = useState(exportJobState.destinationPath ?? '');
+  const [saveRootPath, setSaveRootPath] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberInWindows, setRememberInWindows] = useState(false);
@@ -138,7 +138,9 @@ export const NetworkFolderExportPage = () => {
     [destinations, selectedDestinationId]
   );
   const shouldShowAddLocation = destinations.length === 0 || isAddLocationOpen;
-  const canBrowseNetworkFolder = Boolean(saveRootPath.trim() || selectedDestination?.rootPath || destinationPath.trim());
+  const hasSelectedDestination = Boolean(selectedDestination);
+  const selectedRootPath = selectedDestination?.rootPath ?? '';
+  const canBrowseNetworkFolder = Boolean(selectedRootPath || destinationPath.trim());
 
   const credentials = useMemo<NetworkCredentials | undefined>(() => {
     if (!username.trim() || !password) {
@@ -152,15 +154,40 @@ export const NetworkFolderExportPage = () => {
     };
   }, [password, rememberInWindows, username]);
 
+  const resetNetworkDestinationDraft = useCallback(() => {
+    setSelectedDestinationId('');
+    setSaveName('');
+    setSaveRootPath('');
+    setDestinationPath('');
+    setUsername('');
+    setPassword('');
+    setRememberInWindows(false);
+    setAuthMessage(null);
+    setAuthError(null);
+    setTargetTest(null);
+    setBrowserResult(null);
+    setBrowserError(null);
+    setNewFolderName('');
+    setIsBrowserOpen(false);
+    setIsManualPathOpen(false);
+    setIsAddLocationOpen(true);
+  }, []);
+
   const loadDestinations = useCallback(async () => {
     try {
       const result = await listNetworkDestinationsRequest();
       setDestinations(result.destinations);
-      setIsAddLocationOpen(result.destinations.length === 0);
+
+      if (result.destinations.length === 0) {
+        resetNetworkDestinationDraft();
+        return;
+      }
+
+      setIsAddLocationOpen(false);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.network.destinationsLoadError'));
     }
-  }, [t]);
+  }, [resetNetworkDestinationDraft, t]);
 
   useEffect(() => {
     void loadDestinations();
@@ -171,8 +198,7 @@ export const NetworkFolderExportPage = () => {
     const destination = destinations.find((item) => item.id === destinationId);
 
     if (!destination) {
-      setSaveName('');
-      setSaveRootPath('');
+      resetNetworkDestinationDraft();
       return;
     }
 
@@ -181,9 +207,15 @@ export const NetworkFolderExportPage = () => {
     setDestinationPath(destination.rootPath);
     setUsername(destination.username ?? '');
     setPassword('');
+    setRememberInWindows(false);
     setTargetTest(null);
     setAuthMessage(null);
     setAuthError(null);
+    setBrowserResult(null);
+    setBrowserError(null);
+    setNewFolderName('');
+    setIsBrowserOpen(false);
+    setIsManualPathOpen(false);
   };
 
   const handleToggleAddLocation = () => {
@@ -200,7 +232,7 @@ export const NetworkFolderExportPage = () => {
   };
 
   const handleSaveDestination = async () => {
-    const rootPath = saveRootPath.trim() || destinationPath.trim();
+    const rootPath = saveRootPath.trim();
 
     if (!rootPath) {
       setBackendError(t('export.network.saveRootRequired'));
@@ -251,11 +283,8 @@ export const NetworkFolderExportPage = () => {
 
     try {
       await deleteNetworkDestinationRequest(selectedDestination.id);
-      setSelectedDestinationId('');
-      setSaveName('');
-      setSaveRootPath('');
       await loadDestinations();
-      setIsAddLocationOpen(destinations.length <= 1);
+      resetNetworkDestinationDraft();
       setBackendError(null);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.network.deleteError'));
@@ -273,7 +302,7 @@ export const NetworkFolderExportPage = () => {
     setIsAuthenticating(true);
 
     try {
-      const result = await authenticateNetworkPathRequest({ path: destinationPath.trim() || saveRootPath.trim(), credentials });
+      const result = await authenticateNetworkPathRequest({ path: destinationPath.trim() || selectedRootPath, credentials });
       setAuthMessage(result.message);
       setAuthError(null);
       setBackendError(null);
@@ -291,7 +320,7 @@ export const NetworkFolderExportPage = () => {
   };
 
   const openBrowser = async () => {
-    const rootPath = saveRootPath.trim() || selectedDestination?.rootPath || destinationPath.trim();
+    const rootPath = selectedRootPath || destinationPath.trim();
 
     if (!rootPath) {
       setBrowserError(t('export.network.browserRootRequired'));
@@ -303,7 +332,7 @@ export const NetworkFolderExportPage = () => {
     await loadBrowserPath(rootPath, rootPath);
   };
 
-  const loadBrowserPath = async (pathToBrowse: string, rootPath = saveRootPath.trim() || selectedDestination?.rootPath || pathToBrowse) => {
+  const loadBrowserPath = async (pathToBrowse: string, rootPath = selectedRootPath || pathToBrowse) => {
     setIsBrowsing(true);
 
     try {
@@ -330,7 +359,7 @@ export const NetworkFolderExportPage = () => {
     setIsBrowsing(true);
 
     try {
-      const rootPath = saveRootPath.trim() || selectedDestination?.rootPath || browserResult.path;
+      const rootPath = selectedRootPath || browserResult.path;
       await createNetworkFolderRequest({
         parentPath: browserResult.path,
         folderName: newFolderName.trim(),
@@ -550,7 +579,7 @@ export const NetworkFolderExportPage = () => {
           </form>}
         </div>
 
-        <form className="network-step" onSubmit={handleAuthenticateSubmit}>
+        {hasSelectedDestination && <form className="network-step" onSubmit={handleAuthenticateSubmit}>
           <div>
             <p className="page-section-title">{t('export.network.accessStep')}</p>
             <p className="page-summary-note">{t('export.network.credentialsNote')}</p>
@@ -593,9 +622,9 @@ export const NetworkFolderExportPage = () => {
           </div>
           {authMessage && <p className="success-message">{authMessage}</p>}
           {authError && <p className="error">{authError}</p>}
-        </form>
+        </form>}
 
-        <div className="network-step network-export-folder">
+        {hasSelectedDestination && <div className="network-step network-export-folder">
           <div>
             <p className="page-section-title">{t('export.network.folderStep')}</p>
             <p className="page-summary-note">{t('export.network.exportFolderNote')}</p>
@@ -629,9 +658,9 @@ export const NetworkFolderExportPage = () => {
               />
             </label>
           )}
-        </div>
+        </div>}
 
-        <div className="export-actions network-final-actions">
+        {hasSelectedDestination && <div className="export-actions network-final-actions">
           <button className="btn btn-secondary" type="button" onClick={() => void handleTestTarget()} disabled={!destinationPath.trim() || isTesting}>
             {isTesting ? t('export.testing') : t('export.testTarget')}
           </button>
@@ -644,7 +673,7 @@ export const NetworkFolderExportPage = () => {
           <button className="btn btn-secondary" type="button" onClick={() => void handleRetryFailed()} disabled={!backendJobId || !progress?.failed}>
             {t('export.retryFailed')}
           </button>
-        </div>
+        </div>}
 
         {targetTest && (
           <div className={targetTest.ok ? 'success-message' : 'error'}>
