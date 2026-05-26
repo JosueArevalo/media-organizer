@@ -66,6 +66,8 @@ export const NetworkFolderExportPage = () => {
   const [isSavingDestination, setIsSavingDestination] = useState(false);
   const [isDeletingDestination, setIsDeletingDestination] = useState(false);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
+  const [isAddLocationOpen, setIsAddLocationOpen] = useState(false);
+  const [isManualPathOpen, setIsManualPathOpen] = useState(false);
   const [browserResult, setBrowserResult] = useState<NetworkBrowseResult | null>(null);
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [isBrowsing, setIsBrowsing] = useState(false);
@@ -134,6 +136,8 @@ export const NetworkFolderExportPage = () => {
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
     [destinations, selectedDestinationId]
   );
+  const shouldShowAddLocation = destinations.length === 0 || isAddLocationOpen;
+  const canBrowseNetworkFolder = Boolean(saveRootPath.trim() || selectedDestination?.rootPath || destinationPath.trim());
 
   const credentials = useMemo<NetworkCredentials | undefined>(() => {
     if (!username.trim() || !password) {
@@ -151,6 +155,7 @@ export const NetworkFolderExportPage = () => {
     try {
       const result = await listNetworkDestinationsRequest();
       setDestinations(result.destinations);
+      setIsAddLocationOpen(result.destinations.length === 0);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.network.destinationsLoadError'));
     }
@@ -165,6 +170,8 @@ export const NetworkFolderExportPage = () => {
     const destination = destinations.find((item) => item.id === destinationId);
 
     if (!destination) {
+      setSaveName('');
+      setSaveRootPath('');
       return;
     }
 
@@ -176,6 +183,19 @@ export const NetworkFolderExportPage = () => {
     setTargetTest(null);
     setAuthMessage(null);
     setAuthError(null);
+  };
+
+  const handleToggleAddLocation = () => {
+    setIsAddLocationOpen((current) => {
+      const nextIsOpen = !current;
+
+      if (nextIsOpen) {
+        setSaveName('');
+        setSaveRootPath('');
+      }
+
+      return nextIsOpen;
+    });
   };
 
   const handleSaveDestination = async () => {
@@ -198,9 +218,13 @@ export const NetworkFolderExportPage = () => {
       setSelectedDestinationId(saved.id);
       setSaveName(saved.name);
       setSaveRootPath(saved.rootPath);
+      setDestinationPath(saved.rootPath);
+      setTargetTest(null);
       setBackendError(null);
+      setIsAddLocationOpen(false);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.network.saveError'));
+      setIsAddLocationOpen(true);
     } finally {
       setIsSavingDestination(false);
     }
@@ -219,6 +243,7 @@ export const NetworkFolderExportPage = () => {
       setSaveName('');
       setSaveRootPath('');
       await loadDestinations();
+      setIsAddLocationOpen(destinations.length <= 1);
       setBackendError(null);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.network.deleteError'));
@@ -422,81 +447,94 @@ export const NetworkFolderExportPage = () => {
       {!sourceRoot && <p className="error">{t('export.unavailable')}</p>}
       {backendError && <p className="error">{backendError}</p>}
 
-      <section className="settings-panel export-panel">
-        <div>
+      <section className="settings-panel export-panel network-export-flow">
+        <div className="network-step network-source-step">
           <p className="page-section-title">{t('export.sourceTitle')}</p>
           <p className="page-summary-note">{sourceRoot || t('export.noSource')}</p>
         </div>
 
-        <div className="network-destination-grid">
-          <label className="folder-path-control">
-            <span>{t('export.network.savedDestinations')}</span>
-            <select
-              className="folder-path-input"
-              value={selectedDestinationId}
-              onChange={(event) => handleSelectDestination(event.target.value)}
-            >
-              <option value="">{t('export.network.noSavedDestination')}</option>
+        <div className="network-step">
+          <div className="network-section-header">
+            <div>
+              <p className="page-section-title">{t('export.network.locationStep')}</p>
+              <p className="page-summary-note">{t('export.network.savedDestinationsNote')}</p>
+            </div>
+            <div className="network-header-actions">
+              {destinations.length > 0 && (
+                <button className="btn btn-secondary" type="button" onClick={handleToggleAddLocation}>
+                  {isAddLocationOpen ? t('export.network.hideAddLocation') : t('export.network.addAnotherLocation')}
+                </button>
+              )}
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => void handleDeleteDestination()}
+                disabled={!selectedDestination || isDeletingDestination}
+              >
+                {isDeletingDestination ? t('export.network.deletingDestination') : t('export.network.deleteDestination')}
+              </button>
+            </div>
+          </div>
+
+          {destinations.length === 0 ? (
+            <p className="network-empty-note">{t('export.network.noSavedDestinationNote')}</p>
+          ) : (
+            <div className="network-location-list" aria-label={t('export.network.savedDestinations')}>
               {destinations.map((destination) => (
-                <option key={destination.id} value={destination.id}>
-                  {destination.name} - {destination.rootPath}
-                </option>
+                <button
+                  key={destination.id}
+                  className={`network-location-card${destination.id === selectedDestinationId ? ' is-selected' : ''}`}
+                  type="button"
+                  onClick={() => handleSelectDestination(destination.id)}
+                >
+                  <strong>{destination.name}</strong>
+                  <span>{destination.rootPath}</span>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          )}
 
-          <label className="folder-path-control">
-            <span>{t('export.network.saveName')}</span>
-            <input
-              className="folder-path-input"
-              value={saveName}
-              onChange={(event) => setSaveName(event.target.value)}
-              placeholder={t('export.network.saveNamePlaceholder')}
-              type="text"
-            />
-          </label>
+          {shouldShowAddLocation && <div className="network-subsection">
+            <div>
+              <p className="network-subsection-title">{t('export.network.addLocationTitle')}</p>
+              <p className="page-summary-note">{t('export.network.addLocationNote')}</p>
+            </div>
 
-          <label className="folder-path-control network-destination-root">
-            <span>{t('export.network.rootPath')}</span>
-            <input
-              className="folder-path-input"
-              value={saveRootPath}
-              onChange={(event) => setSaveRootPath(event.target.value)}
-              placeholder="\\\\192.168.0.148\\Xternal"
-              type="text"
-            />
-          </label>
+            <div className="network-destination-grid">
+              <label className="folder-path-control">
+                <span>{t('export.network.saveName')}</span>
+                <input
+                  className="folder-path-input"
+                  value={saveName}
+                  onChange={(event) => setSaveName(event.target.value)}
+                  placeholder={t('export.network.saveNamePlaceholder')}
+                  type="text"
+                />
+              </label>
+
+              <label className="folder-path-control">
+                <span>{t('export.network.rootPath')}</span>
+                <input
+                  className="folder-path-input"
+                  value={saveRootPath}
+                  onChange={(event) => setSaveRootPath(event.target.value)}
+                  placeholder={t('export.network.rootPathPlaceholder')}
+                  type="text"
+                />
+              </label>
+            </div>
+
+            <div className="network-export-tools">
+              <button className="btn btn-secondary" type="button" onClick={() => void handleSaveDestination()} disabled={isSavingDestination}>
+                {isSavingDestination ? t('export.network.savingDestination') : t('export.network.saveDestination')}
+              </button>
+            </div>
+          </div>}
         </div>
 
-        <label className="folder-path-control">
-          <span>{t('export.destinationLabel')}</span>
-          <input
-            className="folder-path-input"
-            value={destinationPath}
-            onChange={(event) => {
-              setDestinationPath(event.target.value);
-              setTargetTest(null);
-            }}
-            placeholder="\\\\192.168.0.148\\photos\\2026"
-            type="text"
-          />
-        </label>
-
-        <div className="network-export-tools">
-          <button className="btn btn-secondary" type="button" onClick={() => void handleSaveDestination()} disabled={isSavingDestination}>
-            {isSavingDestination ? t('export.network.savingDestination') : t('export.network.saveDestination')}
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => void handleDeleteDestination()} disabled={!selectedDestination || isDeletingDestination}>
-            {isDeletingDestination ? t('export.network.deletingDestination') : t('export.network.deleteDestination')}
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => void openBrowser()}>
-            {t('export.network.browseFolders')}
-          </button>
-        </div>
-
-        <div className="network-auth-panel">
+        <div className="network-step">
           <div>
-            <p className="page-section-title">{t('export.network.credentialsTitle')}</p>
+            <p className="page-section-title">{t('export.network.accessStep')}</p>
             <p className="page-summary-note">{t('export.network.credentialsNote')}</p>
           </div>
           <div className="network-auth-grid">
@@ -522,15 +560,15 @@ export const NetworkFolderExportPage = () => {
               />
             </label>
           </div>
-          <label className="network-checkbox">
-            <input
-              checked={rememberInWindows}
-              onChange={(event) => setRememberInWindows(event.target.checked)}
-              type="checkbox"
-            />
-            <span>{t('export.network.rememberInWindows')}</span>
-          </label>
-          <div className="network-export-tools">
+          <div className="network-auth-footer">
+            <label className="network-checkbox">
+              <input
+                checked={rememberInWindows}
+                onChange={(event) => setRememberInWindows(event.target.checked)}
+                type="checkbox"
+              />
+              <span>{t('export.network.rememberInWindows')}</span>
+            </label>
             <button className="btn btn-secondary" type="button" onClick={() => void handleAuthenticate()} disabled={isAuthenticating || !username.trim() || !password}>
               {isAuthenticating ? t('export.network.authenticating') : t('export.network.authenticate')}
             </button>
@@ -539,7 +577,43 @@ export const NetworkFolderExportPage = () => {
           {authError && <p className="error">{authError}</p>}
         </div>
 
-        <div className="export-actions">
+        <div className="network-step network-export-folder">
+          <div>
+            <p className="page-section-title">{t('export.network.folderStep')}</p>
+            <p className="page-summary-note">{t('export.network.exportFolderNote')}</p>
+          </div>
+
+          <div className="network-path-summary">
+            <span>{destinationPath.trim() || t('export.network.noExportFolder')}</span>
+          </div>
+
+          <div className="network-export-tools">
+            <button className="btn btn-primary" type="button" onClick={() => void openBrowser()} disabled={!canBrowseNetworkFolder}>
+              {t('export.network.chooseFolder')}
+            </button>
+            <button className="btn btn-secondary" type="button" onClick={() => setIsManualPathOpen((current) => !current)}>
+              {isManualPathOpen ? t('export.network.hideManualPath') : t('export.network.editPathManually')}
+            </button>
+          </div>
+
+          {isManualPathOpen && (
+            <label className="folder-path-control">
+              <span>{t('export.destinationLabel')}</span>
+              <input
+                className="folder-path-input"
+                value={destinationPath}
+                onChange={(event) => {
+                  setDestinationPath(event.target.value);
+                  setTargetTest(null);
+                }}
+                placeholder={t('export.network.destinationPathPlaceholder')}
+                type="text"
+              />
+            </label>
+          )}
+        </div>
+
+        <div className="export-actions network-final-actions">
           <button className="btn btn-secondary" type="button" onClick={() => void handleTestTarget()} disabled={!destinationPath.trim() || isTesting}>
             {isTesting ? t('export.testing') : t('export.testTarget')}
           </button>
