@@ -1134,6 +1134,24 @@ body {
   accent-color: var(--accent);
 }
 
+.compression-controls-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.compression-controls-fieldset:disabled .page-option,
+.compression-controls-fieldset:disabled .compression-custom-quality,
+.compression-controls-fieldset:disabled .compression-video-preset {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.compression-controls-fieldset:disabled input,
+.compression-controls-fieldset:disabled select {
+  cursor: not-allowed;
+}
+
 .page-option-label {
   font-size: 13px;
   color: var(--text-muted);
