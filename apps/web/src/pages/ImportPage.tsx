@@ -185,11 +185,6 @@ export const ImportPage = () => {
               {displayedValidationError}
             </p>
           )}
-          {isValidating && (
-            <p className="folder-picker-message folder-picker-message-info">
-              {t('import.validation.validating')}
-            </p>
-          )}
         </div>
         <button className="btn btn-primary" type="button" onClick={() => void handleContinue()} disabled={!canContinue}>
           {isValidating ? t('import.validation.validating') : t('import.continue')}
