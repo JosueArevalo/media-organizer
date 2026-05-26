@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
@@ -237,6 +237,11 @@ export const NetworkFolderExportPage = () => {
     }
   };
 
+  const handleSaveDestinationSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleSaveDestination();
+  };
+
   const handleDeleteDestination = async () => {
     if (!selectedDestination) {
       return;
@@ -278,6 +283,11 @@ export const NetworkFolderExportPage = () => {
     } finally {
       setIsAuthenticating(false);
     }
+  };
+
+  const handleAuthenticateSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleAuthenticate();
   };
 
   const openBrowser = async () => {
@@ -501,7 +511,7 @@ export const NetworkFolderExportPage = () => {
             </div>
           )}
 
-          {shouldShowAddLocation && <div className="network-subsection">
+          {shouldShowAddLocation && <form className="network-subsection" onSubmit={handleSaveDestinationSubmit}>
             <div>
               <p className="network-subsection-title">{t('export.network.addLocationTitle')}</p>
               <p className="page-summary-note">{t('export.network.addLocationNote')}</p>
@@ -533,14 +543,14 @@ export const NetworkFolderExportPage = () => {
             </div>
 
             <div className="network-export-tools">
-              <button className="btn btn-primary" type="button" onClick={() => void handleSaveDestination()} disabled={isSavingDestination}>
+              <button className="btn btn-primary" type="submit" disabled={isSavingDestination}>
                 {isSavingDestination ? t('export.network.savingDestination') : t('export.network.saveDestination')}
               </button>
             </div>
-          </div>}
+          </form>}
         </div>
 
-        <div className="network-step">
+        <form className="network-step" onSubmit={handleAuthenticateSubmit}>
           <div>
             <p className="page-section-title">{t('export.network.accessStep')}</p>
             <p className="page-summary-note">{t('export.network.credentialsNote')}</p>
@@ -577,13 +587,13 @@ export const NetworkFolderExportPage = () => {
               />
               <span>{t('export.network.rememberInWindows')}</span>
             </label>
-            <button className="btn btn-secondary" type="button" onClick={() => void handleAuthenticate()} disabled={isAuthenticating || !username.trim() || !password}>
+            <button className="btn btn-secondary" type="submit" disabled={isAuthenticating || !username.trim() || !password}>
               {isAuthenticating ? t('export.network.authenticating') : t('export.network.authenticate')}
             </button>
           </div>
           {authMessage && <p className="success-message">{authMessage}</p>}
           {authError && <p className="error">{authError}</p>}
-        </div>
+        </form>
 
         <div className="network-step network-export-folder">
           <div>
