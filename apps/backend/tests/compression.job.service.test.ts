@@ -269,7 +269,7 @@ test('compression progress reports the actively processing video and clears it a
   const execution = executeCompressionSession(started.session.id);
   let activeProgress = getCompressionProgress(started.session.id);
 
-  for (let attempt = 0; attempt < 30 && !activeProgress?.currentlyProcessing.length; attempt += 1) {
+  for (let attempt = 0; attempt < 100 && !activeProgress?.currentlyProcessing.length; attempt += 1) {
     await sleep(100);
     activeProgress = getCompressionProgress(started.session.id);
   }

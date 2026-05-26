@@ -402,14 +402,10 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
               ...(typeof item.skipped === 'boolean' ? { skipped: item.skipped } : {})
             }))
         : [];
-      console.log(`[getCompressionProgress] sessionId=${sessionId} totalCount=${totalCount}`);
-      console.log(`[getCompressionProgress] checkpoint payload keys:`, Object.keys(parsed));
     } catch (e) {
       // Invalid JSON, use 0
-      console.log(`[getCompressionProgress] Failed to parse checkpoint JSON:`, e);
+      console.warn(`[getCompressionProgress] Failed to parse checkpoint JSON:`, e);
     }
-  } else {
-    console.log(`[getCompressionProgress] No checkpoint found for sessionId=${sessionId}`);
   }
 
   // Get all processed items (completed and failed)
