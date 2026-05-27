@@ -95,6 +95,67 @@ const seedCompressionSession = (relativePaths: string[]) => {
   return { compressionSessionId, items };
 };
 
+const seedCompressionManifest = (compressionSessionId: string, imageMagickCommand: string) => {
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  db.prepare(
+    `
+      INSERT INTO session_checkpoints (id, session_id, stage, cursor, payload_json, updated_at)
+      VALUES (?, ?, 'compress', NULL, ?, ?)
+      ON CONFLICT(session_id, stage) DO UPDATE SET
+        payload_json = excluded.payload_json,
+        updated_at = excluded.updated_at
+    `
+  ).run(
+    randomUUID(),
+    compressionSessionId,
+    JSON.stringify({
+      outputRoot: outputDir,
+      manifest: {
+        imageMagickCommand
+      }
+    }),
+    now
+  );
+};
+
+const writeFakeMagick = (toolsDir: string, supportsHeic: boolean) => {
+  const extension = process.platform === 'win32' ? '.cmd' : '.sh';
+  const filePath = path.join(toolsDir, `magick-fake-${supportsHeic ? 'heic' : 'missing'}${extension}`);
+  const script = process.platform === 'win32'
+    ? `@echo off
+if "%~1"=="identify" (
+  ${supportsHeic ? 'echo HEIC RW' : 'echo JPEG RW'}
+  exit /b 0
+)
+set "last="
+for %%A in (%*) do set "last=%%~A"
+echo preview > "%last%"
+exit /b 0
+`
+    : `#!/usr/bin/env sh
+if [ "$1" = "identify" ]; then
+  ${supportsHeic ? 'echo "HEIC RW"' : 'echo "JPEG RW"'}
+  exit 0
+fi
+last=""
+for arg in "$@"; do
+  last="$arg"
+done
+printf 'preview\\n' > "$last"
+`;
+
+  fs.mkdirSync(toolsDir, { recursive: true });
+  fs.writeFileSync(filePath, script, 'utf8');
+
+  if (process.platform !== 'win32') {
+    fs.chmodSync(filePath, 0o755);
+  }
+
+  return filePath;
+};
+
 test('createGroupingWorkspace opens without automatic proposals', async () => {
   const { compressionSessionId } = seedCompressionSession([
     'IMG_20250102_101010.jpg',
@@ -114,6 +175,58 @@ test('createGroupingWorkspace opens without automatic proposals', async () => {
     []
   );
   assert.equal(workspace.items.every((item) => item.targetGroupLabel === null), true);
+});
+
+test('getGroupingPreviewPath serves web-safe images without conversion', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['photo.webp']);
+  const { createGroupingWorkspace, getGroupingPreviewPath } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+
+  const preview = getGroupingPreviewPath(workspace.sessionId, items[0].itemId);
+
+  assert.ok(preview);
+  assert.equal(preview.path, path.join(outputDir, 'photo.webp'));
+  assert.equal(preview.mediaType, 'image');
+});
+
+test('getGroupingPreviewPath generates and reuses HEIC previews with ImageMagick', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['photo.heic']);
+  const toolsDir = path.join(tempRoot, 'tools-heic-preview');
+  const fakeMagick = writeFakeMagick(toolsDir, true);
+  seedCompressionManifest(compressionSessionId, fakeMagick);
+
+  const { createGroupingWorkspace, getGroupingPreviewPath } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+
+  const preview = getGroupingPreviewPath(workspace.sessionId, items[0].itemId);
+
+  assert.ok(preview);
+  assert.equal(preview.path.endsWith('.jpg'), true);
+  assert.equal(preview.mediaType, 'image');
+  assert.equal(fs.readFileSync(preview.path, 'utf8').trim(), 'preview');
+
+  fs.writeFileSync(preview.path, 'cached\n', 'utf8');
+  const cachedPreview = getGroupingPreviewPath(workspace.sessionId, items[0].itemId);
+
+  assert.equal(cachedPreview?.path, preview.path);
+  assert.equal(fs.readFileSync(preview.path, 'utf8').trim(), 'cached');
+});
+
+test('getGroupingPreviewPath reports HEIC support errors from ImageMagick', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['photo.heic']);
+  const toolsDir = path.join(tempRoot, 'tools-heic-preview-missing');
+  const fakeMagick = writeFakeMagick(toolsDir, false);
+  seedCompressionManifest(compressionSessionId, fakeMagick);
+
+  const { createGroupingWorkspace, getGroupingPreviewPath, GroupingPreviewError } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js'
+  );
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+
+  assert.throws(
+    () => getGroupingPreviewPath(workspace.sessionId, items[0].itemId),
+    (error) => error instanceof GroupingPreviewError && /HEIC\/HEIF support/.test(error.message)
+  );
 });
 
 test('reorganizeGroupingWorkspace proposes enabled date rules only', async () => {

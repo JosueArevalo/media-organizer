@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../../state/db.js';
 import { runMigrations } from '../../state/migrations/runMigrations.js';
@@ -106,6 +107,17 @@ const MEDIA_EXTENSIONS = new Set([
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif']);
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv']);
+const HEIC_EXTENSIONS = new Set(['.heic', '.heif']);
+const WEB_SAFE_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
+const PREVIEW_MAX_SIZE = '2400x2400';
+const PREVIEW_QUALITY = '85';
+
+export class GroupingPreviewError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GroupingPreviewError';
+  }
+}
 
 const nowIso = () => new Date().toISOString();
 
@@ -346,6 +358,28 @@ const getGroupingManifest = (groupingSessionId: string) => {
         sourceFolderOptions?: GroupingSourceFolderOptions;
       };
     };
+    return payload.manifest ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const getCompressionManifest = (compressionSessionId: string | null) => {
+  if (!compressionSessionId) {
+    return null;
+  }
+
+  const db = getDb();
+  const row = db
+    .prepare('SELECT payload_json FROM session_checkpoints WHERE session_id = ? AND stage = ?')
+    .get(compressionSessionId, 'compress') as { payload_json: string | null } | undefined;
+
+  if (!row?.payload_json) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(row.payload_json) as { manifest?: { imageMagickCommand?: string | null } };
     return payload.manifest ?? null;
   } catch {
     return null;
@@ -1334,6 +1368,125 @@ export const getGroupingMediaPath = (sessionId: string, itemId: string) => {
 
   return {
     path: item.outputPath,
+    mediaType: item.mediaType
+  };
+};
+
+const getPreviewFileName = (itemId: string) => `${itemId.replace(/[^a-zA-Z0-9_-]/g, '_')}.jpg`;
+
+const runImageMagick = (imageMagickCommand: string, args: string[]) =>
+  spawnSync(imageMagickCommand, args, {
+    encoding: 'utf8',
+    shell: process.platform === 'win32' && ['.cmd', '.bat'].includes(path.extname(imageMagickCommand).toLowerCase())
+  });
+
+const ensureHeicPreviewSupport = (imageMagickCommand: string) => {
+  const result = runImageMagick(imageMagickCommand, ['identify', '-list', 'format']);
+
+  if (result.error) {
+    throw new GroupingPreviewError(`ImageMagick command not found: ${imageMagickCommand}`);
+  }
+
+  if (result.status !== 0) {
+    const stderr = (result.stderr ?? '').trim();
+    throw new GroupingPreviewError(stderr || 'Could not verify ImageMagick HEIC support.');
+  }
+
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.toUpperCase();
+
+  if (!output.includes('HEIC') && !output.includes('HEIF')) {
+    throw new GroupingPreviewError('ImageMagick is installed, but HEIC/HEIF support was not found. Install a build with libheif.');
+  }
+};
+
+const generateHeicPreview = (imageMagickCommand: string, sourcePath: string, previewPath: string) => {
+  ensureHeicPreviewSupport(imageMagickCommand);
+  fs.mkdirSync(path.dirname(previewPath), { recursive: true });
+
+  const result = runImageMagick(imageMagickCommand, [
+    sourcePath,
+    '-auto-orient',
+    '-colorspace',
+    'sRGB',
+    '-resize',
+    PREVIEW_MAX_SIZE,
+    '-quality',
+    PREVIEW_QUALITY,
+    previewPath
+  ]);
+
+  if (result.error) {
+    throw new GroupingPreviewError(`ImageMagick command not found: ${imageMagickCommand}`);
+  }
+
+  if (result.status !== 0) {
+    const stderr = (result.stderr ?? '').trim();
+    throw new GroupingPreviewError(stderr || 'Could not generate HEIC preview.');
+  }
+};
+
+const isPreviewFresh = (sourcePath: string, previewPath: string) => {
+  if (!fs.existsSync(previewPath)) {
+    return false;
+  }
+
+  const sourceStats = fs.statSync(sourcePath);
+  const previewStats = fs.statSync(previewPath);
+  return previewStats.mtimeMs >= sourceStats.mtimeMs;
+};
+
+export const getGroupingPreviewPath = (sessionId: string, itemId: string) => {
+  const workspace = getGroupingWorkspace(sessionId);
+
+  if (!workspace) {
+    return null;
+  }
+
+  const item = workspace.items.find((candidate) => candidate.id === itemId);
+
+  if (!item || item.mediaType !== 'image') {
+    return null;
+  }
+
+  const extension = path.extname(item.outputPath).toLowerCase();
+
+  if (!IMAGE_EXTENSIONS.has(extension)) {
+    return null;
+  }
+
+  if (!isPathInside(workspace.outputDir, item.outputPath)) {
+    throw new Error('Refusing to read media outside the destination folder.');
+  }
+
+  if (!fs.existsSync(item.outputPath)) {
+    return null;
+  }
+
+  if (WEB_SAFE_IMAGE_EXTENSIONS.has(extension)) {
+    return {
+      path: item.outputPath,
+      mediaType: item.mediaType
+    };
+  }
+
+  if (!HEIC_EXTENSIONS.has(extension)) {
+    return null;
+  }
+
+  const previewPath = path.join(workspace.outputDir, '.media-organizer', 'previews', sessionId, getPreviewFileName(item.id));
+
+  if (!isPathInside(workspace.outputDir, previewPath)) {
+    throw new Error('Refusing to write preview outside the destination folder.');
+  }
+
+  if (!isPreviewFresh(item.outputPath, previewPath)) {
+    const compressionManifest = getCompressionManifest(workspace.compressionSessionId);
+    const imageMagickCommand = compressionManifest?.imageMagickCommand?.trim() || 'magick';
+    generateHeicPreview(imageMagickCommand, item.outputPath, previewPath);
+  }
+
+  return {
+    path: previewPath,
     mediaType: item.mediaType
   };
 };
