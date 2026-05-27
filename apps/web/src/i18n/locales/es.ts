@@ -419,6 +419,7 @@ export const es: TranslationDictionary = {
   'grouping.previewNext': 'Siguiente',
   'grouping.previewCounter': '{current} / {total}',
   'grouping.movePreview': 'Mover archivo',
+  'grouping.previewUnavailable': 'Vista previa no disponible',
   'grouping.deletePreviewConfirm': '{name} se quitara de la organizacion y se borrara de Destination al aplicar. Source no se tocara.',
   'grouping.folderNamePrompt': 'Nombre de carpeta',
   'grouping.newFolderNamePrompt': 'Nuevo nombre de carpeta',

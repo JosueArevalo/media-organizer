@@ -10,6 +10,7 @@ import {
   applyGroupingWorkspaceRequest,
   assignGroupingItemsRequest,
   buildGroupingMediaUrl,
+  buildGroupingPreviewUrl,
   createGroupingFolderFromTemplateRequest,
   createGroupingFolderRequest,
   createGroupingTemplateRequest,
@@ -277,6 +278,7 @@ export const GroupingPage = () => {
   const [reorganizedDirectories, setReorganizedDirectories] = useState<Set<string>>(new Set());
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
+  const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(new Set());
   const [verification, setVerification] = useState<ExecutionVerification | null>(null);
 
   const sourcePath = sourceSelection?.path ?? '';
@@ -690,6 +692,10 @@ export const GroupingPage = () => {
     }
   };
 
+  const markPreviewFailed = (itemId: string) => {
+    setFailedPreviewIds((current) => new Set(current).add(itemId));
+  };
+
   const handleItemClick = (item: GroupingWorkspaceItem, event: MouseEvent) => {
     if (!canMutateGrouping) {
       return;
@@ -829,7 +835,11 @@ export const GroupingPage = () => {
     }
   };
 
-  const mediaUrl = previewItem && workspace ? buildGroupingMediaUrl(workspace.sessionId, previewItem.id) : null;
+  const mediaUrl = previewItem && workspace
+    ? previewItem.mediaType === 'image'
+      ? buildGroupingPreviewUrl(workspace.sessionId, previewItem.id)
+      : buildGroupingMediaUrl(workspace.sessionId, previewItem.id)
+    : null;
 
   return (
     <div className={`grouping-workspace page-stack ${isGroupingCompleted ? 'is-read-only' : ''}`}>
@@ -1213,6 +1223,8 @@ export const GroupingPage = () => {
               {visibleItems.map((item) => {
                 const isSelected = selectedIds.has(item.id);
                 const itemMediaUrl = workspace ? buildGroupingMediaUrl(workspace.sessionId, item.id) : '';
+                const itemPreviewUrl = workspace ? buildGroupingPreviewUrl(workspace.sessionId, item.id) : '';
+                const hasPreviewFailed = failedPreviewIds.has(item.id);
 
                 return (
                   <article
@@ -1228,8 +1240,10 @@ export const GroupingPage = () => {
                       : undefined}
                   >
                     <button className="grouping-media-preview" type="button" onDoubleClick={() => setPreviewItemId(item.id)}>
-                      {item.mediaType === 'image' ? (
-                        <img src={itemMediaUrl} alt={item.fileName} loading="lazy" />
+                      {item.mediaType === 'image' && !hasPreviewFailed ? (
+                        <img src={itemPreviewUrl} alt={item.fileName} loading="lazy" onError={() => markPreviewFailed(item.id)} />
+                      ) : item.mediaType === 'image' ? (
+                        <span>{t('grouping.previewUnavailable')}</span>
                       ) : item.mediaType === 'video' ? (
                         <video src={itemMediaUrl} muted preload="metadata" />
                       ) : (
@@ -1291,8 +1305,17 @@ export const GroupingPage = () => {
               </button>
             </div>
             <div className="grouping-modal-stage">
-              {previewItem.mediaType === 'image' ? (
-                <img className="grouping-modal-media" src={mediaUrl} alt={previewItem.fileName} />
+              {previewItem.mediaType === 'image' && !failedPreviewIds.has(previewItem.id) ? (
+                <img
+                  className="grouping-modal-media"
+                  src={mediaUrl}
+                  alt={previewItem.fileName}
+                  onError={() => markPreviewFailed(previewItem.id)}
+                />
+              ) : previewItem.mediaType === 'image' ? (
+                <div className="grouping-modal-unsupported">
+                  {t('grouping.previewUnavailable')}
+                </div>
               ) : previewItem.mediaType === 'video' ? (
                 <video className="grouping-modal-media" src={mediaUrl} controls autoPlay />
               ) : (

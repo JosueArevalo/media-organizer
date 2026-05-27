@@ -417,6 +417,7 @@ export const en = {
   'grouping.previewNext': 'Next',
   'grouping.previewCounter': '{current} / {total}',
   'grouping.movePreview': 'Move file',
+  'grouping.previewUnavailable': 'Preview unavailable',
   'grouping.deletePreviewConfirm': '{name} will be removed from the organization and deleted from Destination when you apply. Source will not be touched.',
   'grouping.folderNamePrompt': 'Folder name',
   'grouping.newFolderNamePrompt': 'New folder name',

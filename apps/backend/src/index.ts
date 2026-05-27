@@ -26,7 +26,9 @@ import {
   deleteGroupingItems,
   deleteGroupingTemplate,
   getGroupingMediaPath,
+  getGroupingPreviewPath,
   getGroupingWorkspace,
+  GroupingPreviewError,
   listGroupingTemplates,
   reorganizeGroupingWorkspace,
   renameGroupingFolder,
@@ -516,6 +518,34 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not stream media.'
+        });
+      }
+
+      return;
+    }
+
+    if (req.method === 'GET' && subPath === 'items' && subId && tailPath === 'preview') {
+      try {
+        const media = getGroupingPreviewPath(sessionId, subId);
+
+        if (!media || !fs.existsSync(media.path)) {
+          sendJson(res, 404, { status: 'not_found' });
+          return;
+        }
+
+        streamMediaFile(req, res, media.path);
+      } catch (error) {
+        if (error instanceof GroupingPreviewError) {
+          sendJson(res, 422, {
+            status: 'preview_unavailable',
+            message: error.message
+          });
+          return;
+        }
+
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not stream media preview.'
         });
       }
 
