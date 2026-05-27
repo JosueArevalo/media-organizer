@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
@@ -129,6 +129,18 @@ type GroupingDirectoryRow = GroupingDirectoryNode & {
   isReorganizedOverride: boolean;
 };
 
+type Point = {
+  x: number;
+  y: number;
+};
+
+type MarqueeSelection = {
+  anchor: Point;
+  current: Point;
+  initialSelectedIds: Set<string>;
+  isAdditive: boolean;
+};
+
 const formatPath = (path: string) => path.split('\\').join('/');
 
 const getPathName = (path: string) => formatPath(path).split('/').filter(Boolean).pop() ?? path;
@@ -255,10 +267,24 @@ const flattenDirectoryTree = (
   return rows;
 };
 
+const getNormalizedRect = (start: Point, end: Point) => ({
+  left: Math.min(start.x, end.x),
+  top: Math.min(start.y, end.y),
+  width: Math.abs(end.x - start.x),
+  height: Math.abs(end.y - start.y)
+});
+
+const rectsIntersect = (left: DOMRect, right: DOMRect) =>
+  left.left < right.right &&
+  left.right > right.left &&
+  left.top < right.bottom &&
+  left.bottom > right.top;
+
 export const GroupingPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const groupingMainRef = useRef<HTMLElement | null>(null);
   const { sourceSelection, destinationSelection, isLoading: isLoadingFolderSelections } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
   const groupingSessionState = useGroupingSessionState();
@@ -279,6 +305,7 @@ export const GroupingPage = () => {
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(new Set());
+  const [marqueeSelection, setMarqueeSelection] = useState<MarqueeSelection | null>(null);
   const [verification, setVerification] = useState<ExecutionVerification | null>(null);
 
   const sourcePath = sourceSelection?.path ?? '';
@@ -417,6 +444,7 @@ export const GroupingPage = () => {
   const previewIndex = previewItem ? folderScopeItems.findIndex((item) => item.id === previewItem.id) : -1;
   const canShowPreviousPreview = previewIndex > 0;
   const canShowNextPreview = previewIndex >= 0 && previewIndex < folderScopeItems.length - 1;
+  const marqueeRect = marqueeSelection ? getNormalizedRect(marqueeSelection.anchor, marqueeSelection.current) : null;
 
   const selectedItems = useMemo(() => {
     if (!workspace) {
@@ -694,6 +722,117 @@ export const GroupingPage = () => {
 
   const markPreviewFailed = (itemId: string) => {
     setFailedPreviewIds((current) => new Set(current).add(itemId));
+  };
+
+  const getMarqueePoint = (event: PointerEvent<HTMLElement>): Point | null => {
+    const container = groupingMainRef.current;
+
+    if (!container) {
+      return null;
+    }
+
+    const rect = container.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+  };
+
+  const getMarqueeItemIds = (start: Point, end: Point) => {
+    const container = groupingMainRef.current;
+
+    if (!container) {
+      return [];
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const marquee = getNormalizedRect(start, end);
+    const marqueeDomRect = new DOMRect(
+      containerRect.left + marquee.left,
+      containerRect.top + marquee.top,
+      marquee.width,
+      marquee.height
+    );
+
+    return Array.from(container.querySelectorAll<HTMLElement>('[data-grouping-item-id]'))
+      .filter((element) => rectsIntersect(element.getBoundingClientRect(), marqueeDomRect))
+      .map((element) => element.dataset.groupingItemId)
+      .filter((itemId): itemId is string => Boolean(itemId));
+  };
+
+  const updateMarqueeSelection = (nextCurrent: Point, selection: MarqueeSelection) => {
+    const marqueeIds = getMarqueeItemIds(selection.anchor, nextCurrent);
+    const nextSelectedIds = new Set(selection.isAdditive ? Array.from(selection.initialSelectedIds) : []);
+
+    for (const itemId of marqueeIds) {
+      nextSelectedIds.add(itemId);
+    }
+
+    setSelectedIds(nextSelectedIds);
+    setMarqueeSelection({ ...selection, current: nextCurrent });
+  };
+
+  const handleMarqueePointerDown = (event: PointerEvent<HTMLElement>) => {
+    const target = event.target;
+
+    if (
+      !canMutateGrouping ||
+      event.button !== 0 ||
+      previewItem ||
+      !(target instanceof HTMLElement) ||
+      target.closest('.grouping-media-card, button, input, select, textarea, a, .grouping-selection-bar, .grouping-main-head')
+    ) {
+      return;
+    }
+
+    const point = getMarqueePoint(event);
+
+    if (!point) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+
+    const selection = {
+      anchor: point,
+      current: point,
+      initialSelectedIds: selectedIds,
+      isAdditive: event.ctrlKey || event.metaKey
+    };
+
+    setMarqueeSelection(selection);
+
+    if (!selection.isAdditive) {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleMarqueePointerMove = (event: PointerEvent<HTMLElement>) => {
+    if (!marqueeSelection) {
+      return;
+    }
+
+    const point = getMarqueePoint(event);
+
+    if (!point) {
+      return;
+    }
+
+    event.preventDefault();
+    updateMarqueeSelection(point, marqueeSelection);
+  };
+
+  const endMarqueeSelection = (event: PointerEvent<HTMLElement>) => {
+    if (!marqueeSelection) {
+      return;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    setMarqueeSelection(null);
   };
 
   const handleItemClick = (item: GroupingWorkspaceItem, event: MouseEvent) => {
@@ -1175,7 +1314,14 @@ export const GroupingPage = () => {
           </div>
         </aside>
 
-        <section className="grouping-main">
+        <section
+          className={`grouping-main ${marqueeSelection ? 'is-selecting-area' : ''}`}
+          ref={groupingMainRef}
+          onPointerDown={handleMarqueePointerDown}
+          onPointerMove={handleMarqueePointerMove}
+          onPointerUp={endMarqueeSelection}
+          onPointerCancel={endMarqueeSelection}
+        >
           {selectedItems.length > 0 && (
             <div className="grouping-selection-bar">
               <strong>{t('grouping.selected', { count: selectedItems.length })}</strong>
@@ -1220,6 +1366,17 @@ export const GroupingPage = () => {
             <p className="empty-note">{t('grouping.loadingWorkspace')}</p>
           ) : (
             <div className="grouping-media-grid">
+              {marqueeRect && (
+                <div
+                  className="grouping-marquee"
+                  style={{
+                    left: `${marqueeRect.left}px`,
+                    top: `${marqueeRect.top}px`,
+                    width: `${marqueeRect.width}px`,
+                    height: `${marqueeRect.height}px`
+                  }}
+                />
+              )}
               {visibleItems.map((item) => {
                 const isSelected = selectedIds.has(item.id);
                 const itemMediaUrl = workspace ? buildGroupingMediaUrl(workspace.sessionId, item.id) : '';
@@ -1229,6 +1386,7 @@ export const GroupingPage = () => {
                 return (
                   <article
                     key={item.id}
+                    data-grouping-item-id={item.id}
                     className={`grouping-media-card ${isSelected ? 'is-selected' : ''}`}
                     draggable={canMutateGrouping}
                     onClick={canMutateGrouping ? (event) => handleItemClick(item, event) : undefined}

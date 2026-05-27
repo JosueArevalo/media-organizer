@@ -2571,6 +2571,11 @@ body {
 .grouping-main {
   padding: 14px;
   min-height: 640px;
+  position: relative;
+}
+
+.grouping-main.is-selecting-area {
+  user-select: none;
 }
 
 .grouping-selection-bar {
@@ -2607,6 +2612,15 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 12px;
+}
+
+.grouping-marquee {
+  position: absolute;
+  z-index: 5;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: rgba(47, 143, 101, 0.16);
+  pointer-events: none;
 }
 
 .grouping-media-card {
