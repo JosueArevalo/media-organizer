@@ -9,12 +9,13 @@ export type ImportValidationCode =
   | 'source_not_readable'
   | 'destination_parent_not_found'
   | 'destination_not_directory'
+  | 'destination_not_empty'
   | 'destination_not_writable'
   | 'request_failed';
 
 export type ImportValidationResult =
   | { ok: true }
-  | { ok: false; code: ImportValidationCode; message: string };
+  | { ok: false; code: ImportValidationCode; message: string; entryCount?: number };
 
 export const isLikelyAbsoluteImportPath = (value: string) => {
   if (!value.trim()) {

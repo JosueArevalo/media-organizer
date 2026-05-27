@@ -13,6 +13,16 @@ export type ClearDestinationValidation =
       message: string;
     };
 
+const normalizeForComparison = (value: string) => {
+  const resolved = path.resolve(value);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+};
+
+const isPathInside = (parent: string, child: string) => {
+  const relative = path.relative(parent, child);
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+};
+
 export const validateClearDestinationRequest = (body: unknown): ClearDestinationValidation => {
   if (!hasDestructiveConfirmation(body, 'CLEAR_DESTINATION')) {
     return {
@@ -37,11 +47,22 @@ export const validateClearDestinationRequest = (body: unknown): ClearDestination
   const destinationResolved = path.resolve(destinationPath);
   const sourceResolved = sourcePath && path.isAbsolute(sourcePath) ? path.resolve(sourcePath) : null;
 
-  if (sourceResolved && sourceResolved === destinationResolved) {
+  if (sourceResolved && normalizeForComparison(sourceResolved) === normalizeForComparison(destinationResolved)) {
     return {
       valid: false,
       status: 'invalid_request',
       message: 'Destination path cannot be the same as source path.'
+    };
+  }
+
+  if (
+    sourceResolved &&
+    isPathInside(normalizeForComparison(sourceResolved), normalizeForComparison(destinationResolved))
+  ) {
+    return {
+      valid: false,
+      status: 'invalid_request',
+      message: 'Destination path cannot be inside source path.'
     };
   }
 
