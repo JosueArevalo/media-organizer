@@ -12,11 +12,12 @@ export type ImportFolderValidationCode =
   | 'source_not_readable'
   | 'destination_parent_not_found'
   | 'destination_not_directory'
+  | 'destination_not_empty'
   | 'destination_not_writable';
 
 export type ImportFolderValidationResult =
   | { ok: true }
-  | { ok: false; code: ImportFolderValidationCode; message: string };
+  | { ok: false; code: ImportFolderValidationCode; message: string; entryCount?: number };
 
 const normalizeForComparison = (value: string) => {
   const resolved = path.resolve(value);
@@ -151,6 +152,17 @@ export const validateImportFolders = async (
     }
 
     await fs.access(resolvedDestination, fs.constants.W_OK);
+    const destinationEntries = await fs.readdir(resolvedDestination);
+
+    if (destinationEntries.length > 0) {
+      return {
+        ok: false,
+        code: 'destination_not_empty',
+        message: 'Destination folder is not empty.',
+        entryCount: destinationEntries.length
+      };
+    }
+
     return { ok: true };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

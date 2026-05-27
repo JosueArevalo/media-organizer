@@ -83,6 +83,40 @@ test('validateImportFolders allows sibling source and destination folders', asyn
   assert.deepEqual(result, { ok: true });
 });
 
+test('validateImportFolders rejects a destination that contains files', async () => {
+  const sourceDir = path.join(tempRoot, 'Input');
+  const destinationDir = path.join(tempRoot, 'Output');
+  fs.mkdirSync(sourceDir);
+  fs.mkdirSync(destinationDir);
+  fs.writeFileSync(path.join(destinationDir, 'existing.txt'), 'existing output');
+
+  const result = await validateImportFolders(sourceDir, destinationDir);
+
+  assert.deepEqual(result, {
+    ok: false,
+    code: 'destination_not_empty',
+    message: 'Destination folder is not empty.',
+    entryCount: 1
+  });
+});
+
+test('validateImportFolders rejects a destination that contains subdirectories', async () => {
+  const sourceDir = path.join(tempRoot, 'Input');
+  const destinationDir = path.join(tempRoot, 'Output');
+  fs.mkdirSync(sourceDir);
+  fs.mkdirSync(destinationDir);
+  fs.mkdirSync(path.join(destinationDir, 'ExistingAlbum'));
+
+  const result = await validateImportFolders(sourceDir, destinationDir);
+
+  assert.deepEqual(result, {
+    ok: false,
+    code: 'destination_not_empty',
+    message: 'Destination folder is not empty.',
+    entryCount: 1
+  });
+});
+
 test('validateImportFolders allows a missing destination when its parent is writable', async () => {
   const sourceDir = path.join(tempRoot, 'Input');
   fs.mkdirSync(sourceDir);

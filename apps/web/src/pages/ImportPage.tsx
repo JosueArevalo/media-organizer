@@ -22,6 +22,7 @@ const validationMessageKeys: Record<ImportValidationCode, TranslationKey> = {
   source_not_readable: 'import.validation.sourceNotReadable',
   destination_parent_not_found: 'import.validation.destinationParentNotFound',
   destination_not_directory: 'import.validation.destinationNotDirectory',
+  destination_not_empty: 'import.validation.destinationNotEmpty',
   destination_not_writable: 'import.validation.destinationNotWritable',
   request_failed: 'import.validation.requestFailed'
 };
@@ -32,7 +33,9 @@ export const ImportPage = () => {
   const sourcePathInputRef = useRef<HTMLInputElement>(null);
   const destinationPathInputRef = useRef<HTMLInputElement>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [nonEmptyDestinationEntryCount, setNonEmptyDestinationEntryCount] = useState<number | null>(null);
   const [isValidating, setIsValidating] = useState(false);
+  const [isClearingDestination, setIsClearingDestination] = useState(false);
   const {
     sourceSelection,
     destinationSelection,
@@ -51,25 +54,47 @@ export const ImportPage = () => {
     () => validateImportFoldersLocally(sourcePath, destinationPath),
     [sourcePath, destinationPath]
   );
+  const hasNonEmptyDestinationWarning = nonEmptyDestinationEntryCount !== null;
   const canContinue = Boolean(
     sourcePath &&
     destinationPath &&
     localValidation.ok &&
-    !isValidating
+    !isValidating &&
+    !isClearingDestination
   );
 
-  const getValidationMessage = (code: ImportValidationCode, fallback: string) =>
-    validationMessageKeys[code] ? t(validationMessageKeys[code]) : fallback;
+  const getValidationMessage = (code: ImportValidationCode, fallback: string, entryCount?: number) =>
+    validationMessageKeys[code]
+      ? t(validationMessageKeys[code], { count: entryCount ?? 0 })
+      : fallback;
   const localValidationError = sourcePath && destinationPath && !localValidation.ok
     ? getValidationMessage(localValidation.code, localValidation.message)
     : null;
   const displayedValidationError = validationError ?? localValidationError;
+  const validationMessageTone = hasNonEmptyDestinationWarning && validationError
+    ? 'warning'
+    : 'error';
 
   useEffect(() => {
     setValidationError(null);
+    setNonEmptyDestinationEntryCount(null);
   }, [sourcePath, destinationPath]);
 
+  const setBackendValidationError = (
+    code: ImportValidationCode,
+    message: string,
+    entryCount?: number
+  ) => {
+    setValidationError(getValidationMessage(code, message, entryCount));
+    setNonEmptyDestinationEntryCount(code === 'destination_not_empty' ? entryCount ?? 0 : null);
+  };
+
   const handleContinue = async () => {
+    if (hasNonEmptyDestinationWarning) {
+      await handleClearDestinationAndContinue();
+      return;
+    }
+
     setValidationError(null);
 
     if (!localValidation.ok) {
@@ -87,7 +112,11 @@ export const ImportPage = () => {
       const backendValidation = await validateImportFoldersRequest(sourcePath, destinationPath);
 
       if (!backendValidation.ok) {
-        setValidationError(getValidationMessage(backendValidation.code, backendValidation.message));
+        setBackendValidationError(
+          backendValidation.code,
+          backendValidation.message,
+          backendValidation.entryCount
+        );
         return;
       }
 
@@ -96,6 +125,68 @@ export const ImportPage = () => {
       setValidationError(error instanceof Error ? error.message : t('import.validation.requestFailed'));
     } finally {
       setIsValidating(false);
+    }
+  };
+
+  const handleClearDestinationAndContinue = async () => {
+    if (!sourcePath || !destinationPath || nonEmptyDestinationEntryCount === null) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      t('import.validation.clearDestinationConfirm', {
+        destinationPath,
+        count: nonEmptyDestinationEntryCount
+      })
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setValidationError(null);
+    setIsClearingDestination(true);
+
+    try {
+      const response = await fetch('/api/system/maintenance/clear-destination', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          destinationPath,
+          sourcePath,
+          confirmation: 'CLEAR_DESTINATION'
+        })
+      });
+
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(body || t('import.validation.clearDestinationFailed'));
+      }
+
+      const backendValidation = await validateImportFoldersRequest(sourcePath, destinationPath);
+
+      if (!backendValidation.ok) {
+        setBackendValidationError(
+          backendValidation.code,
+          backendValidation.message,
+          backendValidation.entryCount
+        );
+        return;
+      }
+
+      setNonEmptyDestinationEntryCount(null);
+      navigate('/selection');
+    } catch (error) {
+      setNonEmptyDestinationEntryCount(null);
+      setValidationError(
+        t('import.validation.clearDestinationFailedWithMessage', {
+          message: error instanceof Error ? error.message : t('import.validation.clearDestinationFailed')
+        })
+      );
+    } finally {
+      setIsClearingDestination(false);
     }
   };
 
@@ -181,13 +272,19 @@ export const ImportPage = () => {
       <div className="page-footer-actions">
         <div className="import-validation-status" aria-live="polite">
           {displayedValidationError && (
-            <p className="folder-picker-message folder-picker-message-error">
+            <p className={`folder-picker-message folder-picker-message-${validationMessageTone}`}>
               {displayedValidationError}
             </p>
           )}
         </div>
         <button className="btn btn-primary" type="button" onClick={() => void handleContinue()} disabled={!canContinue}>
-          {isValidating ? t('import.validation.validating') : t('import.continue')}
+          {isClearingDestination
+            ? t('import.validation.clearingDestination')
+            : isValidating
+              ? t('import.validation.validating')
+              : hasNonEmptyDestinationWarning
+                ? t('import.validation.clearDestinationAndContinue')
+                : t('import.continue')}
         </button>
       </div>
     </div>

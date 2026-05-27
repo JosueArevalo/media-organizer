@@ -42,6 +42,7 @@ test('destructive operations require exact confirmation tokens', () => {
 
 test('clear destination validation rejects missing confirmation and source-as-destination', () => {
   const destinationPath = path.resolve('tmp-output');
+  const sourcePath = path.resolve('tmp-source');
 
   assert.deepEqual(validateClearDestinationRequest({ destinationPath }), {
     valid: false,
@@ -59,6 +60,19 @@ test('clear destination validation rejects missing confirmation and source-as-de
       valid: false,
       status: 'invalid_request',
       message: 'Destination path cannot be the same as source path.'
+    }
+  );
+
+  assert.deepEqual(
+    validateClearDestinationRequest({
+      destinationPath: path.join(sourcePath, 'Output'),
+      sourcePath,
+      confirmation: 'CLEAR_DESTINATION'
+    }),
+    {
+      valid: false,
+      status: 'invalid_request',
+      message: 'Destination path cannot be inside source path.'
     }
   );
 });
