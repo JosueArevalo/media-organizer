@@ -11,10 +11,11 @@ const createInitialSnapshot = (): BackendHealthSnapshot => ({
   lastCheckedAt: null,
   consecutiveFailures: 0,
   consecutiveSuccesses: 0,
+  failureKind: null,
   errorMessage: null
 });
 
-export const useBackendHealth = (intervalMs = 2000) => {
+export const useBackendHealth = (intervalMs = 1000) => {
   const [snapshot, setSnapshot] = useState<BackendHealthSnapshot>(createInitialSnapshot);
 
   useEffect(() => {

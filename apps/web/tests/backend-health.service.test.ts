@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import {
+  DEFAULT_BACKEND_HEALTH_OFFLINE_FAILURE_THRESHOLD,
+  DEFAULT_BACKEND_HEALTH_TIMEOUT_FAILURE_THRESHOLD,
+  DEFAULT_BACKEND_HEALTH_TIMEOUT_MS,
   checkBackendHealth,
   mergeBackendHealthSnapshot,
   type BackendHealthSnapshot
@@ -14,12 +17,19 @@ const createSnapshot = (overrides: Partial<BackendHealthSnapshot>): BackendHealt
   lastCheckedAt: null,
   consecutiveFailures: 0,
   consecutiveSuccesses: 0,
+  failureKind: null,
   errorMessage: null,
   ...overrides
 });
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+test('backend health defaults balance quick detection and transient failure tolerance', () => {
+  assert.equal(DEFAULT_BACKEND_HEALTH_TIMEOUT_MS, 1500);
+  assert.equal(DEFAULT_BACKEND_HEALTH_OFFLINE_FAILURE_THRESHOLD, 2);
+  assert.equal(DEFAULT_BACKEND_HEALTH_TIMEOUT_FAILURE_THRESHOLD, 4);
 });
 
 test('checkBackendHealth reports online when the health endpoint responds', async () => {
@@ -36,6 +46,7 @@ test('checkBackendHealth reports online when the health endpoint responds', asyn
   assert.equal(typeof result.lastCheckedAt, 'number');
   assert.equal(result.consecutiveFailures, 0);
   assert.equal(result.consecutiveSuccesses, 1);
+  assert.equal(result.failureKind, null);
 });
 
 test('checkBackendHealth reports offline without throwing when fetch fails', async () => {
@@ -50,6 +61,7 @@ test('checkBackendHealth reports offline without throwing when fetch fails', asy
   assert.equal(typeof result.lastCheckedAt, 'number');
   assert.equal(result.consecutiveFailures, 1);
   assert.equal(result.consecutiveSuccesses, 0);
+  assert.equal(result.failureKind, 'network');
   assert.equal(result.errorMessage, 'connection refused');
 });
 
@@ -65,6 +77,7 @@ test('mergeBackendHealthSnapshot keeps online visible after one transient failur
     status: 'offline',
     lastCheckedAt: 200,
     consecutiveFailures: 1,
+    failureKind: 'timeout',
     errorMessage: 'timeout'
   });
 
@@ -88,6 +101,7 @@ test('mergeBackendHealthSnapshot shows offline after two consecutive failures', 
     status: 'offline',
     lastCheckedAt: 300,
     consecutiveFailures: 1,
+    failureKind: 'network',
     errorMessage: 'connection refused'
   });
 
@@ -98,6 +112,52 @@ test('mergeBackendHealthSnapshot shows offline after two consecutive failures', 
   assert.equal(result.consecutiveFailures, 2);
   assert.equal(result.consecutiveSuccesses, 0);
   assert.equal(result.errorMessage, 'connection refused');
+});
+
+test('mergeBackendHealthSnapshot tolerates repeated timeout probes before showing offline', () => {
+  const current = createSnapshot({
+    status: 'online',
+    lastOkAt: 100,
+    lastCheckedAt: 300,
+    consecutiveFailures: 2
+  });
+  const probe = createSnapshot({
+    status: 'offline',
+    lastCheckedAt: 400,
+    consecutiveFailures: 1,
+    failureKind: 'timeout',
+    errorMessage: 'The operation was aborted.'
+  });
+
+  const result = mergeBackendHealthSnapshot(current, probe);
+
+  assert.equal(result.status, 'online');
+  assert.equal(result.lastOkAt, 100);
+  assert.equal(result.consecutiveFailures, 3);
+  assert.equal(result.errorMessage, null);
+});
+
+test('mergeBackendHealthSnapshot eventually shows offline after sustained timeout probes', () => {
+  const current = createSnapshot({
+    status: 'online',
+    lastOkAt: 100,
+    lastCheckedAt: 400,
+    consecutiveFailures: 3
+  });
+  const probe = createSnapshot({
+    status: 'offline',
+    lastCheckedAt: 500,
+    consecutiveFailures: 1,
+    failureKind: 'timeout',
+    errorMessage: 'The operation was aborted.'
+  });
+
+  const result = mergeBackendHealthSnapshot(current, probe);
+
+  assert.equal(result.status, 'offline');
+  assert.equal(result.lastOkAt, 100);
+  assert.equal(result.consecutiveFailures, 4);
+  assert.equal(result.errorMessage, 'The operation was aborted.');
 });
 
 test('mergeBackendHealthSnapshot recovers to online with one successful probe', () => {

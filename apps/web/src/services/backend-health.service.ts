@@ -6,10 +6,27 @@ export type BackendHealthSnapshot = {
   lastCheckedAt: number | null;
   consecutiveFailures: number;
   consecutiveSuccesses: number;
+  failureKind: 'timeout' | 'network' | 'http' | null;
   errorMessage: string | null;
 };
 
-export const checkBackendHealth = async (timeoutMs = 2500): Promise<BackendHealthSnapshot> => {
+export const DEFAULT_BACKEND_HEALTH_TIMEOUT_MS = 1500;
+export const DEFAULT_BACKEND_HEALTH_OFFLINE_FAILURE_THRESHOLD = 2;
+export const DEFAULT_BACKEND_HEALTH_TIMEOUT_FAILURE_THRESHOLD = 4;
+
+const getFailureKind = (error: unknown): NonNullable<BackendHealthSnapshot['failureKind']> => {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return 'timeout';
+  }
+
+  if (error instanceof Error && error.message.startsWith('HTTP ')) {
+    return 'http';
+  }
+
+  return 'network';
+};
+
+export const checkBackendHealth = async (timeoutMs = DEFAULT_BACKEND_HEALTH_TIMEOUT_MS): Promise<BackendHealthSnapshot> => {
   const controller = new AbortController();
   const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   const checkedAt = Date.now();
@@ -21,7 +38,7 @@ export const checkBackendHealth = async (timeoutMs = 2500): Promise<BackendHealt
     });
 
     if (!response.ok) {
-      throw new Error(`${response.status}: ${response.statusText}`);
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
     return {
@@ -30,6 +47,7 @@ export const checkBackendHealth = async (timeoutMs = 2500): Promise<BackendHealt
       lastCheckedAt: checkedAt,
       consecutiveFailures: 0,
       consecutiveSuccesses: 1,
+      failureKind: null,
       errorMessage: null
     };
   } catch (error) {
@@ -39,6 +57,7 @@ export const checkBackendHealth = async (timeoutMs = 2500): Promise<BackendHealt
       lastCheckedAt: checkedAt,
       consecutiveFailures: 1,
       consecutiveSuccesses: 0,
+      failureKind: getFailureKind(error),
       errorMessage: error instanceof Error ? error.message : 'Backend health check failed.'
     };
   } finally {
@@ -49,7 +68,8 @@ export const checkBackendHealth = async (timeoutMs = 2500): Promise<BackendHealt
 export const mergeBackendHealthSnapshot = (
   current: BackendHealthSnapshot,
   probe: BackendHealthSnapshot,
-  offlineFailureThreshold = 2
+  offlineFailureThreshold = DEFAULT_BACKEND_HEALTH_OFFLINE_FAILURE_THRESHOLD,
+  timeoutFailureThreshold = DEFAULT_BACKEND_HEALTH_TIMEOUT_FAILURE_THRESHOLD
 ): BackendHealthSnapshot => {
   if (probe.status === 'online') {
     return {
@@ -57,12 +77,15 @@ export const mergeBackendHealthSnapshot = (
       status: 'online',
       consecutiveFailures: 0,
       consecutiveSuccesses: current.consecutiveSuccesses + 1,
+      failureKind: null,
       errorMessage: null
     };
   }
 
   const consecutiveFailures = current.consecutiveFailures + 1;
-  const shouldShowOffline = consecutiveFailures >= offlineFailureThreshold;
+  const isTimeoutOnly = probe.failureKind === 'timeout';
+  const requiredFailures = isTimeoutOnly ? timeoutFailureThreshold : offlineFailureThreshold;
+  const shouldShowOffline = consecutiveFailures >= requiredFailures;
 
   return {
     ...probe,
