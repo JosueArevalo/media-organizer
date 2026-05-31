@@ -65,6 +65,15 @@ export type CompressionProgressApiResponse = {
   failedCopy: number;
 };
 
+export type ActiveCompressionSessionApiResponse = (CompressionSessionApiResponse & {
+  progress: CompressionProgressApiResponse;
+}) | null;
+
+export type ResumeCompressionSessionApiResponse = CompressionSessionApiResponse & {
+  progress: CompressionProgressApiResponse | null;
+  accepted: true;
+};
+
 export type HandBrakePresetOption = {
   category: string;
   name: string;
@@ -117,6 +126,28 @@ export const getCompressionProgressRequest = async (sessionId: string): Promise<
   }
 
   return (await response.json()) as CompressionProgressApiResponse;
+};
+
+export const getActiveCompressionSessionRequest = async (): Promise<ActiveCompressionSessionApiResponse> => {
+  const response = await fetch('/api/compression/active-session');
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Could not fetch active compression session (${response.status}): ${body}`);
+  }
+
+  return (await response.json()) as ActiveCompressionSessionApiResponse;
+};
+
+export const resumeCompressionSessionRequest = async (sessionId: string): Promise<ResumeCompressionSessionApiResponse> => {
+  const response = await fetch(`/api/compression/sessions/${sessionId}/resume`, { method: 'POST' });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Could not resume compression session (${response.status}): ${body}`);
+  }
+
+  return (await response.json()) as ResumeCompressionSessionApiResponse;
 };
 
 export const loadHandBrakePresetsRequest = async (command: string): Promise<HandBrakePresetsApiResponse> => {

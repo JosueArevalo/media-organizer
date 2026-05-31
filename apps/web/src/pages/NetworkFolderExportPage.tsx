@@ -76,7 +76,8 @@ export const NetworkFolderExportPage = () => {
 
   const sourceRoot = groupingSessionState.outputRootLabel ?? '';
   const backendJobId = exportJobState.backendJobId;
-  const canStart = Boolean(sourceRoot && destinationPath.trim() && targetTest?.ok && !isStarting);
+  const isPaused = progress?.status === 'paused' || exportJobState.status === 'paused';
+  const canStart = Boolean(sourceRoot && destinationPath.trim() && !isStarting && (targetTest?.ok || isPaused));
   const isRunning = progress?.status === 'running' || exportJobState.status === 'running';
   const completeCount = (progress?.completed ?? 0) + (progress?.skipped ?? 0);
   const progressPercent = progress?.total ? Math.round((completeCount / progress.total) * 100) : 0;
@@ -665,7 +666,7 @@ export const NetworkFolderExportPage = () => {
             {isTesting ? t('export.testing') : t('export.testTarget')}
           </button>
           <button className="btn btn-primary" type="button" onClick={() => void handleStart()} disabled={!canStart}>
-            {isStarting ? t('export.starting') : t('export.start')}
+            {isStarting ? t('export.starting') : isPaused ? t('export.resume') : t('export.start')}
           </button>
           <button className="btn btn-secondary" type="button" onClick={() => void handlePause()} disabled={!backendJobId || !isRunning}>
             {t('export.pause')}

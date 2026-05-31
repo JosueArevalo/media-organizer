@@ -18,11 +18,20 @@ import {
   type CompressionImagePreset,
   type VideoOutputFormatMode
 } from '../services/compression-settings.store';
-import { completeCompressionSession, failCompressionSession, startCompressionSession, resetCompressionSession } from '../services/compression-job.store';
 import {
+  completeCompressionSession,
+  failCompressionSession,
+  pauseCompressionSession,
+  saveCompressionSessionSnapshot,
+  startCompressionSession,
+  resetCompressionSession
+} from '../services/compression-job.store';
+import {
+  getActiveCompressionSessionRequest,
   getCompressionSessionRequest,
   getCompressionProgressRequest,
   loadHandBrakePresetsRequest,
+  resumeCompressionSessionRequest,
   startCompressionSessionRequest,
   type HandBrakePresetOption
 } from '../services/compression.service';
@@ -445,7 +454,7 @@ export const CompressionPage = () => {
     updatedAt: 0
   });
   const [progressData, setProgressData] = useState<{
-    status: 'running' | 'completed' | 'failed' | 'cancelled';
+    status: 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
     total: number;
     completed: number;
     failed: number;
@@ -460,6 +469,24 @@ export const CompressionPage = () => {
   } | null>(null);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const completionTimerRef = useRef<number | null>(null);
+  const pollSessionIdRef = useRef<string | null>(null);
+
+  const syncProgressData = (progress: Awaited<ReturnType<typeof getCompressionProgressRequest>>) => {
+    setProgressData({
+      status: progress.status as 'running' | 'paused' | 'completed' | 'failed' | 'cancelled',
+      total: progress.total,
+      completed: progress.completed,
+      failed: progress.failed,
+      currentlyProcessing: progress.currentlyProcessing,
+      processedItems: progress.processedItems,
+      totalCompress: progress.totalCompress,
+      totalCopy: progress.totalCopy,
+      completedCompress: progress.completedCompress,
+      completedCopy: progress.completedCopy,
+      failedCompress: progress.failedCompress,
+      failedCopy: progress.failedCopy
+    });
+  };
 
   const activePreset = IMAGE_PRESETS.find((preset) => preset.id === imagePreset);
   const effectiveImageQuality = imagePreset === 'custom' ? customQuality : (activePreset?.quality ?? 80);
@@ -601,7 +628,62 @@ export const CompressionPage = () => {
   }, [sourceSelection?.updatedAt]);
 
   useEffect(() => {
-    if (compressionSessionState.status !== 'running' || !compressionSessionState.backendSessionId) {
+    let isActive = true;
+
+    const hydrateActiveCompressionSession = async () => {
+      try {
+        const activeSession = await getActiveCompressionSessionRequest();
+
+        if (!isActive || !activeSession) {
+          return;
+        }
+
+        const localSessionId = compressionSessionState.backendSessionId;
+        const localIsTerminal = compressionSessionState.status === 'completed' || compressionSessionState.status === 'failed';
+
+        if (localSessionId === activeSession.session.id && localIsTerminal) {
+          return;
+        }
+
+        saveCompressionSessionSnapshot({
+          backendSessionId: activeSession.session.id,
+          status: activeSession.session.status === 'running' ? 'running' : 'paused',
+          startedAt: compressionSessionState.startedAt ?? Date.now(),
+          completedAt: null,
+          imageProfileLabel: compressionSessionState.imageProfileLabel,
+          imageQuality: compressionSessionState.imageQuality,
+          videoPresetLabel: compressionSessionState.videoPresetLabel,
+          outputRootLabel: activeSession.session.outputDir,
+          errorMessage: activeSession.session.status === 'paused' ? t('compression.interrupted') : null,
+          updatedAt: Date.now()
+        });
+        syncProgressData(activeSession.progress);
+        setBackendError(null);
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        if (compressionSessionState.backendSessionId) {
+          pauseCompressionSession(t('compression.backendOfflineResumePreserved'));
+        }
+
+        setBackendError(error instanceof Error ? error.message : t('compression.backendOfflineResumePreserved'));
+      }
+    };
+
+    void hydrateActiveCompressionSession();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !compressionSessionState.backendSessionId ||
+      (compressionSessionState.status !== 'running' && compressionSessionState.status !== 'paused')
+    ) {
       return;
     }
 
@@ -623,6 +705,15 @@ export const CompressionPage = () => {
           return;
         }
 
+        if (status === 'paused') {
+          pauseCompressionSession(t('compression.interrupted'));
+          setBackendError(null);
+          setIsStartingCompression(false);
+          const progress = await getCompressionProgressRequest(compressionSessionState.backendSessionId as string);
+          syncProgressData(progress);
+          return;
+        }
+
         if (status === 'failed' || status === 'cancelled') {
           const errorDetails = extractCompressionErrorDetails(session.checkpoint?.payloadJson ?? null);
           const message = errorDetails.failedCount > 0
@@ -633,14 +724,14 @@ export const CompressionPage = () => {
           setBackendError(message);
           setIsStartingCompression(false);
         }
-      } catch {
+      } catch (error) {
         if (!isActive) {
           return;
         }
 
-        resetCompressionSession();
+        pauseCompressionSession(t('compression.backendOfflineResumePreserved'));
         setIsStartingCompression(false);
-        setBackendError(t('compression.staleReset'));
+        setBackendError(error instanceof Error ? error.message : t('compression.backendOfflineResumePreserved'));
       }
     };
 
@@ -649,12 +740,12 @@ export const CompressionPage = () => {
     return () => {
       isActive = false;
     };
-  }, [compressionSessionState.backendSessionId, compressionSessionState.status]);
+  }, [compressionSessionState.backendSessionId, compressionSessionState.status, t]);
 
   useEffect(() => {
     if (
       !compressionSessionState.backendSessionId ||
-      (compressionSessionState.status !== 'completed' && compressionSessionState.status !== 'failed')
+      (compressionSessionState.status !== 'completed' && compressionSessionState.status !== 'failed' && compressionSessionState.status !== 'paused')
     ) {
       return;
     }
@@ -668,7 +759,7 @@ export const CompressionPage = () => {
         }
 
         setProgressData({
-          status: progress.status as 'running' | 'completed' | 'failed' | 'cancelled',
+          status: progress.status as 'running' | 'paused' | 'completed' | 'failed' | 'cancelled',
           total: progress.total,
           completed: progress.completed,
           failed: progress.failed,
@@ -808,6 +899,10 @@ export const CompressionPage = () => {
       return t('compression.complete');
     }
 
+    if (compressionSessionState.status === 'paused') {
+      return t('compression.interrupted');
+    }
+
     if (compressionSessionState.status === 'failed') {
       return null;
     }
@@ -884,7 +979,7 @@ export const CompressionPage = () => {
           const progress = await getCompressionProgressRequest(started.session.id);
           
           setProgressData({
-            status: progress.status as 'running' | 'completed' | 'failed' | 'cancelled',
+            status: progress.status as 'running' | 'paused' | 'completed' | 'failed' | 'cancelled',
             total: progress.total,
             completed: progress.completed,
             failed: progress.failed,
@@ -902,6 +997,12 @@ export const CompressionPage = () => {
 
           if (status === 'completed') {
             completeCompressionSession();
+            setIsStartingCompression(false);
+            return;
+          }
+
+          if (status === 'paused') {
+            pauseCompressionSession(t('compression.interrupted'));
             setIsStartingCompression(false);
             return;
           }
@@ -944,6 +1045,7 @@ export const CompressionPage = () => {
         } catch (error) {
           const message = error instanceof Error ? error.message : t('compression.pollError');
           console.error('[CompressionPage] polling error:', message);
+          setBackendError(message);
           
           completionTimerRef.current = window.setTimeout(() => {
             void poll();
@@ -960,6 +1062,90 @@ export const CompressionPage = () => {
     }
   };
 
+  const handleResumeCompression = async () => {
+    if (!compressionSessionState.backendSessionId) {
+      return;
+    }
+
+    const sessionId = compressionSessionState.backendSessionId;
+    setBackendError(null);
+    setIsStartingCompression(true);
+    pollSessionIdRef.current = sessionId;
+
+    try {
+      const resumed = await resumeCompressionSessionRequest(sessionId);
+      startCompressionSession({
+        backendSessionId: sessionId,
+        imageProfileLabel: compressionSessionState.imageProfileLabel ?? selectedImageProfileLabel,
+        imageQuality: compressionSessionState.imageQuality ?? effectiveImageQuality,
+        videoPresetLabel: compressionSessionState.videoPresetLabel ?? selectedVideoProfileLabel,
+        outputRootLabel: compressionSessionState.outputRootLabel ?? destinationPath
+      });
+
+      if (resumed.progress) {
+        syncProgressData(resumed.progress);
+      }
+
+      const poll = async () => {
+        try {
+          if (pollSessionIdRef.current !== sessionId) {
+            return;
+          }
+
+          const progress = await getCompressionProgressRequest(sessionId);
+          syncProgressData(progress);
+
+          const status = progress.status;
+
+          if (status === 'completed') {
+            completeCompressionSession();
+            setIsStartingCompression(false);
+            return;
+          }
+
+          if (status === 'paused') {
+            pauseCompressionSession(t('compression.interrupted'));
+            setIsStartingCompression(false);
+            return;
+          }
+
+          if (status === 'failed' || status === 'cancelled') {
+            const session = await getCompressionSessionRequest(sessionId);
+            const errorDetails = extractCompressionErrorDetails(session.checkpoint?.payloadJson ?? null);
+            const errorMessage = errorDetails.failedCount > 0
+              ? t('compression.failedItemsSummary', { completed: errorDetails.completedCount, failed: errorDetails.failedCount })
+              : t('compression.sessionEnded', { status });
+
+            failCompressionSession(errorMessage);
+            setBackendError(errorMessage);
+            setIsStartingCompression(false);
+            return;
+          }
+
+          completionTimerRef.current = window.setTimeout(() => {
+            void poll();
+          }, 1000);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : t('compression.pollError');
+          console.error('[CompressionPage] resume polling error:', message);
+          setBackendError(message);
+
+          completionTimerRef.current = window.setTimeout(() => {
+            void poll();
+          }, 1000);
+        }
+      };
+
+      await poll();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('compression.resumeError');
+      pauseCompressionSession(t('compression.interrupted'));
+      setBackendError(message);
+      setIsStartingCompression(false);
+    }
+  };
+
+  const isCompressionPaused = compressionSessionState.status === 'paused';
   const isCompressionRunning = compressionSessionState.status === 'running' || isStartingCompression;
   const isCompressionComplete = compressionSessionState.status === 'completed';
 
@@ -1002,9 +1188,24 @@ export const CompressionPage = () => {
             </button>
           </div>
         )}
+        {compressionSessionState.status === 'paused' && (
+          <div className="compression-error-section">
+            <p className="page-summary-note">
+              {compressionSessionState.errorMessage ?? t('compression.interrupted')}
+            </p>
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={() => void handleResumeCompression()}
+              disabled={isStartingCompression}
+            >
+              {isStartingCompression ? t('compression.resumingButton') : t('compression.resumeButton')}
+            </button>
+          </div>
+        )}
       </div>
 
-      {(isCompressionRunning || progressData) && progressData && (
+      {(isCompressionRunning || isCompressionPaused || progressData) && progressData && (
         <div className="page-card compression-progress-card">
           <p className="page-section-title">{t('compression.progressTitle')}</p>
           {progressData.total === 0 && estimatedTotalMediaCount > 0 && (
@@ -1301,12 +1502,14 @@ export const CompressionPage = () => {
         <button
           className="btn btn-primary"
           type="button"
-          onClick={() => void handleStartCompression()}
-          disabled={isCompressionRunning || isCompressionComplete || !canStartRealCompression}
+          onClick={() => void (isCompressionPaused ? handleResumeCompression() : handleStartCompression())}
+          disabled={isCompressionRunning || isCompressionComplete || (!isCompressionPaused && !canStartRealCompression)}
         >
           {isCompressionRunning
             ? t('compression.runningButton')
-            : isCompressionComplete
+            : isCompressionPaused
+              ? t('compression.resumeButton')
+              : isCompressionComplete
               ? t('compression.completedButton')
               : isCompressionSetupLoading
                 ? t('compression.loadingSetupButton')

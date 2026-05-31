@@ -6,6 +6,7 @@ import { useImportStepCompletion } from '../hooks/useImportStepCompletion';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
+import { useBackendHealth } from '../hooks/useBackendHealth';
 import { useTranslation } from '../i18n';
 
 const workflowStepBlueprint = [
@@ -36,11 +37,18 @@ const workflowStepBlueprint = [
   }
 ] as const;
 
+const SERVER_STATUS_LABEL_KEYS = {
+  checking: 'serverStatus.checking',
+  online: 'serverStatus.online',
+  offline: 'serverStatus.offline'
+} as const;
+
 const AppShell = () => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const { currentLanguage, languages, locale, setLocale, t } = useTranslation();
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
+  const backendHealth = useBackendHealth();
   const isImportStepComplete = useImportStepCompletion();
   const { sourceSelection, destinationSelection } = useFolderSelections();
   const isSelectionComplete = isImportStepComplete && Boolean(sourceSelection && destinationSelection);
@@ -115,11 +123,19 @@ const AppShell = () => {
         <section className="sidebar-section sidebar-quick-access">
           <p className="sidebar-label">{t('shell.quickAccess')}</p>
           <Link to="/dashboard" className={`quick-link ${isDashboard ? 'active' : ''}`}>
-            📊 {t('shell.dashboard')}
+            <span className="quick-link-icon" aria-hidden="true">📊</span>
+            <span>{t('shell.dashboard')}</span>
           </Link>
           <Link to="/settings" className={`quick-link ${location.pathname === '/settings' ? 'active' : ''}`}>
-            🔧 {t('shell.settings')}
+            <span className="quick-link-icon" aria-hidden="true">🔧</span>
+            <span>{t('shell.settings')}</span>
           </Link>
+          <div className={`server-status server-status-${backendHealth.status}`} title={backendHealth.errorMessage ?? undefined}>
+            <span className="quick-link-icon" aria-hidden="true">
+              <span className="server-status-dot" />
+            </span>
+            <span>{t(SERVER_STATUS_LABEL_KEYS[backendHealth.status])}</span>
+          </div>
         </section>
 
         <div className="sidebar-footer">

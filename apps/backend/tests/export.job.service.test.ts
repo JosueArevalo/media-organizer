@@ -126,3 +126,39 @@ test('pauseExportJob and start/resume APIs keep resumable job state', async () =
   assert.equal(completed?.job.status, 'completed');
   assert.equal(completed?.job.completedItems, 2);
 });
+
+test('interrupted export jobs pause on startup, reset running items, and replace partial copies on resume', async () => {
+  const { createExportJob, getExportProgress, reconcileInterruptedExportJobs } = await import('../src/pipeline/export/exportJob.service.js?resume-interrupted=1');
+  const { executeExportJob } = await import('../src/pipeline/export/exportJob.runner.js?resume-interrupted=1');
+
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'network-folder', destinationPath: destinationRoot }
+  });
+  const db = getDb();
+  const rows = db
+    .prepare('SELECT id, source_path, destination_path FROM export_items WHERE job_id = ? ORDER BY relative_path ASC')
+    .all(job.job.id) as Array<{ id: string; source_path: string; destination_path: string }>;
+
+  fs.mkdirSync(path.dirname(rows[0].destination_path), { recursive: true });
+  fs.copyFileSync(rows[0].source_path, rows[0].destination_path);
+  fs.utimesSync(rows[0].destination_path, fs.statSync(rows[0].source_path).atime, fs.statSync(rows[0].source_path).mtime);
+  fs.writeFileSync(rows[1].destination_path, 'partial');
+
+  db.prepare("UPDATE export_items SET status = 'completed' WHERE id = ?").run(rows[0].id);
+  db.prepare("UPDATE export_items SET status = 'running' WHERE id = ?").run(rows[1].id);
+  db.prepare("UPDATE export_jobs SET status = 'running', completed_items = 1 WHERE id = ?").run(job.job.id);
+
+  assert.equal(reconcileInterruptedExportJobs(), 1);
+
+  const pausedProgress = getExportProgress(job.job.id);
+  assert.equal(pausedProgress?.status, 'paused');
+  assert.equal(pausedProgress?.recentItems.find((item) => item.id === rows[1].id)?.status, 'pending');
+
+  await executeExportJob(job.job.id);
+
+  const finalProgress = getExportProgress(job.job.id);
+  assert.equal(finalProgress?.status, 'completed');
+  assert.equal(finalProgress?.failed, 0);
+  assert.equal(fs.readFileSync(rows[1].destination_path, 'utf8'), fs.readFileSync(rows[1].source_path, 'utf8'));
+});

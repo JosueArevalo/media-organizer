@@ -20,11 +20,14 @@ type CapturedResponse = {
   body: string;
 };
 
-const createJsonRequest = (payload: unknown) => {
-  const request = Readable.from([JSON.stringify(payload)]) as IncomingMessage;
-  request.method = 'POST';
+const createRequest = (method: string, payload?: unknown) => {
+  const body = payload === undefined ? [] : [JSON.stringify(payload)];
+  const request = Readable.from(body) as IncomingMessage;
+  request.method = method;
   return request;
 };
+
+const createJsonRequest = (payload: unknown) => createRequest('POST', payload);
 
 const createResponse = () => {
   let resolveResponse: (response: CapturedResponse) => void;
@@ -90,4 +93,77 @@ test('compression session route forwards optional HEIC tool commands into the ma
   assert.equal(payload.manifest.imageMagickCommand, 'D:\\Tools\\ImageMagick\\magick.exe');
   assert.equal(payload.manifest.exifToolCommand, 'D:\\Tools\\ExifTool\\exiftool.exe');
   assert.equal(payload.manifest.videoOutputFormatMode, 'mp4');
+});
+
+test('active session route returns the latest resumable compression session with progress', async () => {
+  const { startCompressionSession } = await import('../src/pipeline/compression/compressionJob.service.js?routes-active=1');
+  const started = startCompressionSession({
+    sourceDir,
+    outputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Fast 1080p30',
+    imageToolCommand: '__missing_image_encoder__',
+    videoToolCommand: '__missing_video_encoder__'
+  });
+
+  const { response, responsePromise } = createResponse();
+  const handled = handleCompressionRoutes({
+    req: createRequest('GET'),
+    res: response,
+    requestUrl: new URL('http://localhost/api/compression/active-session')
+  });
+
+  assert.equal(handled, true);
+
+  const captured = await responsePromise;
+  assert.equal(captured.statusCode, 200);
+
+  const payload = JSON.parse(captured.body) as {
+    session: { id: string; status: string };
+    progress: { sessionId: string; status: string };
+  };
+
+  assert.ok(payload.session.id);
+  assert.equal(payload.session.status, 'running');
+  assert.equal(payload.progress.sessionId, payload.session.id);
+  assert.equal(payload.progress.status, 'running');
+  assert.ok(started.session.id);
+});
+
+test('resume route accepts a resumable session and returns initial progress', async () => {
+  const { startCompressionSession, reconcileInterruptedCompressionSessions } = await import('../src/pipeline/compression/compressionJob.service.js?routes-resume=1');
+  const started = startCompressionSession({
+    sourceDir,
+    outputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Fast 1080p30',
+    imageToolCommand: '__missing_image_encoder__',
+    videoToolCommand: '__missing_video_encoder__'
+  });
+  reconcileInterruptedCompressionSessions();
+
+  const { response, responsePromise } = createResponse();
+  const handled = handleCompressionRoutes({
+    req: createRequest('POST'),
+    res: response,
+    requestUrl: new URL(`http://localhost/api/compression/sessions/${started.session.id}/resume`)
+  });
+
+  assert.equal(handled, true);
+
+  const captured = await responsePromise;
+  assert.equal(captured.statusCode, 202);
+
+  const payload = JSON.parse(captured.body) as {
+    accepted: boolean;
+    session: { id: string; status: string };
+    progress: { sessionId: string; status: string } | null;
+  };
+
+  assert.equal(payload.accepted, true);
+  assert.equal(payload.session.id, started.session.id);
+  assert.equal(payload.session.status, 'running');
+  assert.equal(payload.progress?.sessionId, started.session.id);
 });
