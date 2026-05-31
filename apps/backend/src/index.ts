@@ -6,7 +6,9 @@ import { runMigrations } from './state/migrations/runMigrations.js';
 import { getDbPath } from './state/db.js';
 import { handleDashboardRoutes } from './dashboard/dashboard.routes.js';
 import { handleCompressionRoutes } from './pipeline/compression/compression.routes.js';
+import { reconcileInterruptedCompressionSessions } from './pipeline/compression/compressionJob.service.js';
 import { handleExportRoutes } from './pipeline/export/export.routes.js';
+import { reconcileInterruptedExportJobs } from './pipeline/export/exportJob.service.js';
 import { handleImportValidationRoutes } from './pipeline/import/importValidation.routes.js';
 import {
   getGroupingProgress,
@@ -115,7 +117,11 @@ const streamMediaFile = (
   fs.createReadStream(filePath, { start, end }).pipe(res);
 };
 
-export const createBackendServer = (appliedMigrations = runMigrations()) => createServer((req, res) => {
+export const createBackendServer = (appliedMigrations = runMigrations()) => {
+  reconcileInterruptedCompressionSessions();
+  reconcileInterruptedExportJobs();
+
+  return createServer((req, res) => {
   if (req.method === 'OPTIONS') {
     if (!isAllowedLocalOrigin(req.headers.origin) || !isAllowedLocalHost(req.headers.host)) {
       sendForbiddenLocalOnly(res);
@@ -595,7 +601,8 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => crea
   sendJson(res, 404, {
     status: 'not_found'
   });
-});
+  });
+};
 
 const isMainModule = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 

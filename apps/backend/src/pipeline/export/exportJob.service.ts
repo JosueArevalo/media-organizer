@@ -313,6 +313,39 @@ export const markExportJobRunning = (jobId: string) => updateExportJobStatus(job
 
 export const markExportJobFailed = (jobId: string, error: Error) => updateExportJobStatus(jobId, 'failed', error.message);
 
+export const reconcileInterruptedExportJobs = () => {
+  runMigrations();
+  const db = getDb();
+  const timestamp = nowIso();
+  const rows = db.prepare("SELECT id FROM export_jobs WHERE status = 'running'").all() as Array<{ id: string }>;
+
+  for (const row of rows) {
+    db.prepare(
+      `
+        UPDATE export_items
+        SET status = 'pending',
+            last_error = NULL,
+            updated_at = ?
+        WHERE job_id = ?
+          AND status = 'running'
+      `
+    ).run(timestamp, row.id);
+
+    db.prepare(
+      `
+        UPDATE export_jobs
+        SET status = 'paused',
+            last_error = NULL,
+            updated_at = ?,
+            last_opened_at = ?
+        WHERE id = ?
+      `
+    ).run(timestamp, timestamp, row.id);
+  }
+
+  return rows.length;
+};
+
 export const retryFailedExportItems = (jobId: string): ExportJobSnapshot | null => {
   runMigrations();
   const snapshot = getExportJob(jobId);
@@ -410,6 +443,40 @@ export const listRunnableExportItems = (jobId: string) => {
     .all(jobId) as Array<Parameters<typeof toItemRecord>[0]>;
 };
 
+export const resetInvalidCompletedExportItems = (jobId: string, isCompletedOutputValid: (item: ExportItemRecord) => boolean) => {
+  runMigrations();
+  const db = getDb();
+  const timestamp = nowIso();
+  const rows = db
+    .prepare(
+      `
+        SELECT *
+        FROM export_items
+        WHERE job_id = ?
+          AND status IN ('completed', 'skipped')
+      `
+    )
+    .all(jobId) as Array<Parameters<typeof toItemRecord>[0]>;
+
+  for (const row of rows) {
+    const item = toItemRecord(row);
+
+    if (isCompletedOutputValid(item)) {
+      continue;
+    }
+
+    db.prepare(
+      `
+        UPDATE export_items
+        SET status = 'pending',
+            last_error = NULL,
+            updated_at = ?
+        WHERE id = ?
+      `
+    ).run(timestamp, item.id);
+  }
+};
+
 export const getExportJobStatus = (jobId: string) => {
   const db = getDb();
   const row = db.prepare('SELECT status FROM export_jobs WHERE id = ?').get(jobId) as { status: ExportJobRecord['status'] } | undefined;
@@ -435,6 +502,33 @@ export const persistExportItemResult = (
       WHERE id = ?
     `
   ).run(status, lastError, timestamp, itemId);
+
+  const row = db.prepare('SELECT job_id FROM export_items WHERE id = ?').get(itemId) as { job_id: string } | undefined;
+
+  if (row) {
+    db.prepare(
+      `
+        UPDATE export_checkpoints
+        SET cursor = ?, updated_at = ?
+        WHERE job_id = ?
+      `
+    ).run(cursor, timestamp, row.job_id);
+  }
+};
+
+export const markExportItemRunning = (itemId: string, cursor: string | null) => {
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE export_items
+      SET status = 'running',
+          last_error = NULL,
+          updated_at = ?
+      WHERE id = ?
+    `
+  ).run(timestamp, itemId);
 
   const row = db.prepare('SELECT job_id FROM export_items WHERE id = ?').get(itemId) as { job_id: string } | undefined;
 

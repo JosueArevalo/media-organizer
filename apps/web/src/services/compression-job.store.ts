@@ -1,4 +1,4 @@
-export type CompressionSessionStatus = 'idle' | 'running' | 'completed' | 'failed';
+export type CompressionSessionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
 export type CompressionSessionSnapshot = {
   backendSessionId: string | null;
@@ -76,6 +76,11 @@ const writeSnapshot = (snapshot: CompressionSessionSnapshot) => {
 
 export const loadCompressionSessionSnapshot = () => readSnapshot();
 
+export const saveCompressionSessionSnapshot = (snapshot: CompressionSessionSnapshot) => {
+  writeSnapshot(snapshot);
+  return snapshot;
+};
+
 export const isCompressionSessionComplete = () => readSnapshot().status === 'completed';
 
 export const startCompressionSession = (payload: CompressionSessionStartPayload) => {
@@ -148,4 +153,19 @@ export const subscribeCompressionSessionChanges = (callback: () => void) => {
   window.addEventListener(STORAGE_EVENT_NAME, callback as EventListener);
 
   return () => window.removeEventListener(STORAGE_EVENT_NAME, callback as EventListener);
+};
+
+export const pauseCompressionSession = (errorMessage: string | null = null) => {
+  const current = readSnapshot();
+  const snapshot: CompressionSessionSnapshot = {
+    ...current,
+    status: 'paused',
+    completedAt: null,
+    errorMessage,
+    updatedAt: Date.now()
+  };
+
+  writeSnapshot(snapshot);
+
+  return snapshot;
 };

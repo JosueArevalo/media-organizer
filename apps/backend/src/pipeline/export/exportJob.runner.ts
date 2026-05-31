@@ -4,8 +4,10 @@ import {
   getExportJob,
   getExportJobStatus,
   listRunnableExportItems,
+  markExportItemRunning,
   markExportJobRunning,
   persistExportItemResult,
+  resetInvalidCompletedExportItems,
   refreshExportJobCounters
 } from './exportJob.service.js';
 import type { ExportItemRecord } from './export.types.js';
@@ -17,18 +19,34 @@ const isAlreadyCopied = (item: ExportItemRecord) => {
 
   const sourceStats = fs.statSync(item.sourcePath);
   const destinationStats = fs.statSync(item.destinationPath);
-  const sourceTime = Math.floor(sourceStats.mtimeMs);
-  const destinationTime = Math.floor(destinationStats.mtimeMs);
 
-  return sourceStats.size === destinationStats.size && Math.abs(sourceTime - destinationTime) < 2000;
+  if (sourceStats.size !== destinationStats.size) {
+    return false;
+  }
+
+  return fs.readFileSync(item.sourcePath).equals(fs.readFileSync(item.destinationPath));
 };
 
 const copyExportItem = (item: ExportItemRecord) => {
   const sourceStats = fs.statSync(item.sourcePath);
+  const tempPath = path.join(
+    path.dirname(item.destinationPath),
+    `.${path.basename(item.destinationPath)}.media-organizer-tmp-${process.pid}-${Date.now()}`
+  );
 
   fs.mkdirSync(path.dirname(item.destinationPath), { recursive: true });
-  fs.copyFileSync(item.sourcePath, item.destinationPath);
-  fs.utimesSync(item.destinationPath, sourceStats.atime, sourceStats.mtime);
+  try {
+    fs.copyFileSync(item.sourcePath, tempPath);
+    fs.utimesSync(tempPath, sourceStats.atime, sourceStats.mtime);
+    fs.renameSync(tempPath, item.destinationPath);
+  } catch (error) {
+    fs.rmSync(tempPath, { force: true });
+    throw error;
+  }
+
+  if (!isAlreadyCopied(item)) {
+    throw new Error('Copied file verification failed.');
+  }
 };
 
 const yieldToEventLoop = async () => {
@@ -50,6 +68,9 @@ export const executeExportJob = async (jobId: string) => {
 
   markExportJobRunning(jobId);
   await yieldToEventLoop();
+
+  resetInvalidCompletedExportItems(jobId, isAlreadyCopied);
+  refreshExportJobCounters(jobId, 'running');
 
   const items = listRunnableExportItems(jobId);
 
@@ -79,6 +100,7 @@ export const executeExportJob = async (jobId: string) => {
       if (isAlreadyCopied(item)) {
         persistExportItemResult(item.id, 'skipped', null, item.relativePath);
       } else {
+        markExportItemRunning(item.id, item.relativePath);
         copyExportItem(item);
         persistExportItemResult(item.id, 'completed', null, item.relativePath);
       }

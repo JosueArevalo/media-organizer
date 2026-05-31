@@ -10,9 +10,26 @@ export const getCompressionScriptsDir = () => path.join(repoRootDir, 'scripts', 
 
 export const getPythonCommand = () => process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python';
 
-export const buildImageCompressionCommand = (manifest: CompressionSessionManifest) => ({
+type ResumeItem = {
+  source: string;
+  output: string;
+};
+
+const appendResumeArgs = (args: string[], resumeItems?: ResumeItem[]) => {
+  if (!resumeItems?.length) {
+    return args;
+  }
+
+  return [
+    ...args,
+    '--resume-skip-json',
+    JSON.stringify(resumeItems)
+  ];
+};
+
+export const buildImageCompressionCommand = (manifest: CompressionSessionManifest, resumeItems?: ResumeItem[]) => ({
   command: getPythonCommand(),
-  args: [
+  args: appendResumeArgs([
     path.join(getCompressionScriptsDir(), 'compress_images.py'),
     '--source-dir',
     manifest.sourceDir,
@@ -28,12 +45,12 @@ export const buildImageCompressionCommand = (manifest: CompressionSessionManifes
     manifest.exifToolCommand,
     '--selection-scope-json',
     JSON.stringify(manifest.selectionScope)
-  ]
+  ], resumeItems)
 });
 
-export const buildVideoCompressionCommand = (manifest: CompressionSessionManifest) => ({
+export const buildVideoCompressionCommand = (manifest: CompressionSessionManifest, resumeItems?: ResumeItem[]) => ({
   command: getPythonCommand(),
-  args: [
+  args: appendResumeArgs([
     path.join(getCompressionScriptsDir(), 'compress_videos.py'),
     '--source-dir',
     manifest.sourceDir,
@@ -47,5 +64,5 @@ export const buildVideoCompressionCommand = (manifest: CompressionSessionManifes
     manifest.videoToolCommand,
     '--selection-scope-json',
     JSON.stringify(manifest.selectionScope)
-  ]
+  ], resumeItems)
 });

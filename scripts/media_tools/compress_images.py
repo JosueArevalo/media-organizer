@@ -38,6 +38,29 @@ def load_scope(value: str):
     return json.loads(value)
 
 
+def load_resume_items(value: str):
+    if not value:
+        return []
+
+    parsed = json.loads(value)
+
+    if not isinstance(parsed, list):
+        return []
+
+    items = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+
+        source = item.get('source')
+        output = item.get('output')
+
+        if isinstance(source, str) and isinstance(output, str):
+            items.append({'source': source, 'output': output})
+
+    return items
+
+
 def resolve_scope_path(source_dir: Path, scope_path: str) -> str:
     trimmed = scope_path.strip().replace('\\', '/')
 
@@ -149,8 +172,45 @@ def copy_if_changed(source_file: Path, output_file: Path) -> bool:
     if has_same_file_metadata(source_file, output_file):
         return True
 
-    shutil.copy2(source_file, output_file)
+    temp_file = build_temp_output_path(output_file)
+
+    try:
+        shutil.copy2(source_file, temp_file)
+        os.replace(temp_file, output_file)
+    finally:
+        try:
+            temp_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     return False
+
+
+def build_temp_output_path(output_file: Path) -> Path:
+    return output_file.with_name(f'.{output_file.name}.media-organizer-tmp-{os.getpid()}-{time.time_ns()}{output_file.suffix}')
+
+
+def cleanup_stale_temp_outputs(output_file: Path):
+    pattern = f'.{output_file.name}.media-organizer-tmp-*{output_file.suffix}'
+
+    for candidate in output_file.parent.glob(pattern):
+        try:
+            candidate.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def replace_output(temp_file: Path, output_file: Path):
+    os.replace(temp_file, output_file)
+
+
+def run_external_command(command: list[str]):
+    subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def iter_image_files(source_dir: Path):
@@ -163,6 +223,7 @@ def iter_image_files(source_dir: Path):
 
 
 def run_cjpeg(encoder_command: str, quality: int, source_file: Path, output_file: Path):
+    temp_file = build_temp_output_path(output_file)
     command = [
         encoder_command,
         '-quality',
@@ -170,16 +231,25 @@ def run_cjpeg(encoder_command: str, quality: int, source_file: Path, output_file
         '-progressive',
         '-optimize',
         '-outfile',
-        str(output_file),
+        str(temp_file),
         str(source_file),
     ]
-    subprocess.run(command, check=True, capture_output=True, text=True)
+    try:
+        run_external_command(command)
+        replace_output(temp_file, output_file)
+    finally:
+        try:
+            temp_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     return command
 
 
 def convert_heic_to_jpeg(source_file: Path, output_file: Path, quality: int, encoder_command: str, imagemagick_command: str):
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.ppm')
     temp_path = Path(temp_file.name)
+    temp_output_file = build_temp_output_path(output_file)
     temp_file.close()
 
     magick_command = [
@@ -197,16 +267,21 @@ def convert_heic_to_jpeg(source_file: Path, output_file: Path, quality: int, enc
         '-progressive',
         '-optimize',
         '-outfile',
-        str(output_file),
+        str(temp_output_file),
         str(temp_path),
     ]
 
     try:
         subprocess.run(magick_command, check=True, capture_output=True, text=True)
-        subprocess.run(cjpeg_command, check=True, capture_output=True, text=True)
+        run_external_command(cjpeg_command)
+        replace_output(temp_output_file, output_file)
     finally:
         try:
             temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            temp_output_file.unlink(missing_ok=True)
         except OSError:
             pass
 
@@ -262,6 +337,7 @@ def main() -> int:
     parser.add_argument('--imagemagick-command', default='magick')
     parser.add_argument('--exiftool-command', default='')
     parser.add_argument('--selection-scope-json', default='')
+    parser.add_argument('--resume-skip-json', default='')
     args = parser.parse_args()
 
     source_dir = Path(args.source_dir).resolve()
@@ -271,9 +347,17 @@ def main() -> int:
 
     manifest = []
     used_outputs = set()
+    resume_items = load_resume_items(args.resume_skip_json)
+    skipped_sources = {normalize_path(item['source']) for item in resume_items}
     heic_support_checked = False
 
+    for resume_item in resume_items:
+        used_outputs.add(normalize_path(resume_item['output']))
+
     for source_file in iter_image_files(source_dir):
+        if normalize_path(str(source_file)) in skipped_sources:
+            continue
+
         selected_for_compression = should_compress(source_file, scope)
         extension = source_file.suffix.lower()
         output_file = build_output_path(
@@ -284,6 +368,7 @@ def main() -> int:
         )
         output_file = resolve_unique_output_path(output_file, used_outputs)
         output_file.parent.mkdir(parents=True, exist_ok=True)
+        cleanup_stale_temp_outputs(output_file)
 
         command = []
 
@@ -351,7 +436,7 @@ def main() -> int:
             warning_message = f"{extension or 'Unknown'} files are copied without compression in this version."
 
         if status == 'failed' and source_file.suffix.lower() == output_file.suffix.lower():
-            shutil.copy2(source_file, output_file)
+            copy_if_changed(source_file, output_file)
 
         finished_at = now_ms()
         item = {

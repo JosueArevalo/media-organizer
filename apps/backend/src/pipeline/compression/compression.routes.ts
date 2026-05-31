@@ -3,7 +3,9 @@ import type { RouteHandler } from '../../http/routeTypes.js';
 import {
   getCompressionProgress,
   getCompressionSession,
+  getActiveCompressionSession,
   markCompressionSessionFailed,
+  startCompressionSessionResume,
   startCompressionSession
 } from './compressionJob.service.js';
 import { executeCompressionSession } from './compressionJob.runner.js';
@@ -69,7 +71,12 @@ export const handleCompressionRoutes: RouteHandler = ({ req, res, requestUrl }) 
     return true;
   }
 
-  if (requestUrl.pathname.startsWith('/api/compression/sessions/') && req.method === 'GET') {
+  if (requestUrl.pathname === '/api/compression/active-session' && req.method === 'GET') {
+    sendJson(res, 200, getActiveCompressionSession());
+    return true;
+  }
+
+  if (requestUrl.pathname.startsWith('/api/compression/sessions/') && (req.method === 'GET' || req.method === 'POST')) {
     const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
     const sessionId = pathSegments[3];
     const subPath = pathSegments[4];
@@ -88,6 +95,28 @@ export const handleCompressionRoutes: RouteHandler = ({ req, res, requestUrl }) 
       }
 
       sendJson(res, 200, progress);
+      return true;
+    }
+
+    if (req.method === 'POST' && subPath === 'resume') {
+      const session = startCompressionSessionResume(sessionId);
+
+      if (!session) {
+        sendJson(res, 404, { status: 'not_found' });
+        return true;
+      }
+
+      void executeCompressionSession(sessionId).catch((error) => {
+        console.error(`[backend] compression session ${sessionId} resume failed`, error);
+        markCompressionSessionFailed(sessionId, error instanceof Error ? error : new Error('Compression session resume failed.'));
+      });
+
+      sendJson(res, 202, session);
+      return true;
+    }
+
+    if (req.method !== 'GET') {
+      sendJson(res, 404, { status: 'not_found' });
       return true;
     }
 

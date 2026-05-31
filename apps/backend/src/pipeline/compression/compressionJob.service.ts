@@ -67,6 +67,27 @@ export type CompressionSessionLaunchResult = {
   manifestPath: string;
 };
 
+type CompressionCheckpointPayload = {
+  outputRoot?: string;
+  manifest?: Partial<CompressionSessionManifest>;
+  totalCount?: number;
+  summary?: {
+    completedItems?: number;
+    failedItems?: number;
+    totalCompressCount?: number;
+    totalCopyCount?: number;
+    completedCompressCount?: number;
+    completedCopyCount?: number;
+    failedCompressCount?: number;
+    failedCopyCount?: number;
+  };
+  activeItems?: unknown[];
+  processedItems?: unknown[];
+  interrupted?: boolean;
+  interruptedAt?: string;
+  fatalError?: string;
+};
+
 const nowIso = () => new Date().toISOString();
 
 const ensureDirectory = (directoryPath: string) => {
@@ -139,6 +160,20 @@ const upsertCompressionCheckpoint = (sessionId: string, outputRoot: string, mani
     updated_at: string;
   };
 };
+
+const parseCheckpointPayload = (payloadJson: string | null): CompressionCheckpointPayload => {
+  if (!payloadJson) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(payloadJson) as CompressionCheckpointPayload;
+  } catch {
+    return {};
+  }
+};
+
+const serializeCheckpointPayload = (payload: CompressionCheckpointPayload) => JSON.stringify(payload);
 
 export const startCompressionSession = (request: CompressionSessionRequest): CompressionSessionLaunchResult => {
   runMigrations();
@@ -289,6 +324,38 @@ export const getCompressionSession = (sessionId: string) => {
           updatedAt: checkpointRow.updated_at
         }
       : null
+  };
+};
+
+export const getActiveCompressionSession = () => {
+  runMigrations();
+  const db = getDb();
+  const row = db
+    .prepare(
+      `
+        SELECT id
+        FROM sessions
+        WHERE status IN ('running', 'paused')
+        ORDER BY datetime(updated_at) DESC
+        LIMIT 1
+      `
+    )
+    .get() as { id: string } | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  const snapshot = getCompressionSession(row.id);
+  const progress = getCompressionProgress(row.id);
+
+  if (!snapshot || !progress) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    progress
   };
 };
 
@@ -492,6 +559,100 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   };
 };
 
+export const reconcileInterruptedCompressionSessions = () => {
+  runMigrations();
+  const db = getDb();
+  const timestamp = nowIso();
+  const runningRows = db
+    .prepare(
+      `
+        SELECT s.id, sc.payload_json
+        FROM sessions s
+        LEFT JOIN session_checkpoints sc ON sc.session_id = s.id AND sc.stage = 'compress'
+        WHERE s.status = 'running'
+      `
+    )
+    .all() as Array<{ id: string; payload_json: string | null }>;
+
+  for (const row of runningRows) {
+    const payload = parseCheckpointPayload(row.payload_json);
+
+    db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(
+      'paused',
+      timestamp,
+      timestamp,
+      row.id
+    );
+
+    db.prepare(
+      `
+        UPDATE session_checkpoints
+        SET payload_json = ?, updated_at = ?
+        WHERE session_id = ? AND stage = 'compress'
+      `
+    ).run(
+      serializeCheckpointPayload({
+        ...payload,
+        activeItems: [],
+        interrupted: true,
+        interruptedAt: timestamp
+      }),
+      timestamp,
+      row.id
+    );
+  }
+
+  return runningRows.length;
+};
+
+export const markCompressionSessionRunning = (sessionId: string) => {
+  runMigrations();
+  const db = getDb();
+  const timestamp = nowIso();
+  const snapshot = getCompressionSession(sessionId);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run('running', timestamp, timestamp, sessionId);
+
+  if (snapshot.checkpoint) {
+    const payload = parseCheckpointPayload(snapshot.checkpoint.payloadJson);
+    db.prepare(
+      `
+        UPDATE session_checkpoints
+        SET payload_json = ?, updated_at = ?
+        WHERE session_id = ? AND stage = 'compress'
+      `
+    ).run(
+      serializeCheckpointPayload({
+        ...payload,
+        activeItems: [],
+        interrupted: false
+      }),
+      timestamp,
+      sessionId
+    );
+  }
+
+  return getCompressionSession(sessionId);
+};
+
+export const startCompressionSessionResume = (sessionId: string) => {
+  const snapshot = markCompressionSessionRunning(sessionId);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    progress: getCompressionProgress(sessionId),
+    accepted: true
+  };
+};
+
 export const markCompressionSessionFailed = (sessionId: string, error: Error) => {
   runMigrations();
   const db = getDb();
@@ -504,26 +665,7 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
 
   db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run('failed', timestamp, timestamp, sessionId);
 
-  const checkpointPayload = snapshot.checkpoint?.payloadJson
-    ? (() => {
-        try {
-          return JSON.parse(snapshot.checkpoint?.payloadJson ?? '{}') as {
-            outputRoot?: string;
-            manifest?: {
-              imageProfileLabel?: string;
-              videoPresetLabel?: string;
-            };
-            totalCount?: number;
-            summary?: {
-              completedItems?: number;
-              failedItems?: number;
-            };
-          };
-        } catch {
-          return {};
-        }
-      })()
-    : {};
+  const checkpointPayload = parseCheckpointPayload(snapshot.checkpoint?.payloadJson ?? null);
 
   if (snapshot.checkpoint) {
     db.prepare(

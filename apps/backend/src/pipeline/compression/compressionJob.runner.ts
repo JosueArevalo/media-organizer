@@ -264,6 +264,81 @@ const getPersistedMediaCounts = (sessionId: string) => {
   };
 };
 
+const hasMatchingCopiedOutput = (sourcePath: string, outputPath: string) => {
+  if (!fs.existsSync(sourcePath) || !fs.existsSync(outputPath)) {
+    return false;
+  }
+
+  const sourceStats = fs.statSync(sourcePath);
+  const outputStats = fs.statSync(outputPath);
+
+  if (sourceStats.size !== outputStats.size) {
+    return false;
+  }
+
+  return fs.readFileSync(sourcePath).equals(fs.readFileSync(outputPath));
+};
+
+const getResumeCompletedItems = (sessionId: string, outputRoot: string) => {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          mi.source_path,
+          mi.relative_path,
+          COALESCE(idc.selected_for_compression, 0) AS selected_for_compression
+        FROM item_stage_status iss
+        JOIN media_items mi ON mi.id = iss.item_id
+        LEFT JOIN item_decisions idc ON idc.item_id = mi.id AND idc.session_id = iss.session_id
+        WHERE iss.session_id = ?
+          AND iss.stage = 'compress'
+          AND iss.status = 'completed'
+        ORDER BY mi.source_path ASC
+      `
+    )
+    .all(sessionId) as Array<{ source_path: string; relative_path: string; selected_for_compression: number }>;
+
+  const completedItems: ScriptResultItem[] = [];
+
+  for (const row of rows) {
+    const outputPath = path.join(outputRoot, row.relative_path);
+    const operation = row.selected_for_compression ? 'compress' as const : 'copy' as const;
+    const isValidCompletedOutput = operation === 'copy'
+      ? hasMatchingCopiedOutput(row.source_path, outputPath)
+      : fs.existsSync(outputPath);
+
+    if (!isValidCompletedOutput) {
+      db.prepare(
+        `
+          UPDATE item_stage_status
+          SET status = 'pending',
+              last_error = NULL,
+              updated_at = ?
+          WHERE session_id = ?
+            AND stage = 'compress'
+            AND item_id = (
+              SELECT id FROM media_items WHERE session_id = ? AND source_path = ?
+            )
+        `
+      ).run(now, sessionId, sessionId, row.source_path);
+      continue;
+    }
+
+    completedItems.push({
+      source: row.source_path,
+      output: outputPath,
+      command: [],
+      status: 'completed',
+      operation,
+      skipped: true
+    });
+  }
+
+  return completedItems;
+};
+
 const collectFailedItems = (...payloads: ScriptResultPayload[]) =>
   payloads
     .flatMap((payload) => payload.items)
@@ -507,7 +582,7 @@ const updateSessionAndCheckpoint = (
   );
 
   const mediaCounts = getPersistedMediaCounts(sessionId);
-  const sizeMetrics = calculateCompletedSizeMetrics([...payload.image.items, ...payload.video.items]);
+  const sizeMetrics = calculateCompletedSizeMetrics(payload.processedItems);
   upsertExecutionHistory({
     sessionId,
     name: session?.name ?? null,
@@ -625,6 +700,35 @@ const persistCompressionItem = (
   }
 };
 
+const seedProgressFromCompletedItems = (items: ScriptResultItem[]) => {
+  const counters = {
+    completedCount: 0,
+    failedCount: 0,
+    totalCompressCount: 0,
+    totalCopyCount: 0,
+    completedCompressCount: 0,
+    completedCopyCount: 0,
+    failedCompressCount: 0,
+    failedCopyCount: 0
+  };
+
+  for (const item of items) {
+    if (item.status !== 'completed') {
+      continue;
+    }
+
+    counters.completedCount += 1;
+
+    if (item.operation === 'compress') {
+      counters.completedCompressCount += 1;
+    } else {
+      counters.completedCopyCount += 1;
+    }
+  }
+
+  return counters;
+};
+
 const toActiveCompressionItem = (item: ScriptActiveItem, scope: SelectionScope): ActiveCompressionItem => ({
   id: normalizePath(item.source),
   sourcePath: item.source,
@@ -635,6 +739,18 @@ const toActiveCompressionItem = (item: ScriptActiveItem, scope: SelectionScope):
 const withoutActiveItem = (items: ActiveCompressionItem[], sourcePath: string) => {
   const itemId = normalizePath(sourcePath);
   return items.filter((item) => item.id !== itemId);
+};
+
+const replaceProcessedItem = (items: ScriptResultItem[], item: ScriptResultItem) => {
+  const itemId = normalizePath(item.source);
+  const existingIndex = items.findIndex((processedItem) => normalizePath(processedItem.source) === itemId);
+
+  if (existingIndex >= 0) {
+    items.splice(existingIndex, 1, item);
+    return;
+  }
+
+  items.push(item);
 };
 
 export const executeCompressionSession = async (sessionId: string) => {
@@ -659,6 +775,14 @@ export const executeCompressionSession = async (sessionId: string) => {
   };
   const resolvedSelectionScope = resolveSelectionScope(checkpointData.manifest.sourceDir, selectionScope);
 
+  const resumeCompletedItems = getResumeCompletedItems(sessionId, checkpointData.outputRoot);
+  const imageResumeItems = resumeCompletedItems
+    .filter((item) => getMediaTypeFromPath(item.source) === 'image')
+    .map((item) => ({ source: item.source, output: item.output }));
+  const videoResumeItems = resumeCompletedItems
+    .filter((item) => getMediaTypeFromPath(item.source) === 'video')
+    .map((item) => ({ source: item.source, output: item.output }));
+
   const imageCommand = buildImageCompressionCommand({
     sessionId,
     sourceDir: checkpointData.manifest.sourceDir,
@@ -676,7 +800,7 @@ export const executeCompressionSession = async (sessionId: string) => {
     exifToolCommand: checkpointData.manifest.exifToolCommand ?? '',
     selectionScope: resolvedSelectionScope,
     createdAt: snapshot.session.createdAt
-  });
+  }, imageResumeItems);
 
   const videoCommand = buildVideoCompressionCommand({
     sessionId,
@@ -695,21 +819,24 @@ export const executeCompressionSession = async (sessionId: string) => {
     exifToolCommand: checkpointData.manifest.exifToolCommand ?? '',
     selectionScope: resolvedSelectionScope,
     createdAt: snapshot.session.createdAt
-  });
+  }, videoResumeItems);
 
   const { totalCount, totalCompressCount, totalCopyCount } = countFilesToProcess(checkpointData.manifest.sourceDir, resolvedSelectionScope);
+  const seededProgress = seedProgressFromCompletedItems(resumeCompletedItems);
   const progressState = {
-    completedCount: 0,
-    failedCount: 0,
+    ...seededProgress,
     totalCompressCount,
     totalCopyCount,
-    completedCompressCount: 0,
-    completedCopyCount: 0,
     failedCompressCount: 0,
     failedCopyCount: 0
   };
-  let activeItems: ActiveCompressionItem[] = checkpointData.activeItems ?? [];
-  const processedItems: ScriptResultItem[] = checkpointData.processedItems ?? [];
+  let activeItems: ActiveCompressionItem[] = [];
+  const completedSources = new Set(resumeCompletedItems.map((item) => normalizePath(item.source)));
+  const checkpointProcessedItems = checkpointData.processedItems ?? [];
+  const processedItems: ScriptResultItem[] = [
+    ...resumeCompletedItems,
+    ...checkpointProcessedItems.filter((item) => item.status === 'failed' && !completedSources.has(normalizePath(item.source)))
+  ];
 
   // Seed the checkpoint with the total before any phase finishes.
   updateCompressionProgressCheckpoint(sessionId, {
@@ -739,7 +866,7 @@ export const executeCompressionSession = async (sessionId: string) => {
   }, (item) => {
     persistCompressionItem(sessionId, item, checkpointData.outputRoot, resolvedSelectionScope, progressState);
     activeItems = withoutActiveItem(activeItems, item.source);
-    processedItems.push(item);
+    replaceProcessedItem(processedItems, item);
 
     updateCompressionProgressCheckpoint(sessionId, {
       outputRoot: checkpointData.outputRoot,
@@ -769,7 +896,7 @@ export const executeCompressionSession = async (sessionId: string) => {
   }, (item) => {
     persistCompressionItem(sessionId, item, checkpointData.outputRoot, resolvedSelectionScope, progressState);
     activeItems = withoutActiveItem(activeItems, item.source);
-    processedItems.push(item);
+    replaceProcessedItem(processedItems, item);
 
     updateCompressionProgressCheckpoint(sessionId, {
       outputRoot: checkpointData.outputRoot,

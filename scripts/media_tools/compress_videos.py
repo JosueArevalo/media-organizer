@@ -37,6 +37,29 @@ def load_scope(value: str):
     return json.loads(value)
 
 
+def load_resume_items(value: str):
+    if not value:
+        return []
+
+    parsed = json.loads(value)
+
+    if not isinstance(parsed, list):
+        return []
+
+    items = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+
+        source = item.get('source')
+        output = item.get('output')
+
+        if isinstance(source, str) and isinstance(output, str):
+            items.append({'source': source, 'output': output})
+
+    return items
+
+
 def resolve_scope_path(source_dir: Path, scope_path: str) -> str:
     trimmed = scope_path.strip().replace('\\', '/')
 
@@ -136,8 +159,32 @@ def copy_if_changed(source_file: Path, output_file: Path) -> bool:
     if has_same_file_metadata(source_file, output_file):
         return True
 
-    shutil.copy2(source_file, output_file)
+    temp_file = build_temp_output_path(output_file)
+
+    try:
+        shutil.copy2(source_file, temp_file)
+        os.replace(temp_file, output_file)
+    finally:
+        try:
+            temp_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     return False
+
+
+def build_temp_output_path(output_file: Path) -> Path:
+    return output_file.with_name(f'.{output_file.name}.media-organizer-tmp-{os.getpid()}-{time.time_ns()}{output_file.suffix}')
+
+
+def cleanup_stale_temp_outputs(output_file: Path):
+    pattern = f'.{output_file.name}.media-organizer-tmp-*{output_file.suffix}'
+
+    for candidate in output_file.parent.glob(pattern):
+        try:
+            candidate.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def is_handbrake_performance_mode_enabled() -> bool:
@@ -322,6 +369,7 @@ def main() -> int:
     parser.add_argument('--output-format-mode', choices=['preserve', 'mp4'], default='preserve')
     parser.add_argument('--encoder-command', default='HandBrakeCLI')
     parser.add_argument('--selection-scope-json', default='')
+    parser.add_argument('--resume-skip-json', default='')
     args = parser.parse_args()
 
     source_dir = Path(args.source_dir).resolve()
@@ -332,18 +380,25 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = []
+    resume_items = load_resume_items(args.resume_skip_json)
+    skipped_sources = {normalize_path(item['source']) for item in resume_items}
 
     for source_file in iter_video_files(source_dir):
+        if normalize_path(str(source_file)) in skipped_sources:
+            continue
+
         operation = 'compress' if should_compress(source_file, scope) else 'copy'
         output_file = build_output_path(source_dir, output_dir, source_file, args.output_format_mode, operation)
         output_file.parent.mkdir(parents=True, exist_ok=True)
+        cleanup_stale_temp_outputs(output_file)
+        command_output_file = build_temp_output_path(output_file) if operation == 'compress' else output_file
 
         fallback_command = [
             args.encoder_command,
             '-i',
             str(source_file),
             '-o',
-            str(output_file),
+            str(command_output_file),
             '--preset',
             resolved_preset,
         ]
@@ -372,6 +427,7 @@ def main() -> int:
         else:
             try:
                 run_handbrake(command, fallback_command if hw_decode else None)
+                os.replace(command_output_file, output_file)
             except FileNotFoundError:
                 status = 'failed'
                 error_message = f"Video encoder command not found: {args.encoder_command}"
@@ -379,9 +435,15 @@ def main() -> int:
                 status = 'failed'
                 stderr = (error.stderr or '').strip()
                 error_message = stderr or f"Video compression failed for {source_file}"
+            finally:
+                if operation == 'compress':
+                    try:
+                        command_output_file.unlink(missing_ok=True)
+                    except OSError:
+                        pass
 
         if status == 'failed':
-            shutil.copy2(source_file, output_file)
+            copy_if_changed(source_file, output_file)
 
         finished_at = now_ms()
         item = {

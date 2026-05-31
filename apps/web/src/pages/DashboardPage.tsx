@@ -4,6 +4,7 @@ import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
+import { useBackendHealth } from '../hooks/useBackendHealth';
 import { useTranslation, type TranslationKey } from '../i18n';
 import { resetRuntimeStateWithBackend } from '../services/app-maintenance.store';
 import { loadEncoderSettings } from '../services/encoder-settings.store';
@@ -173,10 +174,10 @@ export const DashboardPage = () => {
   const compressionSessionState = useCompressionSessionState();
   const groupingSessionState = useGroupingSessionState();
   const exportJobState = useExportJobState();
+  const backendHealth = useBackendHealth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [executions, setExecutions] = useState<DashboardExecution[]>([]);
   const [health, setHealth] = useState<BackendHealth | null>(null);
-  const [healthError, setHealthError] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [expandedExecutionId, setExpandedExecutionId] = useState<string | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
@@ -205,17 +206,6 @@ export const DashboardPage = () => {
         setDashboardError(error instanceof Error ? error.message : t('dashboard.loadError'));
       });
 
-    getBackendHealth()
-      .then((data) => {
-        if (!isActive) return;
-        setHealth(data);
-        setHealthError(null);
-      })
-      .catch((error) => {
-        if (!isActive) return;
-        setHealthError(error instanceof Error ? error.message : t('dashboard.healthUnknown'));
-      });
-
     loadEncoderSettings().then((settings) => {
       if (!isActive) return;
       setHasConfiguredEncoders(Boolean(settings.imageToolCommand.trim() && settings.videoToolCommand.trim()));
@@ -225,6 +215,34 @@ export const DashboardPage = () => {
       isActive = false;
     };
   }, [t]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (backendHealth.status !== 'online') {
+      return () => {
+        isActive = false;
+      };
+    }
+
+    getBackendHealth()
+      .then((data) => {
+        if (!isActive) return;
+        setHealth(data);
+      })
+      .catch(() => {
+        if (!isActive) return;
+        setHealth(null);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [backendHealth.lastOkAt, backendHealth.status]);
+
+  const healthError = backendHealth.status === 'offline'
+    ? backendHealth.errorMessage ?? t('dashboard.healthUnknown')
+    : null;
 
   const currentState = (() => {
     if (exportJobState.status === 'running' || exportJobState.status === 'paused') {
