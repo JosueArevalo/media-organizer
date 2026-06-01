@@ -46,6 +46,124 @@ import {
 import { readRequestJson, sendCaughtError, sendEmpty, sendJson } from './http/httpResponses.js';
 
 const port = Number(process.env.PORT ?? 4000);
+const BACKEND_HEALTH_OFFLINE_REPORT_PATH = '/api/health/offline-report';
+const MAX_RECENT_HEALTH_PROBES = 8;
+
+type BackendHealthOfflineReport = {
+  previousStatus?: string;
+  status?: string;
+  failureKind?: string | null;
+  errorMessage?: string | null;
+  consecutiveFailures?: number;
+  consecutiveSuccesses?: number;
+  lastCheckedAt?: number | null;
+  lastOkAt?: number | null;
+  msSinceLastOk?: number | null;
+  timeoutMs?: number | null;
+  healthUrl?: string | null;
+};
+
+type HealthProbeTrace = {
+  id: number;
+  startedAt: number;
+  durationMs: number | null;
+  statusCode: number | null;
+  outcome: 'ok' | 'client_closed';
+};
+
+const recentHealthProbes: HealthProbeTrace[] = [];
+let nextHealthProbeId = 1;
+
+const formatTimestamp = (timestamp: number | null | undefined) => {
+  if (typeof timestamp !== 'number') {
+    return 'never';
+  }
+
+  return new Date(timestamp).toISOString();
+};
+
+const formatOptionalMs = (duration: number | null | undefined) => {
+  if (typeof duration !== 'number') {
+    return 'unknown';
+  }
+
+  return `${duration}ms`;
+};
+
+const pushHealthProbeTrace = (trace: HealthProbeTrace) => {
+  recentHealthProbes.push(trace);
+
+  while (recentHealthProbes.length > MAX_RECENT_HEALTH_PROBES) {
+    recentHealthProbes.shift();
+  }
+};
+
+const formatRecentHealthProbes = () => {
+  if (recentHealthProbes.length === 0) {
+    return 'none';
+  }
+
+  return recentHealthProbes
+    .map((probe) => {
+      const ageMs = Date.now() - probe.startedAt;
+      const duration = probe.durationMs === null ? '?' : `${probe.durationMs}ms`;
+      const status = probe.statusCode ?? '?';
+
+      return `#${probe.id}:${probe.outcome}/${status}/${duration}/${ageMs}ms-ago`;
+    })
+    .join(',');
+};
+
+const logBackendHealthOfflineReport = (report: BackendHealthOfflineReport) => {
+  console.warn(
+    [
+      '[backend-health] offline',
+      `prev=${report.previousStatus ?? 'unknown'}`,
+      `kind=${report.failureKind ?? 'unknown'}`,
+      `fails=${report.consecutiveFailures ?? 'unknown'}`,
+      `lastCheck=${formatTimestamp(report.lastCheckedAt)}`,
+      `lastOk=${formatTimestamp(report.lastOkAt)}`,
+      `sinceOk=${formatOptionalMs(report.msSinceLastOk)}`,
+      `timeout=${formatOptionalMs(report.timeoutMs)}`,
+      `url=${report.healthUrl ?? 'unknown'}`,
+      `recent=${formatRecentHealthProbes()}`,
+      `err=${report.errorMessage ?? 'none'}`
+    ].join(' | ')
+  );
+};
+
+const trackHealthProbe = (res: import('node:http').ServerResponse) => {
+  const id = nextHealthProbeId;
+  nextHealthProbeId += 1;
+
+  const startedAt = Date.now();
+  let finished = false;
+
+  res.on('finish', () => {
+    finished = true;
+    pushHealthProbeTrace({
+      id,
+      startedAt,
+      durationMs: Date.now() - startedAt,
+      statusCode: res.statusCode,
+      outcome: 'ok'
+    });
+  });
+
+  res.on('close', () => {
+    if (finished) {
+      return;
+    }
+
+    pushHealthProbeTrace({
+      id,
+      startedAt,
+      durationMs: Date.now() - startedAt,
+      statusCode: res.statusCode || null,
+      outcome: 'client_closed'
+    });
+  });
+};
 
 const sendForbiddenLocalOnly = (res: import('node:http').ServerResponse) => {
   sendJson(res, 403, {
@@ -144,7 +262,22 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     res.setHeader(header, value);
   }
 
+  if (requestUrl.pathname === BACKEND_HEALTH_OFFLINE_REPORT_PATH && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as BackendHealthOfflineReport | null;
+        logBackendHealthOfflineReport(body ?? {});
+        sendJson(res, 200, { status: 'ok' });
+      } catch (error) {
+        sendCaughtError(res, error, 'Could not record backend health diagnostic.');
+      }
+    })();
+
+    return;
+  }
+
   if (requestUrl.pathname === '/api/health' && req.method === 'GET') {
+    trackHealthProbe(res);
     sendJson(res, 200, {
       status: 'ok',
       service: 'backend',
