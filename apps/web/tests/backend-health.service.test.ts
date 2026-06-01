@@ -6,6 +6,7 @@ import {
   DEFAULT_BACKEND_HEALTH_TIMEOUT_MS,
   checkBackendHealth,
   mergeBackendHealthSnapshot,
+  resolveBackendApiUrl,
   type BackendHealthSnapshot
 } from '../src/services/backend-health.service';
 
@@ -30,6 +31,34 @@ test('backend health defaults balance quick detection and transient failure tole
   assert.equal(DEFAULT_BACKEND_HEALTH_TIMEOUT_MS, 1500);
   assert.equal(DEFAULT_BACKEND_HEALTH_OFFLINE_FAILURE_THRESHOLD, 2);
   assert.equal(DEFAULT_BACKEND_HEALTH_TIMEOUT_FAILURE_THRESHOLD, 4);
+});
+
+test('resolveBackendApiUrl uses configured backend URL first', () => {
+  assert.equal(
+    resolveBackendApiUrl('/api/health', {
+      DEV: true,
+      VITE_BACKEND_URL: 'http://127.0.0.1:4100/'
+    }),
+    'http://127.0.0.1:4100/api/health'
+  );
+});
+
+test('resolveBackendApiUrl uses direct backend URL in dev without explicit config', () => {
+  assert.equal(
+    resolveBackendApiUrl('/api/health', {
+      DEV: true
+    }),
+    'http://localhost:4000/api/health'
+  );
+});
+
+test('resolveBackendApiUrl uses relative API path outside dev without explicit config', () => {
+  assert.equal(
+    resolveBackendApiUrl('/api/health', {
+      DEV: false
+    }),
+    '/api/health'
+  );
 });
 
 test('checkBackendHealth reports online when the health endpoint responds', async () => {

@@ -18,6 +18,7 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-http-sec
 const tempDataDir = path.join(tempRoot, 'data');
 const tempDbPath = path.join(tempDataDir, 'test.sqlite');
 const migrationsDir = path.resolve(process.cwd(), 'src', 'state', 'migrations');
+const originalConsoleWarn = console.warn;
 
 let server: Server | null = null;
 let basePort = 0;
@@ -113,6 +114,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await closeServer();
   resetDbForTests();
+  console.warn = originalConsoleWarn;
 });
 
 test('rejects requests from external origins', async () => {
@@ -151,6 +153,50 @@ test('local CORS response reflects the local origin and never uses wildcard', as
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers['access-control-allow-origin'], origin);
   assert.notEqual(response.headers['access-control-allow-origin'], '*');
+});
+
+test('backend health offline reports are logged for local diagnostics', async () => {
+  const messages: string[] = [];
+  console.warn = (...args: unknown[]) => {
+    messages.push(args.join(' '));
+  };
+
+  const healthResponse = await request({
+    path: '/api/health'
+  });
+
+  assert.equal(healthResponse.statusCode, 200);
+
+  const response = await request({
+    method: 'POST',
+    path: '/api/health/offline-report',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      previousStatus: 'online',
+      status: 'offline',
+      failureKind: 'timeout',
+      errorMessage: 'The operation was aborted.',
+      consecutiveFailures: 4,
+      consecutiveSuccesses: 0,
+      lastCheckedAt: 1000,
+      lastOkAt: 500,
+      msSinceLastOk: 500,
+      timeoutMs: 1500,
+      healthUrl: 'http://localhost:4000/api/health'
+    })
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.match(response.body, /"status":"ok"/);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /\[backend-health\] offline/);
+  assert.match(messages[0], /kind=timeout/);
+  assert.match(messages[0], /fails=4/);
+  assert.match(messages[0], /timeout=1500ms/);
+  assert.match(messages[0], /url=http:\/\/localhost:4000\/api\/health/);
+  assert.match(messages[0], /recent=#\d+:ok\/200\/\d+ms\/\d+ms-ago/);
 });
 
 test('oversized JSON request bodies return 413', async () => {

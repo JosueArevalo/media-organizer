@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   checkBackendHealth,
   mergeBackendHealthSnapshot,
+  reportBackendHealthOffline,
   type BackendHealthSnapshot
 } from '../services/backend-health.service';
 
@@ -17,6 +18,7 @@ const createInitialSnapshot = (): BackendHealthSnapshot => ({
 
 export const useBackendHealth = (intervalMs = 1000) => {
   const [snapshot, setSnapshot] = useState<BackendHealthSnapshot>(createInitialSnapshot);
+  const snapshotRef = useRef(snapshot);
 
   useEffect(() => {
     let isActive = true;
@@ -29,7 +31,14 @@ export const useBackendHealth = (intervalMs = 1000) => {
         return;
       }
 
-      setSnapshot((current) => mergeBackendHealthSnapshot(current, result));
+      const current = snapshotRef.current;
+      const next = mergeBackendHealthSnapshot(current, result);
+      snapshotRef.current = next;
+      setSnapshot(next);
+
+      if (current.status !== 'offline' && next.status === 'offline') {
+        void reportBackendHealthOffline(current, next);
+      }
 
       timeoutId = window.setTimeout(() => {
         void probe();
