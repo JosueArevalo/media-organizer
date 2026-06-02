@@ -9,7 +9,12 @@ export type NetworkFolderTarget = {
   destinationPath: string;
 };
 
-export type ExportTarget = NetworkFolderTarget | { type: 'google-photos' };
+export type GooglePhotosTarget = {
+  type: 'google-photos';
+  accountId: string;
+};
+
+export type ExportTarget = NetworkFolderTarget | GooglePhotosTarget;
 
 export type NetworkCredentials = {
   username?: string;
@@ -74,6 +79,45 @@ export type ExportTargetTestResult = {
   targetType: ExportTargetType;
   details?: string | null;
   requiresAuthentication?: boolean;
+};
+
+export type GooglePhotosAccount = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  lastConnectedAt: string;
+};
+
+export type GooglePhotosOAuthConfigSource = 'local-db' | 'env' | 'none';
+
+export type GooglePhotosOAuthConfigStatus = {
+  configured: boolean;
+  source: GooglePhotosOAuthConfigSource;
+  redirectUri: string;
+  requiredScopes: string[];
+  hasClientSecret: boolean;
+};
+
+export type GooglePhotosOAuthConfigRequest = {
+  clientId: string;
+  clientSecret?: string;
+};
+
+export type GooglePhotosAlbumPreview = {
+  folderName: string;
+  albumTitle: string;
+  status: 'existing' | 'new';
+  itemCount: number;
+};
+
+export type GooglePhotosExportPreview = {
+  account: GooglePhotosAccount;
+  albums: GooglePhotosAlbumPreview[];
+  supportedItems: number;
+  unsupportedItems: number;
 };
 
 export type NetworkDestination = {
@@ -164,6 +208,40 @@ export const pauseExportJobRequest = (jobId: string) =>
 
 export const retryFailedExportItemsRequest = (jobId: string) =>
   requestJson<ExportJobSnapshot>(`/api/export/jobs/${jobId}/retry-failed`, { method: 'POST' });
+
+export const listGooglePhotosAccountsRequest = () =>
+  requestJson<{ accounts: GooglePhotosAccount[] }>('/api/export/google-photos/accounts');
+
+export const getGooglePhotosOAuthConfigRequest = () =>
+  requestJson<GooglePhotosOAuthConfigStatus>('/api/export/google-photos/config');
+
+export const saveGooglePhotosOAuthConfigRequest = (payload: GooglePhotosOAuthConfigRequest) =>
+  requestJson<GooglePhotosOAuthConfigStatus>('/api/export/google-photos/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+export const deleteGooglePhotosOAuthConfigRequest = () =>
+  requestJson<GooglePhotosOAuthConfigStatus>('/api/export/google-photos/config', { method: 'DELETE' });
+
+export const startGooglePhotosOAuthRequest = () =>
+  requestJson<{ authUrl: string; state: string }>('/api/export/google-photos/oauth/start', { method: 'POST' });
+
+export const deleteGooglePhotosAccountRequest = async (accountId: string) => {
+  const response = await fetch(`/api/export/google-photos/accounts/${accountId}`, { method: 'DELETE' });
+
+  if (!response.ok) {
+    throw new Error(`${response.status}: ${await readErrorBody(response)}`);
+  }
+};
+
+export const previewGooglePhotosExportRequest = (payload: { accountId: string; sourceRoot: string }) =>
+  requestJson<GooglePhotosExportPreview>('/api/export/google-photos/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
 
 export const listNetworkDestinationsRequest = () =>
   requestJson<{ destinations: NetworkDestination[] }>('/api/export/network-destinations');

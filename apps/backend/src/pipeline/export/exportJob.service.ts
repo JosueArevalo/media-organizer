@@ -12,6 +12,7 @@ import type {
   ExportProgressData,
   ExportTarget,
   ExportTargetTestResult,
+  GooglePhotosExportPreview,
   NetworkCredentials
 } from './export.types.js';
 import {
@@ -19,6 +20,12 @@ import {
   getNetworkErrorMessage,
   markNetworkDestinationUsed
 } from './networkDestination.service.js';
+import {
+  ensureGooglePhotosItemMetadata,
+  getCachedGooglePhotosAlbumByTitle,
+  listGooglePhotosAppCreatedAlbums
+} from './googlePhotosApi.service.js';
+import { getGooglePhotosAccount } from './googlePhotosAuth.service.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -96,6 +103,28 @@ const toCheckpointRecord = (row: {
 
 const normalizeExistingPath = (value: string) => path.resolve(value);
 
+const supportedGooglePhotosExtensions = new Set([
+  '.3gp',
+  '.3g2',
+  '.avi',
+  '.bmp',
+  '.gif',
+  '.heic',
+  '.heif',
+  '.jpg',
+  '.jpeg',
+  '.m2ts',
+  '.mkv',
+  '.mov',
+  '.mp4',
+  '.mpg',
+  '.mts',
+  '.png',
+  '.tif',
+  '.tiff',
+  '.webp'
+]);
+
 const isPathInside = (parent: string, child: string) => {
   const relative = path.relative(parent, child);
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
@@ -139,13 +168,80 @@ export const collectExportFilePlan = (sourceRoot: string, destinationRoot: strin
   return items;
 };
 
-const assertNetworkFolderRequest = (request: ExportJobRequest) => {
-  if (request.target.type !== 'network-folder') {
-    throw new Error('Only network-folder export is available in this MVP.');
-  }
-
-  if (!fs.existsSync(request.sourceRoot) || !fs.statSync(request.sourceRoot).isDirectory()) {
+const assertExistingSourceRoot = (sourceRoot: string) => {
+  if (!fs.existsSync(sourceRoot) || !fs.statSync(sourceRoot).isDirectory()) {
     throw new Error('Export sourceRoot must be an existing directory.');
+  }
+};
+
+export const getGooglePhotosAlbumTitleForRelativePath = (relativePath: string) => {
+  const segments = relativePath.split(path.sep).filter(Boolean);
+  return segments.length > 1 ? segments[0] : path.basename(path.dirname(relativePath)) || 'Media Organizer';
+};
+
+export const isGooglePhotosSupportedFile = (filePath: string) =>
+  supportedGooglePhotosExtensions.has(path.extname(filePath).toLocaleLowerCase());
+
+export const collectGooglePhotosFilePlan = (sourceRoot: string) => {
+  const resolvedSourceRoot = normalizeExistingPath(sourceRoot);
+  const items: Array<{
+    sourcePath: string;
+    relativePath: string;
+    destinationPath: string;
+    sizeBytes: number;
+    albumTitle: string;
+    supported: boolean;
+  }> = [];
+
+  const walk = (directoryPath: string) => {
+    const entries = fs.readdirSync(directoryPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.name === INTERNAL_DIRECTORY_NAME) {
+        continue;
+      }
+
+      const sourcePath = path.join(directoryPath, entry.name);
+
+      if (entry.isDirectory()) {
+        walk(sourcePath);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const relativePath = path.relative(resolvedSourceRoot, sourcePath);
+      const albumTitle = getGooglePhotosAlbumTitleForRelativePath(relativePath);
+      items.push({
+        sourcePath,
+        relativePath,
+        destinationPath: albumTitle,
+        sizeBytes: fs.statSync(sourcePath).size,
+        albumTitle,
+        supported: isGooglePhotosSupportedFile(sourcePath)
+      });
+    }
+  };
+
+  walk(resolvedSourceRoot);
+  return items;
+};
+
+const assertExportJobRequest = (request: ExportJobRequest) => {
+  assertExistingSourceRoot(request.sourceRoot);
+
+  if (request.target.type === 'google-photos') {
+    if (!request.target.accountId?.trim()) {
+      throw new Error('Google Photos accountId is required.');
+    }
+
+    if (!getGooglePhotosAccount(request.target.accountId)) {
+      throw new Error('Connect a Google Photos account before creating this export.');
+    }
+
+    return;
   }
 
   const resolvedSource = normalizeExistingPath(request.sourceRoot);
@@ -158,15 +254,19 @@ const assertNetworkFolderRequest = (request: ExportJobRequest) => {
 
 export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot => {
   runMigrations();
-  assertNetworkFolderRequest(request);
+  assertExportJobRequest(request);
 
   const db = getDb();
   const timestamp = nowIso();
   const jobId = randomUUID();
   const targetPath = request.target.type === 'network-folder' ? request.target.destinationPath : null;
   const plannedItems = request.target.type === 'network-folder'
-    ? collectExportFilePlan(request.sourceRoot, request.target.destinationPath)
-    : [];
+    ? collectExportFilePlan(request.sourceRoot, request.target.destinationPath).map((item) => ({
+        ...item,
+        albumTitle: null,
+        supported: true
+      }))
+    : collectGooglePhotosFilePlan(request.sourceRoot);
 
   try {
     db.exec('BEGIN TRANSACTION');
@@ -218,8 +318,32 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
       `
     );
 
+    let skippedItems = 0;
+
     for (const item of plannedItems) {
-      insertItem.run(randomUUID(), jobId, item.sourcePath, item.relativePath, item.destinationPath, item.sizeBytes, timestamp);
+      const itemId = randomUUID();
+      insertItem.run(itemId, jobId, item.sourcePath, item.relativePath, item.destinationPath, item.sizeBytes, timestamp);
+
+      if (request.target.type === 'google-photos') {
+        ensureGooglePhotosItemMetadata(itemId, request.target.accountId, item.albumTitle ?? item.destinationPath);
+
+        if (!item.supported) {
+          skippedItems += 1;
+          db.prepare(
+            `
+              UPDATE export_items
+              SET status = 'skipped',
+                  last_error = 'File type is not supported by Google Photos.',
+                  updated_at = ?
+              WHERE id = ?
+            `
+          ).run(timestamp, itemId);
+        }
+      }
+    }
+
+    if (skippedItems > 0) {
+      db.prepare('UPDATE export_jobs SET skipped_items = ? WHERE id = ?').run(skippedItems, jobId);
     }
 
     db.prepare(
@@ -378,12 +502,14 @@ export const retryFailedExportItems = (jobId: string): ExportJobSnapshot | null 
 
 export const testExportTarget = async (target: ExportTarget, credentials?: NetworkCredentials): Promise<ExportTargetTestResult> => {
   if (target.type === 'google-photos') {
+    const account = target.accountId ? getGooglePhotosAccount(target.accountId) : null;
+
     return {
-      ok: false,
+      ok: Boolean(account),
       targetType: target.type,
-      message: 'Google Photos is prepared as a spike only and is not enabled in the MVP UI.',
-      details: null,
-      requiresAuthentication: false
+      message: account ? 'Google Photos account is connected.' : 'Connect a Google Photos account before exporting.',
+      details: account?.email ?? null,
+      requiresAuthentication: !account
     };
   }
 
@@ -424,6 +550,55 @@ export const testExportTarget = async (target: ExportTarget, credentials?: Netwo
       requiresAuthentication: networkError.requiresAuthentication
     };
   }
+};
+
+export const previewGooglePhotosExport = async (
+  accountId: string,
+  sourceRoot: string
+): Promise<GooglePhotosExportPreview> => {
+  runMigrations();
+  assertExistingSourceRoot(sourceRoot);
+
+  const account = getGooglePhotosAccount(accountId);
+
+  if (!account) {
+    throw new Error('Connect a Google Photos account before previewing this export.');
+  }
+
+  await listGooglePhotosAppCreatedAlbums(accountId);
+  const plannedItems = collectGooglePhotosFilePlan(sourceRoot);
+  const supportedItems = plannedItems.filter((item) => item.supported);
+  const albumMap = new Map<string, { folderName: string; albumTitle: string; itemCount: number }>();
+
+  for (const item of supportedItems) {
+    const existing = albumMap.get(item.albumTitle) ?? {
+      folderName: item.albumTitle,
+      albumTitle: item.albumTitle,
+      itemCount: 0
+    };
+    existing.itemCount += 1;
+    albumMap.set(item.albumTitle, existing);
+  }
+
+  return {
+    account: {
+      id: account.id,
+      email: account.email,
+      displayName: account.displayName,
+      expiresAt: account.expiresAt,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+      lastConnectedAt: account.lastConnectedAt
+    },
+    albums: [...albumMap.values()]
+      .sort((left, right) => left.albumTitle.localeCompare(right.albumTitle))
+      .map((album) => ({
+        ...album,
+        status: getCachedGooglePhotosAlbumByTitle(accountId, album.albumTitle) ? 'existing' : 'new'
+      })),
+    supportedItems: supportedItems.length,
+    unsupportedItems: plannedItems.length - supportedItems.length
+  };
 };
 
 export const listRunnableExportItems = (jobId: string) => {

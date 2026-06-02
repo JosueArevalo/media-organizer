@@ -36,7 +36,9 @@ test('initial migration creates core state tables', async () => {
     '006_export_jobs.sql',
     '007_network_destinations.sql',
     '008_execution_verification.sql',
-    '009_execution_size_metrics.sql'
+    '009_execution_size_metrics.sql',
+    '010_google_photos_export.sql',
+    '011_google_photos_oauth_config.sql'
   ]);
 
   const db = getDb();
@@ -55,6 +57,10 @@ test('initial migration creates core state tables', async () => {
   assert.ok(tableNames.includes('export_items'));
   assert.ok(tableNames.includes('export_checkpoints'));
   assert.ok(tableNames.includes('network_destinations'));
+  assert.ok(tableNames.includes('google_photos_accounts'));
+  assert.ok(tableNames.includes('google_photos_albums'));
+  assert.ok(tableNames.includes('google_photos_oauth_config'));
+  assert.ok(tableNames.includes('export_google_photos_items'));
   assert.ok(tableNames.includes('schema_migrations'));
 
   const migrationRows = db.prepare('SELECT id FROM schema_migrations;').all() as Array<{ id: string }>;
@@ -66,7 +72,9 @@ test('initial migration creates core state tables', async () => {
     '006_export_jobs.sql',
     '007_network_destinations.sql',
     '008_execution_verification.sql',
-    '009_execution_size_metrics.sql'
+    '009_execution_size_metrics.sql',
+    '010_google_photos_export.sql',
+    '011_google_photos_oauth_config.sql'
   ]);
 });
 
@@ -185,7 +193,9 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '006_export_jobs.sql',
     '007_network_destinations.sql',
     '008_execution_verification.sql',
-    '009_execution_size_metrics.sql'
+    '009_execution_size_metrics.sql',
+    '010_google_photos_export.sql',
+    '011_google_photos_oauth_config.sql'
   ]);
 
   const tableNames = db
@@ -235,6 +245,8 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '006_export_jobs.sql',
     '007_network_destinations.sql',
     '008_execution_verification.sql',
-    '009_execution_size_metrics.sql'
+    '009_execution_size_metrics.sql',
+    '010_google_photos_export.sql',
+    '011_google_photos_oauth_config.sql'
   ]);
 });

@@ -11,6 +11,7 @@ import {
   refreshExportJobCounters
 } from './exportJob.service.js';
 import type { ExportItemRecord } from './export.types.js';
+import { executeGooglePhotosExportJob } from './googlePhotosExport.runner.js';
 
 const isAlreadyCopied = (item: ExportItemRecord) => {
   if (!fs.existsSync(item.destinationPath)) {
@@ -62,8 +63,12 @@ export const executeExportJob = async (jobId: string) => {
     throw new Error('Export job not found.');
   }
 
+  if (snapshot.job.targetType === 'google-photos') {
+    return executeGooglePhotosExportJob(jobId);
+  }
+
   if (snapshot.job.targetType !== 'network-folder') {
-    throw new Error('Only network-folder export jobs can be executed in this MVP.');
+    throw new Error('Unsupported export job target.');
   }
 
   markExportJobRunning(jobId);

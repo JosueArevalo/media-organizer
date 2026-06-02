@@ -7,9 +7,20 @@ import {
   getExportProgress,
   markExportJobFailed,
   pauseExportJob,
+  previewGooglePhotosExport,
   retryFailedExportItems,
   testExportTarget
 } from './exportJob.service.js';
+import {
+  completeGooglePhotosOAuth,
+  deleteGooglePhotosOAuthConfig,
+  deleteGooglePhotosAccount,
+  GooglePhotosOAuthNotConfiguredError,
+  getGooglePhotosOAuthConfigStatus,
+  listGooglePhotosAccounts,
+  saveGooglePhotosOAuthConfig,
+  startGooglePhotosOAuth
+} from './googlePhotosAuth.service.js';
 import {
   authenticateNetworkPath,
   browseNetworkPath,
@@ -21,6 +32,7 @@ import {
 } from './networkDestination.service.js';
 import type {
   ExportJobRequest,
+  GooglePhotosOAuthConfigRequest,
   ExportTargetTestRequest,
   NetworkAuthRequest,
   NetworkBrowseRequest,
@@ -37,7 +49,125 @@ const sendExportRouteError = (res: Parameters<RouteHandler>[0]['res'], error: un
   sendCaughtError(res, error, fallbackMessage);
 };
 
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
 export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
+  if (requestUrl.pathname === '/api/export/google-photos/config' && req.method === 'GET') {
+    sendJson(res, 200, getGooglePhotosOAuthConfigStatus());
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/google-photos/config' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as GooglePhotosOAuthConfigRequest | null;
+
+        if (!body?.clientId?.trim()) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'clientId is required.' });
+          return;
+        }
+
+        sendJson(res, 200, saveGooglePhotosOAuthConfig(body));
+      } catch (error) {
+        sendCaughtError(res, error, 'Failed to save Google Photos OAuth configuration.');
+      }
+    })();
+
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/google-photos/config' && req.method === 'DELETE') {
+    sendJson(res, 200, deleteGooglePhotosOAuthConfig());
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/google-photos/accounts' && req.method === 'GET') {
+    sendJson(res, 200, { accounts: listGooglePhotosAccounts() });
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/google-photos/oauth/start' && req.method === 'POST') {
+    try {
+      sendJson(res, 200, startGooglePhotosOAuth());
+    } catch (error) {
+      if (error instanceof GooglePhotosOAuthNotConfiguredError) {
+        sendJson(res, 400, { status: 'google_photos_oauth_not_configured', message: error.message });
+        return true;
+      }
+
+      sendCaughtError(res, error, 'Failed to start Google Photos OAuth.');
+    }
+
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/google-photos/oauth/callback' && req.method === 'GET') {
+    void (async () => {
+      try {
+        const code = requestUrl.searchParams.get('code');
+        const state = requestUrl.searchParams.get('state');
+
+        if (!code || !state) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'code and state are required.' });
+          return;
+        }
+
+        const account = await completeGooglePhotosOAuth(code, state);
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(
+          `<!doctype html><html><body><p>Google Photos connected for ${escapeHtml(account.email)}. You can close this tab.</p></body></html>`
+        );
+      } catch (error) {
+        sendCaughtError(res, error, 'Failed to complete Google Photos OAuth.');
+      }
+    })();
+
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/export/google-photos/preview' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as { accountId?: string; sourceRoot?: string } | null;
+
+        if (!body?.accountId || !body.sourceRoot) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'accountId and sourceRoot are required.' });
+          return;
+        }
+
+        sendJson(res, 200, await previewGooglePhotosExport(body.accountId, body.sourceRoot));
+      } catch (error) {
+        sendCaughtError(res, error, 'Failed to preview Google Photos export.');
+      }
+    })();
+
+    return true;
+  }
+
+  if (requestUrl.pathname.startsWith('/api/export/google-photos/accounts/') && req.method === 'DELETE') {
+    const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
+    const accountId = pathSegments[4];
+
+    if (!accountId) {
+      sendJson(res, 400, { status: 'invalid_request' });
+      return true;
+    }
+
+    if (!deleteGooglePhotosAccount(accountId)) {
+      sendJson(res, 404, { status: 'not_found' });
+      return true;
+    }
+
+    sendJson(res, 200, { ok: true });
+    return true;
+  }
+
   if (requestUrl.pathname === '/api/export/jobs' && req.method === 'POST') {
     void (async () => {
       try {

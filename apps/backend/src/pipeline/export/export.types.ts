@@ -17,6 +17,7 @@ export type NetworkCredentials = {
 
 export type GooglePhotosTarget = {
   type: 'google-photos';
+  accountId: string;
 };
 
 export type ExportTarget = NetworkFolderTarget | GooglePhotosTarget;
@@ -93,6 +94,50 @@ export type ExportTargetTestResult = {
   targetType: ExportTargetType;
   details?: string | null;
   requiresAuthentication?: boolean;
+};
+
+export type GooglePhotosAccountRecord = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  lastConnectedAt: string;
+};
+
+export type GooglePhotosAuthStartResult = {
+  authUrl: string;
+  state: string;
+};
+
+export type GooglePhotosOAuthConfigSource = 'local-db' | 'env' | 'none';
+
+export type GooglePhotosOAuthConfigStatus = {
+  configured: boolean;
+  source: GooglePhotosOAuthConfigSource;
+  redirectUri: string;
+  requiredScopes: string[];
+  hasClientSecret: boolean;
+};
+
+export type GooglePhotosOAuthConfigRequest = {
+  clientId: string;
+  clientSecret?: string;
+};
+
+export type GooglePhotosAlbumPreview = {
+  folderName: string;
+  albumTitle: string;
+  status: 'existing' | 'new';
+  itemCount: number;
+};
+
+export type GooglePhotosExportPreview = {
+  account: GooglePhotosAccountRecord;
+  albums: GooglePhotosAlbumPreview[];
+  supportedItems: number;
+  unsupportedItems: number;
 };
 
 export type NetworkDestinationRecord = {
