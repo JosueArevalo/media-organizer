@@ -3115,6 +3115,22 @@ body {
   margin: 10px 0;
 }
 
+.google-photos-setup-summary {
+  align-items: center;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.32);
+  border-radius: 8px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.google-photos-setup-summary strong {
+  color: var(--text);
+}
+
 .google-photos-step-card {
   border: 1px solid var(--line);
   border-radius: 8px;

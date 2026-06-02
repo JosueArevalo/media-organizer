@@ -4,7 +4,7 @@ import { ExportProviderIcon } from '../components/ExportProviderIcon';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation } from '../i18n';
-import { saveExportJobSnapshot } from '../services/export-job.store';
+import { resetExportJobSnapshot, saveExportJobSnapshot } from '../services/export-job.store';
 import {
   createExportJobRequest,
   deleteGooglePhotosOAuthConfigRequest,
@@ -74,6 +74,7 @@ export const GooglePhotosExportPage = () => {
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [isSetupGuideExpanded, setIsSetupGuideExpanded] = useState(false);
 
   const sourceRoot = groupingSessionState.outputRootLabel ?? '';
   const backendJobId = exportJobState.backendJobId;
@@ -87,6 +88,7 @@ export const GooglePhotosExportPage = () => {
   const progressPercent = progress?.total ? Math.round((completeCount / progress.total) * 100) : 0;
   const canStart = Boolean(sourceRoot && selectedAccountId && !isStarting && (preview || isPaused));
   const canConnect = Boolean(oauthConfig?.configured && !isConnecting);
+  const isSetupGuideOpen = !oauthConfig?.configured || isSetupGuideExpanded;
   const recentItems = useMemo(() => progress?.recentItems ?? [], [progress]);
   const setupSteps = useMemo(
     () => [
@@ -144,13 +146,27 @@ export const GooglePhotosExportPage = () => {
     [exportJobState.startedAt, selectedAccount?.email, sourceRoot, t]
   );
 
-  const loadAccounts = useCallback(async () => {
+  const resetGooglePhotosExportState = useCallback((message?: string | null) => {
+    setPreview(null);
+    setProgress(null);
+    setBackendError(null);
+    setStatusMessage(message ?? null);
+    resetExportJobSnapshot();
+  }, []);
+
+  const loadAccounts = useCallback(async (autoSelect = true) => {
     setIsLoadingAccounts(true);
 
     try {
       const result = await listGooglePhotosAccountsRequest();
       setAccounts(result.accounts);
-      setSelectedAccountId((current) => current || result.accounts[0]?.id || '');
+      setSelectedAccountId((current) => {
+        if (!autoSelect) {
+          return '';
+        }
+
+        return result.accounts.some((account) => account.id === current) ? current : result.accounts[0]?.id || '';
+      });
       setBackendError(null);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.googlePhotos.accountsLoadError'));
@@ -255,6 +271,7 @@ export const GooglePhotosExportPage = () => {
       setOauthConfig(result);
       setClientId('');
       setClientSecret('');
+      setIsSetupGuideExpanded(false);
       setStatusMessage(t('export.googlePhotos.configSaved'));
       setBackendError(null);
     } catch (error) {
@@ -265,6 +282,11 @@ export const GooglePhotosExportPage = () => {
   };
 
   const handleClearConfig = async () => {
+    if (isRunning) {
+      setBackendError(t('export.googlePhotos.runningSetupLocked'));
+      return;
+    }
+
     setIsClearingConfig(true);
 
     try {
@@ -272,8 +294,10 @@ export const GooglePhotosExportPage = () => {
       setOauthConfig(result);
       setClientId('');
       setClientSecret('');
-      setStatusMessage(t('export.googlePhotos.configCleared'));
-      setBackendError(null);
+      setSelectedAccountId('');
+      setIsSetupGuideExpanded(true);
+      resetGooglePhotosExportState(t('export.googlePhotos.configCleared'));
+      await loadAccounts(false);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.googlePhotos.configClearError'));
     } finally {
@@ -294,19 +318,38 @@ export const GooglePhotosExportPage = () => {
     }
   };
 
+  const handleSelectAccount = (accountId: string) => {
+    if (accountId === selectedAccountId) {
+      return;
+    }
+
+    if (isRunning) {
+      setBackendError(t('export.googlePhotos.runningSetupLocked'));
+      return;
+    }
+
+    setSelectedAccountId(accountId);
+    resetGooglePhotosExportState(t('export.googlePhotos.accountChangeReset'));
+  };
+
   const handleDeleteAccount = async () => {
     if (!selectedAccountId) {
       return;
     }
 
+    if (isRunning) {
+      setBackendError(t('export.googlePhotos.runningSetupLocked'));
+      return;
+    }
+
+    const deletedAccountId = selectedAccountId;
     setIsDeletingAccount(true);
 
     try {
-      await deleteGooglePhotosAccountRequest(selectedAccountId);
+      await deleteGooglePhotosAccountRequest(deletedAccountId);
+      resetGooglePhotosExportState(t('export.googlePhotos.accountDisconnected'));
       setSelectedAccountId('');
-      setPreview(null);
       await loadAccounts();
-      setBackendError(null);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.googlePhotos.accountDeleteError'));
     } finally {
@@ -455,116 +498,136 @@ export const GooglePhotosExportPage = () => {
             )}
           </div>
 
-          <div className="google-photos-setup-grid">
-            <div className="google-photos-setup-card">
-              <p className="network-subsection-title">{t('export.googlePhotos.setupTitle')}</p>
-              <div className="google-photos-step-list">
-                {setupSteps.map((step, index) => (
-                  <article className="google-photos-step-card" key={step.title}>
-                    <div className="google-photos-step-number">{index + 1}</div>
-                    <div className="google-photos-step-body">
-                      <h3>{step.title}</h3>
-                      <p>{step.description}</p>
-                      {index === 3 && (
-                        <div className="google-photos-copy-row">
-                          <code>{oauthConfig?.redirectUri ?? ''}</code>
-                          <button
-                            className="btn btn-secondary"
-                            type="button"
-                            onClick={() => void handleCopyRedirectUri()}
-                            disabled={!oauthConfig?.redirectUri}
-                          >
-                            {t('export.googlePhotos.copyRedirectUri')}
-                          </button>
+          {oauthConfig?.configured && !isSetupGuideOpen && (
+            <div className="google-photos-setup-summary">
+              <strong>{t('export.googlePhotos.setupConfiguredSummary')}</strong>
+              <span>
+                {t(oauthConfig.source === 'env' ? 'export.googlePhotos.configuredFromEnv' : 'export.googlePhotos.configured')}
+              </span>
+            </div>
+          )}
+
+          {isSetupGuideOpen && (
+            <>
+              <div className="google-photos-setup-grid">
+                <div className="google-photos-setup-card">
+                  <p className="network-subsection-title">{t('export.googlePhotos.setupTitle')}</p>
+                  <div className="google-photos-step-list">
+                    {setupSteps.map((step, index) => (
+                      <article className="google-photos-step-card" key={step.title}>
+                        <div className="google-photos-step-number">{index + 1}</div>
+                        <div className="google-photos-step-body">
+                          <h3>{step.title}</h3>
+                          <p>{step.description}</p>
+                          {index === 3 && (
+                            <div className="google-photos-copy-row">
+                              <code>{oauthConfig?.redirectUri ?? ''}</code>
+                              <button
+                                className="btn btn-secondary"
+                                type="button"
+                                onClick={() => void handleCopyRedirectUri()}
+                                disabled={!oauthConfig?.redirectUri}
+                              >
+                                {t('export.googlePhotos.copyRedirectUri')}
+                              </button>
+                            </div>
+                          )}
+                          <div className="google-photos-doc-links">
+                            <a href={step.primaryHref} target="_blank" rel="noreferrer">
+                              {step.primaryLabel}
+                            </a>
+                            {step.secondaryHref && (
+                              <a href={step.secondaryHref} target="_blank" rel="noreferrer">
+                                {step.secondaryLabel}
+                              </a>
+                            )}
+                          </div>
                         </div>
-                      )}
-                      <div className="google-photos-doc-links">
-                        <a href={step.primaryHref} target="_blank" rel="noreferrer">
-                          {step.primaryLabel}
-                        </a>
-                        {step.secondaryHref && (
-                          <a href={step.secondaryHref} target="_blank" rel="noreferrer">
-                            {step.secondaryLabel}
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  </article>
-                ))}
+                      </article>
+                    ))}
+                  </div>
+                </div>
+
+                <details className="google-photos-advanced">
+                  <summary>{t('export.googlePhotos.permissionsTitle')}</summary>
+                  <p>{t('export.googlePhotos.permissionsNote')}</p>
+                  <ul className="google-photos-scope-list">
+                    {(oauthConfig?.requiredScopes ?? []).map((scope) => (
+                      <li key={scope}>
+                        <code>{scope}</code>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="field-hint">{t('export.googlePhotos.requiredScopesHint')}</p>
+                  <div className="google-photos-doc-links">
+                    <a href="https://developers.google.com/photos/overview/authorization" target="_blank" rel="noreferrer">
+                      {t('export.googlePhotos.scopesLink')}
+                    </a>
+                    <a href="https://developers.google.com/photos/library/guides/get-started" target="_blank" rel="noreferrer">
+                      {t('export.googlePhotos.libraryLink')}
+                    </a>
+                  </div>
+                </details>
               </div>
-            </div>
 
-            <details className="google-photos-advanced">
-              <summary>{t('export.googlePhotos.permissionsTitle')}</summary>
-              <p>{t('export.googlePhotos.permissionsNote')}</p>
-              <ul className="google-photos-scope-list">
-                {(oauthConfig?.requiredScopes ?? []).map((scope) => (
-                  <li key={scope}>
-                    <code>{scope}</code>
-                  </li>
-                ))}
-              </ul>
-              <p className="field-hint">{t('export.googlePhotos.requiredScopesHint')}</p>
-              <div className="google-photos-doc-links">
-                <a href="https://developers.google.com/photos/overview/authorization" target="_blank" rel="noreferrer">
-                  {t('export.googlePhotos.scopesLink')}
-                </a>
-                <a href="https://developers.google.com/photos/library/guides/get-started" target="_blank" rel="noreferrer">
-                  {t('export.googlePhotos.libraryLink')}
-                </a>
+              <div className="google-photos-troubleshooting">
+                <p className="network-subsection-title">{t('export.googlePhotos.troubleshootingTitle')}</p>
+                <div className="google-photos-troubleshooting-grid">
+                  <p>{t('export.googlePhotos.troubleshootingConsent')}</p>
+                  <p>{t('export.googlePhotos.troubleshootingTestUsers')}</p>
+                  <p>{t('export.googlePhotos.troubleshootingRedirect')}</p>
+                  <p>{t('export.googlePhotos.troubleshootingUnverified')}</p>
+                </div>
               </div>
-            </details>
-          </div>
 
-          <div className="google-photos-troubleshooting">
-            <p className="network-subsection-title">{t('export.googlePhotos.troubleshootingTitle')}</p>
-            <div className="google-photos-troubleshooting-grid">
-              <p>{t('export.googlePhotos.troubleshootingConsent')}</p>
-              <p>{t('export.googlePhotos.troubleshootingTestUsers')}</p>
-              <p>{t('export.googlePhotos.troubleshootingRedirect')}</p>
-              <p>{t('export.googlePhotos.troubleshootingUnverified')}</p>
-            </div>
-          </div>
+              <div className="network-auth-grid">
+                <label className="folder-path-control">
+                  <span>{t('export.googlePhotos.clientId')}</span>
+                  <input
+                    className="folder-path-input"
+                    value={clientId}
+                    onChange={(event) => setClientId(event.target.value)}
+                    placeholder={t('export.googlePhotos.clientIdPlaceholder')}
+                    type="text"
+                    autoComplete="off"
+                  />
+                  <small className="field-hint">{t('export.googlePhotos.clientIdHint')}</small>
+                </label>
 
-          <div className="network-auth-grid">
-            <label className="folder-path-control">
-              <span>{t('export.googlePhotos.clientId')}</span>
-              <input
-                className="folder-path-input"
-                value={clientId}
-                onChange={(event) => setClientId(event.target.value)}
-                placeholder={t('export.googlePhotos.clientIdPlaceholder')}
-                type="text"
-                autoComplete="off"
-              />
-              <small className="field-hint">{t('export.googlePhotos.clientIdHint')}</small>
-            </label>
+                <label className="folder-path-control">
+                  <span>{t('export.googlePhotos.clientSecret')}</span>
+                  <input
+                    className="folder-path-input"
+                    value={clientSecret}
+                    onChange={(event) => setClientSecret(event.target.value)}
+                    placeholder={t('export.googlePhotos.clientSecretPlaceholder')}
+                    type="password"
+                    autoComplete="off"
+                  />
+                  <small className="field-hint">{t('export.googlePhotos.clientSecretHint')}</small>
+                </label>
+              </div>
 
-            <label className="folder-path-control">
-              <span>{t('export.googlePhotos.clientSecret')}</span>
-              <input
-                className="folder-path-input"
-                value={clientSecret}
-                onChange={(event) => setClientSecret(event.target.value)}
-                placeholder={t('export.googlePhotos.clientSecretPlaceholder')}
-                type="password"
-                autoComplete="off"
-              />
-              <small className="field-hint">{t('export.googlePhotos.clientSecretHint')}</small>
-            </label>
-          </div>
-
-          <p className="page-summary-note">{t('export.googlePhotos.configPrivacyNote')}</p>
+              <p className="page-summary-note">{t('export.googlePhotos.configPrivacyNote')}</p>
+            </>
+          )}
 
           <div className="network-export-tools">
-            <button className="btn btn-primary" type="submit" disabled={isSavingConfig}>
-              {isSavingConfig ? t('export.googlePhotos.savingConfig') : t('export.googlePhotos.saveConfig')}
-            </button>
+            {oauthConfig?.configured && (
+              <button className="btn btn-secondary" type="button" onClick={() => setIsSetupGuideExpanded((current) => !current)}>
+                {isSetupGuideOpen ? t('export.googlePhotos.hideSetupGuide') : t('export.googlePhotos.showSetupGuide')}
+              </button>
+            )}
+            {isSetupGuideOpen && (
+              <button className="btn btn-primary" type="submit" disabled={isSavingConfig}>
+                {isSavingConfig ? t('export.googlePhotos.savingConfig') : t('export.googlePhotos.saveConfig')}
+              </button>
+            )}
             <button
               className="btn btn-secondary"
               type="button"
               onClick={() => void handleClearConfig()}
-              disabled={isClearingConfig || oauthConfig?.source !== 'local-db'}
+              disabled={isClearingConfig || isRunning || oauthConfig?.source !== 'local-db'}
             >
               {isClearingConfig ? t('export.googlePhotos.clearingConfig') : t('export.googlePhotos.clearConfig')}
             </button>
@@ -596,7 +659,8 @@ export const GooglePhotosExportPage = () => {
                   key={account.id}
                   className={`network-location-card${account.id === selectedAccountId ? ' is-selected' : ''}`}
                   type="button"
-                  onClick={() => setSelectedAccountId(account.id)}
+                  onClick={() => handleSelectAccount(account.id)}
+                  disabled={isRunning}
                 >
                   <strong>{account.displayName || account.email}</strong>
                   <span>{account.email}</span>
@@ -611,7 +675,7 @@ export const GooglePhotosExportPage = () => {
                 className="btn btn-secondary"
                 type="button"
                 onClick={() => void handleDeleteAccount()}
-                disabled={isDeletingAccount}
+                disabled={isDeletingAccount || isRunning}
               >
                 {isDeletingAccount ? t('export.googlePhotos.disconnecting') : t('export.googlePhotos.disconnectAccount')}
               </button>
