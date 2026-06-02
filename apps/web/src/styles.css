@@ -3057,62 +3057,121 @@ body {
   justify-content: flex-end;
 }
 
-.network-location-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 10px;
-}
-
-.google-photos-setup-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-
-.google-photos-setup-card {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-}
-
-.google-photos-scope-list {
-  color: var(--text-muted);
+.google-photos-source-context {
   display: grid;
   gap: 6px;
+  padding: 18px 22px;
+}
+
+.export-accordion {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.export-accordion-section {
+  border-bottom: 1px solid var(--line);
+}
+
+.export-accordion-section:last-child {
+  border-bottom: 0;
+}
+
+.export-accordion-header {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 18px 22px;
+  text-align: left;
+  width: 100%;
+}
+
+.export-accordion-header:hover {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.export-accordion-chevron {
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: 20px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+}
+
+.export-accordion-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.export-accordion-title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.export-accordion-title strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.export-accordion-title span {
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.45;
-  margin: 0;
-  padding-left: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.google-photos-step-list {
+.export-accordion-body {
   display: grid;
-  gap: 10px;
+  gap: 14px;
+  padding: 0 22px 22px 48px;
 }
 
-.google-photos-advanced {
+.google-photos-guide {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface);
-  color: var(--text-muted);
   padding: 12px;
 }
 
-.google-photos-advanced summary {
+.google-photos-guide summary {
   color: var(--text);
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
 }
 
-.google-photos-advanced p {
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.45;
-  margin: 10px 0;
+.google-photos-guide[open] summary {
+  margin-bottom: 12px;
+}
+
+.google-photos-config-actions {
+  align-items: center;
+}
+
+.google-photos-config-actions .status-pill {
+  align-items: center;
+  display: inline-flex;
+  min-height: 28px;
+}
+
+.network-location-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.google-photos-step-list {
+  display: grid;
+  gap: 10px;
 }
 
 .google-photos-setup-summary {
@@ -3172,36 +3231,6 @@ body {
   font-size: 12px;
   line-height: 1.45;
   margin: 0;
-}
-
-.google-photos-troubleshooting {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-}
-
-.google-photos-troubleshooting-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.google-photos-troubleshooting-grid p {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.45;
-  margin: 0;
-  padding: 9px;
-}
-
-.google-photos-scope-list code {
-  color: var(--text);
-  overflow-wrap: anywhere;
 }
 
 .google-photos-doc-links,
@@ -3625,9 +3654,7 @@ body {
   }
 
   .network-destination-grid,
-  .network-auth-grid,
-  .google-photos-setup-grid,
-  .google-photos-troubleshooting-grid {
+  .network-auth-grid {
     grid-template-columns: 1fr;
   }
 
