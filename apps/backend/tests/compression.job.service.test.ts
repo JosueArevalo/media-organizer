@@ -305,6 +305,71 @@ test('executeCompressionSession counts copied excluded media in progress while p
   assert.ok(fs.existsSync(path.join(started.outputRoot, 'exclude', 'copied.jpg')));
 });
 
+test('executeCompressionSession completes copy-only sessions when all media is excluded from compression', async () => {
+  const { startCompressionSession, getCompressionSession, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js');
+  const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js');
+  const scopedSourceDir = path.join(tempRoot, 'copy-only-source');
+  const scopedOutputDir = path.join(tempRoot, 'copy-only-output');
+
+  fs.mkdirSync(path.join(scopedSourceDir, 'album'), { recursive: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+  fs.writeFileSync(path.join(scopedSourceDir, 'album', 'photo.jpg'), 'fake-jpg-content', 'utf8');
+  fs.writeFileSync(path.join(scopedSourceDir, 'album', 'clip.mp4'), 'fake-video-content', 'utf8');
+
+  const started = startCompressionSession({
+    name: 'Copy-only compression session',
+    sourceDir: scopedSourceDir,
+    outputDir: scopedOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Balanced',
+    imageToolCommand: '__missing_image_encoder__',
+    videoToolCommand: '__missing_video_encoder__',
+    selectionScope: {
+      excludedDirectories: [scopedSourceDir],
+      excludedFiles: [],
+      includedDirectories: [],
+      includedFiles: [],
+      updatedAt: 1
+    }
+  });
+
+  const result = await executeCompressionSession(started.session.id);
+
+  assert.equal(result.totalCount, 2);
+  assert.equal(result.completedCount, 2);
+  assert.equal(result.failedCount, 0);
+
+  const progress = getCompressionProgress(started.session.id);
+  assert.ok(progress);
+  assert.equal(progress.total, 2);
+  assert.equal(progress.totalCompress, 0);
+  assert.equal(progress.totalCopy, 2);
+  assert.equal(progress.completedCompress, 0);
+  assert.equal(progress.completedCopy, 2);
+  assert.equal(progress.failedCompress, 0);
+  assert.equal(progress.failedCopy, 0);
+
+  const persisted = getCompressionSession(started.session.id);
+  assert.equal(persisted?.session.status, 'completed');
+  assert.ok(fs.existsSync(path.join(started.outputRoot, 'album', 'photo.jpg')));
+  assert.ok(fs.existsSync(path.join(started.outputRoot, 'album', 'clip.mp4')));
+
+  const decisionRows = getDb()
+    .prepare(
+      `
+        SELECT idc.selected_for_compression
+        FROM item_decisions idc
+        WHERE idc.session_id = ?
+        ORDER BY idc.item_id
+      `
+    )
+    .all(started.session.id) as Array<{ selected_for_compression: number }>;
+
+  assert.equal(decisionRows.length, 2);
+  assert.deepEqual(decisionRows.map((row) => row.selected_for_compression), [0, 0]);
+});
+
 test('compression progress reports the actively processing video and clears it after completion', async () => {
   const { startCompressionSession, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js');
   const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js');
