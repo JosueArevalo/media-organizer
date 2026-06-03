@@ -3628,6 +3628,35 @@ body {
   font-size: 11px;
 }
 
+.export-item-row-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.export-item-error {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.export-item-error summary {
+  cursor: pointer;
+  line-height: 1.45;
+}
+
+.export-item-error span {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.btn-compact {
+  min-height: 26px;
+  padding: 5px 9px;
+}
+
 .status-pill {
   border-radius: 999px;
   font-size: 11px;
@@ -3636,10 +3665,14 @@ body {
   white-space: nowrap;
 }
 
-.status-completed,
-.status-skipped {
+.status-completed {
   background: rgba(16, 185, 129, 0.12);
   color: #047857;
+}
+
+.status-skipped {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
 }
 
 .status-failed {
@@ -3647,8 +3680,12 @@ body {
   color: var(--warn);
 }
 
-.status-running,
 .status-pending {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-muted);
+}
+
+.status-running {
   background: var(--accent-light);
   color: var(--accent-deep);
 }

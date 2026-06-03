@@ -530,6 +530,8 @@ export const en = {
   'export.resume': 'Resume export',
   'export.pause': 'Pause',
   'export.retryFailed': 'Retry failed',
+  'export.retryItem': 'Retry',
+  'export.retrying': 'Retrying...',
   'export.defaultJobName': 'Network folder export',
   'export.testError': 'Could not test the export target.',
   'export.startError': 'Could not start export.',

@@ -70,7 +70,19 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /getAlbumFailureSummary/);
   assert.match(pageSource, /item\.lastError/);
   assert.match(pageSource, /progressByAlbum/);
+  assert.match(pageSource, /handleRetryItem/);
+  assert.match(pageSource, /retryExportItemRequest/);
+  assert.match(pageSource, /export\.retryItem/);
   assert.doesNotMatch(pageSource, /google-photos-progress-panel/);
   assert.doesNotMatch(pageSource, /albumNoProgress/);
   assert.doesNotMatch(pageSource, /renderAccordionHeader\('progress'/);
+});
+
+test('Google Photos item states keep distinct visual styles', () => {
+  const stylesPath = path.resolve(process.cwd(), 'src', 'styles.css');
+  const stylesSource = fs.readFileSync(stylesPath, 'utf8');
+
+  assert.match(stylesSource, /\.status-pending\s*\{/);
+  assert.match(stylesSource, /\.status-running\s*\{/);
+  assert.doesNotMatch(stylesSource, /\.status-running,\s*\.status-pending/);
 });

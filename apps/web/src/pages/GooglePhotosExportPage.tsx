@@ -13,6 +13,7 @@ import {
   listGooglePhotosAccountsRequest,
   pauseExportJobRequest,
   previewGooglePhotosExportRequest,
+  retryExportItemRequest,
   retryFailedExportItemsRequest,
   saveGooglePhotosOAuthConfigRequest,
   startExportJobRequest,
@@ -79,6 +80,7 @@ export const GooglePhotosExportPage = () => {
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [retryingItemId, setRetryingItemId] = useState<string | null>(null);
   const [isSetupGuideExpanded, setIsSetupGuideExpanded] = useState(false);
   const [isGoogleSignInPendingRefresh, setIsGoogleSignInPendingRefresh] = useState(false);
   const [openSections, setOpenSections] = useState<Set<GooglePhotosAccordionSection>>(() => createOpenSectionSet('config'));
@@ -616,6 +618,32 @@ export const GooglePhotosExportPage = () => {
     }
   };
 
+  const handleRetryItem = async (itemId: string) => {
+    if (!backendJobId || isRunning) return;
+
+    setRetryingItemId(itemId);
+
+    try {
+      const job = await retryExportItemRequest(backendJobId, itemId);
+      saveExportJobSnapshot({
+        backendJobId,
+        status: job.job.status,
+        sourceRoot,
+        destinationPath: selectedAccount?.email ?? null,
+        startedAt: exportJobState.startedAt ?? Date.now(),
+        completedAt: null,
+        errorMessage: null,
+        updatedAt: Date.now()
+      });
+      await startExportJobRequest(backendJobId);
+      await refreshProgress();
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : t('export.retryError'));
+    } finally {
+      setRetryingItemId(null);
+    }
+  };
+
   const renderAccordionHeader = (
     section: GooglePhotosAccordionSection,
     title: string,
@@ -705,9 +733,16 @@ export const GooglePhotosExportPage = () => {
         relativePath: item.relativePath,
         sizeBytes: progressItem?.sizeBytes ?? item.sizeBytes,
         status: progressItem?.status ?? 'pending',
+        id: progressItem?.id ?? null,
         lastError: progressItem?.lastError ?? null
       };
     });
+  };
+
+  const getShortErrorMessage = (error: string) => {
+    const marker = '. Album:';
+    const markerIndex = error.indexOf(marker);
+    return markerIndex > 0 ? error.slice(0, markerIndex + 1) : error;
   };
 
   const getAlbumFailureSummary = (items: ReturnType<typeof getAlbumDisplayItems>) => {
@@ -1010,9 +1045,26 @@ export const GooglePhotosExportPage = () => {
                                         <div>
                                           <strong title={item.relativePath}>{item.relativePath}</strong>
                                           <span>{formatBytes(item.sizeBytes)}</span>
-                                          {item.lastError && <span>{item.lastError}</span>}
+                                          {item.lastError && (
+                                            <details className="export-item-error">
+                                              <summary>{getShortErrorMessage(item.lastError)}</summary>
+                                              <span>{item.lastError}</span>
+                                            </details>
+                                          )}
                                         </div>
-                                        <span className={`status-pill status-${item.status}`}>{t(itemStatusLabels[item.status])}</span>
+                                        <div className="export-item-row-actions">
+                                          {item.status === 'failed' && item.id && (
+                                            <button
+                                              className="btn btn-secondary btn-compact"
+                                              type="button"
+                                              onClick={() => void handleRetryItem(item.id as string)}
+                                              disabled={isRunning || retryingItemId === item.id}
+                                            >
+                                              {retryingItemId === item.id ? t('export.retrying') : t('export.retryItem')}
+                                            </button>
+                                          )}
+                                          <span className={`status-pill status-${item.status}`}>{t(itemStatusLabels[item.status])}</span>
+                                        </div>
                                       </div>
                                     ))}
                                   </div>

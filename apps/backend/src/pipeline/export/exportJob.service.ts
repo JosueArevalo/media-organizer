@@ -580,7 +580,7 @@ export const retryFailedExportItems = (jobId: string): ExportJobSnapshot | null 
     `
       UPDATE export_items
       SET status = 'pending', last_error = NULL, updated_at = ?
-      WHERE job_id = ? AND status = 'failed'
+      WHERE job_id = ? AND status IN ('failed', 'running')
     `
   ).run(timestamp, jobId);
 
@@ -593,6 +593,55 @@ export const retryFailedExportItems = (jobId: string): ExportJobSnapshot | null 
   ).run(timestamp, timestamp, jobId);
 
   return getExportJob(jobId);
+};
+
+export const retryExportItem = (jobId: string, itemId: string): ExportJobSnapshot | null => {
+  runMigrations();
+  const snapshot = getExportJob(jobId);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const db = getDb();
+  const row = db
+    .prepare('SELECT status FROM export_items WHERE job_id = ? AND id = ?')
+    .get(jobId, itemId) as { status: ExportItemRecord['status'] } | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  if (row.status !== 'failed') {
+    throw new Error('Only failed export items can be retried.');
+  }
+
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE export_items
+      SET status = 'pending',
+          last_error = NULL,
+          updated_at = ?
+      WHERE job_id = ? AND id = ?
+    `
+  ).run(timestamp, jobId, itemId);
+
+  if (snapshot.job.status !== 'running') {
+    db.prepare(
+      `
+        UPDATE export_jobs
+        SET status = 'draft',
+            last_error = NULL,
+            updated_at = ?,
+            last_opened_at = ?
+        WHERE id = ?
+      `
+    ).run(timestamp, timestamp, jobId);
+  }
+
+  return refreshExportJobCounters(jobId, snapshot.job.status === 'running' ? 'running' : 'draft');
 };
 
 export const testExportTarget = async (target: ExportTarget, credentials?: NetworkCredentials): Promise<ExportTargetTestResult> => {
@@ -717,11 +766,27 @@ export const listRunnableExportItems = (jobId: string) => {
         SELECT *
         FROM export_items
         WHERE job_id = ?
-          AND status IN ('pending', 'failed', 'running')
+          AND status IN ('pending', 'running')
         ORDER BY relative_path ASC
       `
     )
     .all(jobId) as Array<Parameters<typeof toItemRecord>[0]>;
+};
+
+export const resetRunningExportItems = (jobId: string) => {
+  runMigrations();
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE export_items
+      SET status = 'pending',
+          last_error = NULL,
+          updated_at = ?
+      WHERE job_id = ? AND status = 'running'
+    `
+  ).run(timestamp, jobId);
 };
 
 export const resetInvalidCompletedExportItems = (jobId: string, isCompletedOutputValid: (item: ExportItemRecord) => boolean) => {
@@ -834,17 +899,29 @@ export const refreshExportJobCounters = (jobId: string, statusOverride?: ExportJ
           COUNT(*) AS total,
           SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
           SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
-          SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped
+          SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped,
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+          SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running
         FROM export_items
         WHERE job_id = ?
       `
     )
-    .get(jobId) as { total: number; completed: number | null; failed: number | null; skipped: number | null };
+    .get(jobId) as {
+      total: number;
+      completed: number | null;
+      failed: number | null;
+      skipped: number | null;
+      pending: number | null;
+      running: number | null;
+    };
 
   const completed = counts.completed ?? 0;
   const failed = counts.failed ?? 0;
   const skipped = counts.skipped ?? 0;
-  const nextStatus = statusOverride ?? (failed > 0 ? 'failed' : completed + skipped >= counts.total ? 'completed' : 'running');
+  const pending = counts.pending ?? 0;
+  const running = counts.running ?? 0;
+  const hasWorkLeft = pending + running > 0;
+  const nextStatus = statusOverride ?? (hasWorkLeft ? 'running' : failed > 0 ? 'failed' : completed + skipped >= counts.total ? 'completed' : 'running');
 
   db.prepare(
     `

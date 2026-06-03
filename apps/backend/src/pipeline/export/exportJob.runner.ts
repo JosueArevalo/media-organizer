@@ -8,6 +8,7 @@ import {
   markExportJobRunning,
   persistExportItemResult,
   resetInvalidCompletedExportItems,
+  resetRunningExportItems,
   refreshExportJobCounters
 } from './exportJob.service.js';
 import type { ExportItemRecord } from './export.types.js';
@@ -74,6 +75,7 @@ export const executeExportJob = async (jobId: string) => {
   markExportJobRunning(jobId);
   await yieldToEventLoop();
 
+  resetRunningExportItems(jobId);
   resetInvalidCompletedExportItems(jobId, isAlreadyCopied);
   refreshExportJobCounters(jobId, 'running');
 

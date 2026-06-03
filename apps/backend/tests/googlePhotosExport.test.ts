@@ -155,7 +155,7 @@ test('Google Photos OAuth config falls back to env when local setup is absent', 
   assert.equal(authUrl.searchParams.get('client_id'), 'env-client-id');
 });
 
-test('Google Photos export creates one album per folder and batches media item creation', async () => {
+test('Google Photos export creates media items one by one with file names and MIME headers', async () => {
   await insertGooglePhotosAccount();
 
   for (let index = 0; index < 51; index += 1) {
@@ -163,6 +163,9 @@ test('Google Photos export creates one album per folder and batches media item c
   }
 
   const batchSizes: number[] = [];
+  const uploadContentTypes: string[] = [];
+  const batchFileNames: string[] = [];
+  const batchDescriptions: Array<string | undefined> = [];
   let uploadCount = 0;
   let albumCreateCount = 0;
 
@@ -180,12 +183,23 @@ test('Google Photos export creates one album per folder and batches media item c
 
     if (url.endsWith('/uploads')) {
       uploadCount += 1;
+      const headers = new Headers(init?.headers);
+      uploadContentTypes.push(headers.get('X-Goog-Upload-Content-Type') ?? '');
       return new Response(`upload-token-${uploadCount}`, { status: 200 });
     }
 
     if (url.endsWith('/mediaItems:batchCreate')) {
-      const body = JSON.parse(String(init?.body)) as { newMediaItems: Array<{ simpleMediaItem: { uploadToken: string } }> };
+      const body = JSON.parse(String(init?.body)) as {
+        newMediaItems: Array<{
+          description?: string;
+          simpleMediaItem: { uploadToken: string; fileName?: string };
+        }>;
+      };
       batchSizes.push(body.newMediaItems.length);
+      for (const item of body.newMediaItems) {
+        batchFileNames.push(item.simpleMediaItem.fileName ?? '');
+        batchDescriptions.push(item.description);
+      }
       return new Response(JSON.stringify({
         newMediaItemResults: body.newMediaItems.map((item, index) => ({
           uploadToken: item.simpleMediaItem.uploadToken,
@@ -211,7 +225,11 @@ test('Google Photos export creates one album per folder and batches media item c
   assert.equal(progress?.completed, 51);
   assert.equal(progress?.failed, 0);
   assert.equal(albumCreateCount, 1);
-  assert.deepEqual(batchSizes, [50, 1]);
+  assert.deepEqual(batchSizes, Array.from({ length: 51 }, () => 1));
+  assert.equal(uploadContentTypes.every((contentType) => contentType === 'image/jpeg'), true);
+  assert.equal(batchFileNames.includes('photo-0.jpg'), true);
+  assert.equal(batchFileNames.includes('photo-50.jpg'), true);
+  assert.equal(batchDescriptions.every((description) => description === undefined), true);
 });
 
 test('Google Photos export job can be filtered to one album', async () => {
@@ -327,7 +345,7 @@ test('Google Photos export persists partial failures and does not retry complete
       batchAttempt += 1;
       const body = JSON.parse(String(init?.body)) as { newMediaItems: Array<{ simpleMediaItem: { uploadToken: string } }> };
       const results = body.newMediaItems.map((item, index) => {
-        if (batchAttempt === 1 && index === 1) {
+        if (item.simpleMediaItem.uploadToken === 'upload-token-sensitive-2' && batchAttempt === 2) {
           return {
             uploadToken: item.simpleMediaItem.uploadToken,
             status: {

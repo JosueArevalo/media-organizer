@@ -3,6 +3,7 @@ import {
   createGooglePhotosMediaItems,
   ensureGooglePhotosItemMetadata,
   getOrCreateGooglePhotosAlbum,
+  inferGooglePhotosContentType,
   isUploadTokenFresh,
   redactGooglePhotosUploadToken,
   updateGooglePhotosItemCreated,
@@ -16,12 +17,13 @@ import {
   markExportItemRunning,
   markExportJobRunning,
   persistExportItemResult,
+  resetRunningExportItems,
   refreshExportJobCounters
 } from './exportJob.service.js';
 import type { ExportItemRecord } from './export.types.js';
 import type { GooglePhotosBatchCreateResult } from './googlePhotos.types.js';
 
-const batchSize = 50;
+const batchSize = 1;
 const GOOGLE_PHOTOS_LOG_PREFIX = '[google-photos]';
 
 const yieldToEventLoop = async () => {
@@ -68,34 +70,6 @@ const toItemRecord = (row: {
   updatedAt: row.updated_at
 });
 
-const inferContentType = (filePath: string) => {
-  const extension = path.extname(filePath).toLocaleLowerCase();
-
-  const contentTypes: Record<string, string> = {
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.heic': 'image/heic',
-    '.heif': 'image/heif',
-    '.tif': 'image/tiff',
-    '.tiff': 'image/tiff',
-    '.bmp': 'image/bmp',
-    '.mp4': 'video/mp4',
-    '.m4v': 'video/mp4',
-    '.mov': 'video/quicktime',
-    '.avi': 'video/x-msvideo',
-    '.mkv': 'video/x-matroska',
-    '.mts': 'video/mp2t',
-    '.m2ts': 'video/mp2t',
-    '.3gp': 'video/3gpp',
-    '.3g2': 'video/3gpp2'
-  };
-
-  return contentTypes[extension] ?? 'application/octet-stream';
-};
-
 const serializeGooglePhotosStatusDetails = (details: unknown) => {
   if (!details) {
     return null;
@@ -123,7 +97,7 @@ const formatGooglePhotosBatchCreateError = (
   }
 
   if (status?.message) {
-    parts.push(`Message: ${status.message}.`);
+    parts.push(`Message: ${status.message.replace(/\.+$/, '')}.`);
   } else {
     parts.push('Message: Google Photos did not create this media item.');
   }
@@ -136,7 +110,7 @@ const formatGooglePhotosBatchCreateError = (
   parts.push(`Album ID: ${albumId}.`);
   parts.push(`File: ${path.basename(queued.item.sourcePath)}.`);
   parts.push(`Size: ${queued.item.sizeBytes} bytes.`);
-  parts.push(`Inferred Content-Type: ${inferContentType(queued.item.sourcePath)}.`);
+  parts.push(`Inferred Content-Type: ${inferGooglePhotosContentType(queued.item.sourcePath)}.`);
   parts.push(`Upload token: ${redactGooglePhotosUploadToken(queued.uploadToken)}.`);
 
   return parts.join(' ');
@@ -152,7 +126,7 @@ const createUploadedBatch = async (
     albumId,
     items.map(({ item, uploadToken }) => ({
       uploadToken,
-      description: item.relativePath
+      fileName: path.basename(item.sourcePath)
     }))
   );
 
@@ -186,6 +160,7 @@ export const executeGooglePhotosExportJob = async (jobId: string) => {
   }
 
   const accountId = getAccountId(snapshot.checkpoint?.payloadJson ?? null);
+  resetRunningExportItems(jobId);
   markExportJobRunning(jobId);
   await yieldToEventLoop();
   refreshExportJobCounters(jobId, 'running');

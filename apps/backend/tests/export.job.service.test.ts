@@ -105,6 +105,87 @@ test('retryFailedExportItems only resets failed items before resuming export', a
   assert.equal(progress?.completed, 2);
 });
 
+test('export progress stays running while failed jobs still have pending or running items', async () => {
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-b.jpg'), 'image-b');
+  const { createExportJob, getExportProgress, refreshExportJobCounters } = await import('../src/pipeline/export/exportJob.service.js?partial-running=1');
+
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'network-folder', destinationPath: destinationRoot }
+  });
+  const db = getDb();
+  const rows = db.prepare('SELECT id FROM export_items WHERE job_id = ? ORDER BY relative_path ASC').all(job.job.id) as Array<{ id: string }>;
+
+  db.prepare("UPDATE export_items SET status = 'failed', last_error = 'upload rejected' WHERE id = ?").run(rows[0].id);
+  db.prepare("UPDATE export_items SET status = 'running' WHERE id = ?").run(rows[1].id);
+  db.prepare("UPDATE export_items SET status = 'pending' WHERE id = ?").run(rows[2].id);
+
+  refreshExportJobCounters(job.job.id);
+  const runningProgress = getExportProgress(job.job.id);
+  assert.equal(runningProgress?.status, 'running');
+  assert.equal(runningProgress?.failed, 1);
+
+  db.prepare("UPDATE export_items SET status = 'failed', last_error = 'upload rejected' WHERE id IN (?, ?)").run(rows[1].id, rows[2].id);
+
+  refreshExportJobCounters(job.job.id);
+  const failedProgress = getExportProgress(job.job.id);
+  assert.equal(failedProgress?.status, 'failed');
+  assert.equal(failedProgress?.failed, 3);
+});
+
+test('retryExportItem resets only the selected failed item', async () => {
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-b.jpg'), 'image-b');
+  const { createExportJob, retryExportItem } = await import('../src/pipeline/export/exportJob.service.js?retry-one=1');
+
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'network-folder', destinationPath: destinationRoot }
+  });
+  const db = getDb();
+  const rows = db.prepare('SELECT id FROM export_items WHERE job_id = ? ORDER BY relative_path ASC').all(job.job.id) as Array<{ id: string }>;
+
+  db.prepare("UPDATE export_items SET status = 'completed' WHERE id = ?").run(rows[0].id);
+  db.prepare("UPDATE export_items SET status = 'failed', last_error = 'first failed' WHERE id = ?").run(rows[1].id);
+  db.prepare("UPDATE export_items SET status = 'failed', last_error = 'second failed' WHERE id = ?").run(rows[2].id);
+  db.prepare("UPDATE export_jobs SET status = 'failed', completed_items = 1, failed_items = 2 WHERE id = ?").run(job.job.id);
+
+  const retried = retryExportItem(job.job.id, rows[1].id);
+  assert.equal(retried?.job.status, 'draft');
+
+  const statuses = db
+    .prepare('SELECT id, status, last_error FROM export_items WHERE job_id = ? ORDER BY relative_path ASC')
+    .all(job.job.id) as Array<{ id: string; status: string; last_error: string | null }>;
+
+  assert.deepEqual(statuses.map((row) => row.status), ['completed', 'pending', 'failed']);
+  assert.equal(statuses[1].last_error, null);
+  assert.equal(statuses[2].last_error, 'second failed');
+});
+
+test('retryFailedExportItems resets failed and stale running items', async () => {
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-b.jpg'), 'image-b');
+  const { createExportJob, retryFailedExportItems } = await import('../src/pipeline/export/exportJob.service.js?retry-running=1');
+
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'network-folder', destinationPath: destinationRoot }
+  });
+  const db = getDb();
+  const rows = db.prepare('SELECT id FROM export_items WHERE job_id = ? ORDER BY relative_path ASC').all(job.job.id) as Array<{ id: string }>;
+
+  db.prepare("UPDATE export_items SET status = 'completed' WHERE id = ?").run(rows[0].id);
+  db.prepare("UPDATE export_items SET status = 'failed', last_error = 'failed' WHERE id = ?").run(rows[1].id);
+  db.prepare("UPDATE export_items SET status = 'running' WHERE id = ?").run(rows[2].id);
+  db.prepare("UPDATE export_jobs SET status = 'failed', completed_items = 1, failed_items = 1 WHERE id = ?").run(job.job.id);
+
+  retryFailedExportItems(job.job.id);
+
+  const statuses = db
+    .prepare('SELECT status FROM export_items WHERE job_id = ? ORDER BY relative_path ASC')
+    .all(job.job.id) as Array<{ status: string }>;
+
+  assert.deepEqual(statuses.map((row) => row.status), ['completed', 'pending', 'pending']);
+});
+
 test('pauseExportJob and start/resume APIs keep resumable job state', async () => {
   const { createExportJob, pauseExportJob, getExportJob } = await import('../src/pipeline/export/exportJob.service.js');
   const { executeExportJob } = await import('../src/pipeline/export/exportJob.runner.js');

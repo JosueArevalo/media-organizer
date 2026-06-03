@@ -16,6 +16,35 @@ const GOOGLE_ERROR_BODY_LIMIT = 4000;
 
 const nowIso = () => new Date().toISOString();
 
+export const inferGooglePhotosContentType = (filePath: string) => {
+  const dotIndex = filePath.lastIndexOf('.');
+  const extension = dotIndex >= 0 ? filePath.slice(dotIndex).toLocaleLowerCase() : '';
+
+  const contentTypes: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif',
+    '.tif': 'image/tiff',
+    '.tiff': 'image/tiff',
+    '.bmp': 'image/bmp',
+    '.mp4': 'video/mp4',
+    '.m4v': 'video/mp4',
+    '.mov': 'video/quicktime',
+    '.avi': 'video/x-msvideo',
+    '.mkv': 'video/x-matroska',
+    '.mts': 'video/mp2t',
+    '.m2ts': 'video/mp2t',
+    '.3gp': 'video/3gpp',
+    '.3g2': 'video/3gpp2'
+  };
+
+  return contentTypes[extension] ?? 'application/octet-stream';
+};
+
 export const redactGooglePhotosUploadToken = (uploadToken: string | null | undefined) => {
   if (!uploadToken) {
     return 'none';
@@ -308,12 +337,14 @@ export const uploadGooglePhotosMedia = async (
 ): Promise<{ uploadToken: string; createdAt: string }> => {
   const accessToken = await getValidGooglePhotosAccessToken(accountId);
   const file = fs.readFileSync(filePath);
-  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Uploading media bytes file="${fileName}" sizeBytes=${file.byteLength} contentType=application/octet-stream`);
+  const contentType = inferGooglePhotosContentType(filePath);
+  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Uploading media bytes file="${fileName}" sizeBytes=${file.byteLength} contentType=${contentType}`);
   const response = await fetch(`${GOOGLE_PHOTOS_API_URL}/uploads`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/octet-stream',
+      'X-Goog-Upload-Content-Type': contentType,
       'X-Goog-Upload-File-Name': encodeURIComponent(fileName),
       'X-Goog-Upload-Protocol': 'raw'
     },
@@ -338,7 +369,7 @@ export const uploadGooglePhotosMedia = async (
 export const createGooglePhotosMediaItems = async (
   accountId: string,
   albumId: string,
-  items: Array<{ uploadToken: string; description: string }>
+  items: Array<{ uploadToken: string; fileName: string }>
 ): Promise<GooglePhotosBatchCreateResult[]> => {
   console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Creating media items albumId=${albumId} count=${items.length}`);
   const body = await requestJson<{ newMediaItemResults?: GooglePhotosBatchCreateResult[] }>(
@@ -351,8 +382,10 @@ export const createGooglePhotosMediaItems = async (
       body: JSON.stringify({
         albumId,
         newMediaItems: items.map((item) => ({
-          description: item.description,
-          simpleMediaItem: { uploadToken: item.uploadToken }
+          simpleMediaItem: {
+            uploadToken: item.uploadToken,
+            fileName: item.fileName
+          }
         }))
       })
     }

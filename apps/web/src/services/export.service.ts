@@ -228,6 +228,9 @@ export const pauseExportJobRequest = (jobId: string) =>
 export const retryFailedExportItemsRequest = (jobId: string) =>
   requestJson<ExportJobSnapshot>(`/api/export/jobs/${jobId}/retry-failed`, { method: 'POST' });
 
+export const retryExportItemRequest = (jobId: string, itemId: string) =>
+  requestJson<ExportJobSnapshot>(`/api/export/jobs/${jobId}/items/${itemId}/retry`, { method: 'POST' });
+
 export const listGooglePhotosAccountsRequest = () =>
   requestJson<{ accounts: GooglePhotosAccount[] }>('/api/export/google-photos/accounts');
 

@@ -8,6 +8,7 @@ import {
   markExportJobFailed,
   pauseExportJob,
   previewGooglePhotosExport,
+  retryExportItem,
   retryFailedExportItems,
   testExportTarget
 } from './exportJob.service.js';
@@ -387,6 +388,23 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
       });
 
       sendJson(res, 202, getExportJob(jobId));
+      return true;
+    }
+
+    if (req.method === 'POST' && subPath === 'items' && pathSegments[6] === 'retry') {
+      try {
+        const job = retryExportItem(jobId, pathSegments[5]);
+
+        if (!job) {
+          sendJson(res, 404, { status: 'not_found' });
+          return true;
+        }
+
+        sendJson(res, 200, job);
+      } catch (error) {
+        sendExportRouteError(res, error, 'Failed to retry export item.');
+      }
+
       return true;
     }
   }

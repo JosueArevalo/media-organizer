@@ -532,6 +532,8 @@ export const es: TranslationDictionary = {
   'export.resume': 'Reanudar exportación',
   'export.pause': 'Pausar',
   'export.retryFailed': 'Reintentar fallidos',
+  'export.retryItem': 'Reintentar',
+  'export.retrying': 'Reintentando...',
   'export.defaultJobName': 'Exportación a carpeta de red',
   'export.testError': 'No se pudo probar el destino de exportación.',
   'export.startError': 'No se pudo iniciar la exportación.',
