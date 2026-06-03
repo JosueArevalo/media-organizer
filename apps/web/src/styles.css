@@ -3691,8 +3691,8 @@ body {
 }
 
 .status-running {
-  background: rgba(59, 130, 246, 0.16);
-  color: #2563eb;
+  background: rgba(20, 184, 166, 0.14);
+  color: #2dd4bf;
 }
 
 .status-paused {

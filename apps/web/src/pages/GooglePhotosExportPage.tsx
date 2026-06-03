@@ -100,6 +100,7 @@ export const GooglePhotosExportPage = () => {
   );
   const isPaused = progress?.status === 'paused' || exportJobState.status === 'paused';
   const isRunning = progress?.status === 'running' || exportJobState.status === 'running';
+  const hasPreview = Boolean(preview);
   const hasActiveUpload = isRunning || isPaused;
   const canStart = Boolean(sourceRoot && selectedAccountId && !isStarting && (preview || isPaused) && (!hasActiveUpload || isPaused));
   const canConnect = Boolean(oauthConfig?.configured && !isConnecting);
@@ -991,7 +992,7 @@ export const GooglePhotosExportPage = () => {
                   className="btn btn-secondary"
                   type="button"
                   onClick={() => void handlePreview()}
-                  disabled={!sourceRoot || !selectedAccountId || isPreviewing || isAllVisibleExportCompletedSuccessfully}
+                  disabled={!sourceRoot || !selectedAccountId || isPreviewing || hasPreview || isAllVisibleExportCompletedSuccessfully}
                 >
                   {isPreviewing ? t('export.googlePhotos.previewing') : t('export.googlePhotos.preview')}
                 </button>

@@ -68,6 +68,9 @@ test('Google Photos albums section owns upload progress', () => {
 
   assert.match(pageSource, /uploadAllAlbums/);
   assert.match(pageSource, /uploadAlbum/);
+  assert.match(pageSource, /hasPreview/);
+  assert.match(pageSource, /disabled=\{!sourceRoot \|\| !selectedAccountId \|\| isPreviewing \|\| hasPreview \|\| isAllVisibleExportCompletedSuccessfully\}/);
+  assert.match(pageSource, /setPreview\(null\)/);
   assert.match(pageSource, /isAllVisibleExportCompletedSuccessfully/);
   assert.match(pageSource, /isAlbumCompletedSuccessfully/);
   assert.match(pageSource, /albumTitles: \[albumTitle\]/);
@@ -92,7 +95,11 @@ test('Google Photos item states keep distinct visual styles', () => {
   assert.match(stylesSource, /\.status-running\s*\{/);
   assert.match(stylesSource, /\.status-paused\s*\{/);
   assert.match(stylesSource, /\.google-photos-upload-action\.btn-compact\s*\{/);
+  assert.match(stylesSource, /rgba\(20, 184, 166, 0\.14\)/);
+  assert.match(stylesSource, /#2dd4bf/);
   assert.match(pageSource, /getItemRenderStatus/);
   assert.match(pageSource, /export\.itemStatus\.paused/);
   assert.doesNotMatch(stylesSource, /\.status-running,\s*\.status-pending/);
+  assert.doesNotMatch(stylesSource, /#2563eb/);
+  assert.doesNotMatch(stylesSource, /rgba\(59, 130, 246, 0\.16\)/);
 });
