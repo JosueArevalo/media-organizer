@@ -2692,6 +2692,16 @@ body {
   box-shadow: var(--soft-shadow);
 }
 
+.grouping-media-card.is-preserved {
+  cursor: default;
+  border-color: rgba(20, 184, 166, 0.38);
+}
+
+.grouping-media-card.is-preserved:hover {
+  transform: none;
+  box-shadow: none;
+}
+
 .grouping-workspace.is-read-only .grouping-media-card {
   cursor: default;
 }

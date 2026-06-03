@@ -66,14 +66,62 @@ const getSelectedDragPayload = (item: GroupingWorkspaceItem, selectedIds: Set<st
   return [item.id];
 };
 
-const getItemsForFolderScope = (items: GroupingWorkspaceItem[], activeFolderLabel: string) =>
+const PRESERVED_FOLDER_PREFIX = '__preserved__:';
+
+type PreservedFolderScope = {
+  path: string;
+  label: string;
+  activeLabel: string;
+  itemCount: number;
+};
+
+const getPreservedFolderActiveLabel = (path: string) => `${PRESERVED_FOLDER_PREFIX}${path}`;
+
+const getActivePreservedFolderPath = (activeFolderLabel: string) =>
+  activeFolderLabel.startsWith(PRESERVED_FOLDER_PREFIX) ? activeFolderLabel.slice(PRESERVED_FOLDER_PREFIX.length) : null;
+
+const getRelativePreservedFolderPath = (scopePath: string, sourceRootPath: string) => {
+  const normalizedScope = formatPath(scopePath);
+  const normalizedSourceRoot = formatPath(sourceRootPath);
+  const normalizedRootName = formatPath(getPathName(sourceRootPath));
+
+  if (normalizedScope === normalizedSourceRoot || normalizedScope === normalizedRootName) {
+    return '';
+  }
+
+  if (normalizedScope.startsWith(`${normalizedSourceRoot}/`)) {
+    return normalizedScope.slice(normalizedSourceRoot.length + 1);
+  }
+
+  return normalizedScope.startsWith(`${normalizedRootName}/`)
+    ? normalizedScope.slice(normalizedRootName.length + 1)
+    : normalizedScope;
+};
+
+const isItemInPreservedFolderScope = (item: GroupingWorkspaceItem, scopePath: string, sourceRootPath: string) => {
+  if (!item.preservedStructure) {
+    return false;
+  }
+
+  const relativeScopePath = getRelativePreservedFolderPath(scopePath, sourceRootPath);
+  const itemDirectory = getDirectoryPath(item.relativePath);
+
+  return (
+    relativeScopePath === '' ||
+    itemDirectory === relativeScopePath ||
+    itemDirectory.startsWith(`${relativeScopePath}/`)
+  );
+};
+
+const getItemsForFolderScope = (items: GroupingWorkspaceItem[], activeFolderLabel: string, sourceRootPath: string) =>
   items.filter((item) => {
     if (activeFolderLabel === '__all__') {
       return true;
     }
 
-    if (activeFolderLabel === '__preserved__') {
-      return item.preservedStructure;
+    const preservedFolderPath = getActivePreservedFolderPath(activeFolderLabel);
+    if (preservedFolderPath) {
+      return isItemInPreservedFolderScope(item, preservedFolderPath, sourceRootPath);
     }
 
     if (activeFolderLabel === '__unassigned__') {
@@ -86,10 +134,11 @@ const getItemsForFolderScope = (items: GroupingWorkspaceItem[], activeFolderLabe
 const getNextPreviewItemId = (
   items: GroupingWorkspaceItem[],
   activeFolderLabel: string,
+  sourceRootPath: string,
   previousIndex: number,
   preferredItemId?: string
 ) => {
-  const scopedItems = getItemsForFolderScope(items, activeFolderLabel);
+  const scopedItems = getItemsForFolderScope(items, activeFolderLabel, sourceRootPath);
 
   if (preferredItemId && scopedItems.some((item) => item.id === preferredItemId)) {
     return preferredItemId;
@@ -316,6 +365,7 @@ export const GroupingPage = () => {
   const canMutateGrouping = !isGroupingCompleted;
   const isWaitingForWorkspacePrerequisites =
     isLoadingFolderSelections || (hasWorkspacePrerequisites && compressionSessionState.status === 'running');
+  const sourceRootPath = workspace?.sourceDir ?? 'Source';
 
   const refreshWorkspace = useCallback(
     async (sessionId: string) => {
@@ -404,21 +454,42 @@ export const GroupingPage = () => {
     setView('review');
   }, [isGroupingCompleted]);
 
+  const preservedFolderScopes = useMemo<PreservedFolderScope[]>(() => {
+    if (!workspace) {
+      return [];
+    }
+
+    return workspace.preservedDirectories
+      .map((path) => ({
+        path,
+        label: getPathName(path),
+        activeLabel: getPreservedFolderActiveLabel(path),
+        itemCount: workspace.items.filter((item) => isItemInPreservedFolderScope(item, path, sourceRootPath)).length
+      }))
+      .filter((scope) => scope.itemCount > 0)
+      .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: 'base' }));
+  }, [sourceRootPath, workspace]);
+
+  const activePreservedFolder = useMemo(
+    () => preservedFolderScopes.find((scope) => scope.activeLabel === activeFolderLabel) ?? null,
+    [activeFolderLabel, preservedFolderScopes]
+  );
+
   const activeFolder = useMemo(() => {
-    if (!workspace || activeFolderLabel === '__all__') {
+    if (!workspace || activeFolderLabel === '__all__' || activePreservedFolder) {
       return null;
     }
 
     return workspace.folders.find((folder) => folder.label === activeFolderLabel) ?? null;
-  }, [activeFolderLabel, workspace]);
+  }, [activeFolderLabel, activePreservedFolder, workspace]);
 
   const folderScopeItems = useMemo(() => {
     if (!workspace) {
       return [];
     }
 
-    return getItemsForFolderScope(workspace.items, activeFolderLabel);
-  }, [activeFolderLabel, workspace]);
+    return getItemsForFolderScope(workspace.items, activeFolderLabel, sourceRootPath);
+  }, [activeFolderLabel, sourceRootPath, workspace]);
 
   const visibleItems = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -453,6 +524,7 @@ export const GroupingPage = () => {
 
     return workspace.items.filter((item) => selectedIds.has(item.id));
   }, [selectedIds, workspace]);
+  const editableSelectedItems = selectedItems.filter((item) => !item.preservedStructure);
 
   const directoryTree = useMemo(() => (workspace ? buildGroupingDirectoryTree(workspace) : null), [workspace]);
 
@@ -465,21 +537,13 @@ export const GroupingPage = () => {
   }, [directoryTree, expandedDirectories, preservedDirectories, reorganizedDirectories]);
 
   const preservedCount = directoryRows.filter((row) => row.isPreserved).length;
-  const preservedItemsCount = workspace?.items.filter((item) => item.preservedStructure).length ?? 0;
   const unassignedItemsCount =
     workspace?.items.filter((item) => !item.preservedStructure && !item.targetGroupLabel).length ?? 0;
-  const preservedGroupLabel = useMemo(() => {
-    if (preservedDirectories.size === 1) {
-      return getPathName(Array.from(preservedDirectories)[0]);
-    }
-
-    return t('grouping.originalStructure');
-  }, [preservedDirectories, t]);
   const canReorganize = Boolean(selectedStrategy && workspace) && !isReorganizing && canMutateGrouping;
 
   const activeFolderTitle = useMemo(() => {
-    if (activeFolderLabel === '__preserved__') {
-      return preservedGroupLabel;
+    if (activePreservedFolder) {
+      return activePreservedFolder.label;
     }
 
     if (activeFolderLabel === '__unassigned__') {
@@ -487,7 +551,7 @@ export const GroupingPage = () => {
     }
 
     return activeFolder?.label ?? t('grouping.allMedia');
-  }, [activeFolder, activeFolderLabel, preservedGroupLabel, t]);
+  }, [activeFolder, activeFolderLabel, activePreservedFolder, t]);
 
   const handleBack = () => {
     if (isGroupingCompleted) {
@@ -633,8 +697,11 @@ export const GroupingPage = () => {
   const moveItemsToFolder = async (itemIds: string[], targetGroupLabel: string) => {
     if (!workspace || itemIds.length === 0 || !canMutateGrouping) return;
 
+    const editableItemIds = itemIds.filter((itemId) => !workspace.items.find((item) => item.id === itemId)?.preservedStructure);
+    if (editableItemIds.length === 0) return;
+
     try {
-      const nextWorkspace = await assignGroupingItemsRequest(workspace.sessionId, itemIds, targetGroupLabel);
+      const nextWorkspace = await assignGroupingItemsRequest(workspace.sessionId, editableItemIds, targetGroupLabel);
       setWorkspace(nextWorkspace);
       setSelectedIds(new Set());
       setBackendError(null);
@@ -664,7 +731,7 @@ export const GroupingPage = () => {
   }, [canShowNextPreview, folderScopeItems, previewIndex]);
 
   const handleDeleteSelected = async () => {
-    if (!workspace || selectedIds.size === 0 || !canMutateGrouping) return;
+    if (!workspace || editableSelectedItems.length === 0 || !canMutateGrouping) return;
 
     const confirmed = window.confirm(t('grouping.deleteSelectedConfirm'));
 
@@ -673,7 +740,10 @@ export const GroupingPage = () => {
     }
 
     try {
-      const nextWorkspace = await deleteGroupingItemsRequest(workspace.sessionId, Array.from(selectedIds));
+      const nextWorkspace = await deleteGroupingItemsRequest(
+        workspace.sessionId,
+        editableSelectedItems.map((item) => item.id)
+      );
       setWorkspace(nextWorkspace);
       setSelectedIds(new Set());
       setBackendError(null);
@@ -683,7 +753,7 @@ export const GroupingPage = () => {
   };
 
   const handleDeletePreviewItem = async () => {
-    if (!workspace || !previewItem || previewIndex < 0 || !canMutateGrouping) return;
+    if (!workspace || !previewItem || previewItem.preservedStructure || previewIndex < 0 || !canMutateGrouping) return;
 
     const confirmed = window.confirm(t('grouping.deletePreviewConfirm', { name: previewItem.fileName }));
 
@@ -699,7 +769,7 @@ export const GroupingPage = () => {
         next.delete(previewItem.id);
         return next;
       });
-      setPreviewItemId(getNextPreviewItemId(nextWorkspace.items, activeFolderLabel, previewIndex));
+      setPreviewItemId(getNextPreviewItemId(nextWorkspace.items, activeFolderLabel, sourceRootPath, previewIndex));
       setBackendError(null);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.deletePreviewError'));
@@ -707,13 +777,13 @@ export const GroupingPage = () => {
   };
 
   const handleMovePreviewItem = async (targetGroupLabel: string) => {
-    if (!workspace || !previewItem || previewIndex < 0 || !targetGroupLabel || !canMutateGrouping) return;
+    if (!workspace || !previewItem || previewItem.preservedStructure || previewIndex < 0 || !targetGroupLabel || !canMutateGrouping) return;
 
     try {
       const nextWorkspace = await assignGroupingItemsRequest(workspace.sessionId, [previewItem.id], targetGroupLabel);
       setWorkspace(nextWorkspace);
       setSelectedIds(new Set());
-      setPreviewItemId(getNextPreviewItemId(nextWorkspace.items, activeFolderLabel, previewIndex, previewItem.id));
+      setPreviewItemId(getNextPreviewItemId(nextWorkspace.items, activeFolderLabel, sourceRootPath, previewIndex, previewItem.id));
       setBackendError(null);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.movePreviewError'));
@@ -756,6 +826,7 @@ export const GroupingPage = () => {
 
     return Array.from(container.querySelectorAll<HTMLElement>('[data-grouping-item-id]'))
       .filter((element) => rectsIntersect(element.getBoundingClientRect(), marqueeDomRect))
+      .filter((element) => element.dataset.groupingItemLocked !== 'true')
       .map((element) => element.dataset.groupingItemId)
       .filter((itemId): itemId is string => Boolean(itemId));
   };
@@ -836,7 +907,7 @@ export const GroupingPage = () => {
   };
 
   const handleItemClick = (item: GroupingWorkspaceItem, event: MouseEvent) => {
-    if (!canMutateGrouping) {
+    if (!canMutateGrouping || item.preservedStructure) {
       return;
     }
 
@@ -1239,14 +1310,18 @@ export const GroupingPage = () => {
           </button>
 
           <div className="grouping-folder-list">
-            {preservedItemsCount > 0 && (
-              <div className={`grouping-folder-drop grouping-folder-drop-preserved ${activeFolderLabel === '__preserved__' ? 'is-active' : ''}`}>
-                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel('__preserved__')}>
-                  <span>{preservedGroupLabel}</span>
-                  <strong>{preservedItemsCount}</strong>
+            {preservedFolderScopes.map((scope) => (
+              <div
+                key={scope.path}
+                className={`grouping-folder-drop grouping-folder-drop-preserved ${activeFolderLabel === scope.activeLabel ? 'is-active' : ''}`}
+              >
+                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel(scope.activeLabel)}>
+                  <span>{scope.label}</span>
+                  <strong>{scope.itemCount}</strong>
                 </button>
+                <p className="grouping-folder-note">{t('grouping.preservedFolderLocked')}</p>
               </div>
-            )}
+            ))}
             {unassignedItemsCount > 0 && (
               <div className={`grouping-folder-drop grouping-folder-drop-unassigned ${activeFolderLabel === '__unassigned__' ? 'is-active' : ''}`}>
                 <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel('__unassigned__')}>
@@ -1322,9 +1397,9 @@ export const GroupingPage = () => {
           onPointerUp={endMarqueeSelection}
           onPointerCancel={endMarqueeSelection}
         >
-          {selectedItems.length > 0 && (
+          {editableSelectedItems.length > 0 && (
             <div className="grouping-selection-bar">
-              <strong>{t('grouping.selected', { count: selectedItems.length })}</strong>
+              <strong>{t('grouping.selected', { count: editableSelectedItems.length })}</strong>
               <select
                 className="grouping-select"
                 value=""
@@ -1357,7 +1432,12 @@ export const GroupingPage = () => {
               <p className="page-section-title">{activeFolderTitle}</p>
               <p className="page-summary-note">{t('grouping.visibleFiles', { count: visibleItems.length })}</p>
             </div>
-            <button className="btn btn-ghost" type="button" onClick={() => setSelectedIds(new Set(visibleItems.map((item) => item.id)))} disabled={isGroupingCompleted}>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => setSelectedIds(new Set(visibleItems.filter((item) => !item.preservedStructure).map((item) => item.id)))}
+              disabled={isGroupingCompleted || visibleItems.every((item) => item.preservedStructure)}
+            >
               {t('grouping.selectVisible')}
             </button>
           </div>
@@ -1379,6 +1459,7 @@ export const GroupingPage = () => {
               )}
               {visibleItems.map((item) => {
                 const isSelected = selectedIds.has(item.id);
+                const canEditItem = canMutateGrouping && !item.preservedStructure;
                 const itemMediaUrl = workspace ? buildGroupingMediaUrl(workspace.sessionId, item.id) : '';
                 const itemPreviewUrl = workspace ? buildGroupingPreviewUrl(workspace.sessionId, item.id) : '';
                 const hasPreviewFailed = failedPreviewIds.has(item.id);
@@ -1387,10 +1468,11 @@ export const GroupingPage = () => {
                   <article
                     key={item.id}
                     data-grouping-item-id={item.id}
-                    className={`grouping-media-card ${isSelected ? 'is-selected' : ''}`}
-                    draggable={canMutateGrouping}
-                    onClick={canMutateGrouping ? (event) => handleItemClick(item, event) : undefined}
-                    onDragStart={canMutateGrouping
+                    data-grouping-item-locked={item.preservedStructure ? 'true' : undefined}
+                    className={`grouping-media-card ${isSelected ? 'is-selected' : ''} ${item.preservedStructure ? 'is-preserved' : ''}`}
+                    draggable={canEditItem}
+                    onClick={canEditItem ? (event) => handleItemClick(item, event) : undefined}
+                    onDragStart={canEditItem
                       ? (event) => {
                           event.dataTransfer.setData('application/json', JSON.stringify(getSelectedDragPayload(item, selectedIds)));
                           event.dataTransfer.effectAllowed = 'move';
@@ -1448,7 +1530,7 @@ export const GroupingPage = () => {
                     void handleMovePreviewItem(event.target.value);
                   }
                 }}
-                disabled={!canMutateGrouping || workspace.folders.length === 0}
+                disabled={!canMutateGrouping || Boolean(previewItem.preservedStructure) || workspace.folders.length === 0}
                 aria-label={t('grouping.movePreview')}
               >
                 <option value="">{t('grouping.movePreview')}</option>
@@ -1458,7 +1540,12 @@ export const GroupingPage = () => {
                   </option>
                 ))}
               </select>
-              <button className="btn btn-danger-secondary" type="button" onClick={() => void handleDeletePreviewItem()} disabled={!canMutateGrouping}>
+              <button
+                className="btn btn-danger-secondary"
+                type="button"
+                onClick={() => void handleDeletePreviewItem()}
+                disabled={!canMutateGrouping || Boolean(previewItem.preservedStructure)}
+              >
                 {t('grouping.delete')}
               </button>
             </div>

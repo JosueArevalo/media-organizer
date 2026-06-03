@@ -417,6 +417,7 @@ export const en = {
   'grouping.keepStructure': 'Keep structure',
   'grouping.reorganizeMode': 'Reorganize',
   'grouping.originalStructure': 'Original structure',
+  'grouping.preservedFolderLocked': 'Locked to keep structure.',
   'grouping.noProposedFolder': 'No proposed folder',
   'grouping.noProposedFolderNote': 'Media not covered by the selected strategy.',
   'grouping.keepOverride': 'Custom',

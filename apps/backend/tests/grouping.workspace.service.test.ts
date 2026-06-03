@@ -473,9 +473,9 @@ test('reorganized child directories override a preserved parent directory', asyn
   assert.ok(fs.existsSync(path.join(outputDir, '2025.01.03 - Event', 'IMG_20250103_121111.jpg')));
 });
 
-test('manual assignments can move media from preserved directories', async () => {
+test('manual assignments cannot move media from preserved directories', async () => {
   const { compressionSessionId, items } = seedCompressionSession(['Album/IMG_20250102_111111.jpg']);
-  const { applyGroupingWorkspace, assignGroupingItems, createGroupingWorkspace, reorganizeGroupingWorkspace } = await import(
+  const { assignGroupingItems, createGroupingWorkspace, getGroupingWorkspace, reorganizeGroupingWorkspace } = await import(
     '../src/pipeline/grouping/groupingWorkspace.service.js'
   );
 
@@ -490,11 +490,69 @@ test('manual assignments can move media from preserved directories', async () =>
   assert.equal(proposed.items[0].preservedStructure, true);
   assert.equal(proposed.items[0].targetGroupLabel, null);
 
-  assignGroupingItems(workspace.sessionId, [items[0].itemId], 'Manual');
-  const result = applyGroupingWorkspace(workspace.sessionId);
+  assert.throws(
+    () => assignGroupingItems(workspace.sessionId, [items[0].itemId], 'Manual'),
+    /Cannot modify media inside a preserved folder/
+  );
 
-  assert.equal(result?.movedItems, 1);
-  assert.ok(fs.existsSync(path.join(outputDir, 'Manual', 'IMG_20250102_111111.jpg')));
+  const afterAttempt = getGroupingWorkspace(workspace.sessionId);
+  assert.equal(afterAttempt?.folders.find((folder) => folder.label === 'Manual'), undefined);
+  assert.equal(afterAttempt?.items[0].targetGroupLabel, null);
+});
+
+test('deleteGroupingItems cannot delete media from preserved directories', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['Album/IMG_20250102_111111.jpg']);
+  const { createGroupingWorkspace, deleteGroupingItems, getGroupingWorkspace, reorganizeGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  reorganizeGroupingWorkspace(workspace.sessionId, {
+    rules: ['date-event-multiple'],
+    preservedDirectories: ['source/Album'],
+    reorganizedDirectories: []
+  });
+
+  assert.throws(
+    () => deleteGroupingItems(workspace.sessionId, [items[0].itemId]),
+    /Cannot modify media inside a preserved folder/
+  );
+
+  const afterAttempt = getGroupingWorkspace(workspace.sessionId);
+  assert.equal(afterAttempt?.items.length, 1);
+  assert.equal(afterAttempt?.items[0].preservedStructure, true);
+});
+
+test('manual edits are allowed for reorganized child directories inside a preserved parent', async () => {
+  const { compressionSessionId, items } = seedCompressionSession([
+    'Album/keep/IMG_20250102_111111.jpg',
+    'Album/reorganize/IMG_20250103_111111.jpg',
+    'Album/reorganize/IMG_20250103_121111.jpg'
+  ]);
+  const { assignGroupingItems, createGroupingWorkspace, deleteGroupingItems, getGroupingWorkspace, reorganizeGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  const proposed = reorganizeGroupingWorkspace(workspace.sessionId, {
+    rules: ['date-event-multiple'],
+    preservedDirectories: ['source/Album'],
+    reorganizedDirectories: ['source/Album/reorganize']
+  });
+  const keptItem = items.find((item) => item.relativePath.includes('/keep/'));
+  const reorganizedItems = items.filter((item) => item.relativePath.includes('/reorganize/'));
+
+  assert.ok(keptItem);
+  assert.equal(proposed.items.find((item) => item.id === keptItem.itemId)?.preservedStructure, true);
+  assert.ok(reorganizedItems.every((item) => proposed.items.find((candidate) => candidate.id === item.itemId)?.preservedStructure === false));
+
+  assignGroupingItems(workspace.sessionId, [reorganizedItems[0].itemId], 'Manual');
+  deleteGroupingItems(workspace.sessionId, [reorganizedItems[1].itemId]);
+
+  const afterEdits = getGroupingWorkspace(workspace.sessionId);
+  assert.equal(afterEdits?.items.find((item) => item.id === reorganizedItems[0].itemId)?.targetGroupLabel, 'Manual');
+  assert.equal(afterEdits?.items.find((item) => item.id === reorganizedItems[1].itemId), undefined);
+  assert.equal(afterEdits?.items.find((item) => item.id === keptItem.itemId)?.preservedStructure, true);
 });
 
 test('folders can be created, renamed, assigned, deleted when empty, and applied with collision-safe moves', async () => {
