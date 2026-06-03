@@ -190,7 +190,23 @@ export const ImportPage = () => {
     }
   };
 
+  const handlePathInputEnter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (!sourcePath || !destinationPath || isValidating || isClearingDestination || event.repeat) {
+      return;
+    }
+
+    void handleContinue();
+  };
+
   const handleSourcePathInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    handlePathInputEnter(event);
+
     if (event.key !== 'Tab' || event.shiftKey) {
       return;
     }
@@ -203,6 +219,10 @@ export const ImportPage = () => {
 
     event.preventDefault();
     destinationPathInput.focus();
+  };
+
+  const handleDestinationPathInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    handlePathInputEnter(event);
   };
 
   const handleBrowseFolder = async (slot: FolderSlot) => {
@@ -266,6 +286,7 @@ export const ImportPage = () => {
           onBrowse={() => handleBrowseFolder('destination')}
           onClear={clearDestinationFolder}
           inputRef={destinationPathInputRef}
+          onPathInputKeyDown={handleDestinationPathInputKeyDown}
         />
       </div>
 
