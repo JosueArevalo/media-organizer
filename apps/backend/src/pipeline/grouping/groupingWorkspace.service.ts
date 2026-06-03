@@ -418,6 +418,36 @@ const listMediaRows = (sessionId: string): MediaRow[] => {
     .all(sessionId) as MediaRow[];
 };
 
+const listMediaRowsByIds = (sessionId: string, itemIds: string[]): MediaRow[] => {
+  if (itemIds.length === 0) {
+    return [];
+  }
+
+  const db = getDb();
+  const placeholders = itemIds.map(() => '?').join(', ');
+  return db
+    .prepare(
+      `
+        SELECT
+          mi.id,
+          mi.source_path,
+          mi.relative_path,
+          mi.media_type,
+          mi.size_bytes,
+          mi.capture_time,
+          decision.target_group_label
+        FROM media_items mi
+        LEFT JOIN item_decisions decision
+          ON decision.session_id = mi.session_id
+          AND decision.item_id = mi.id
+        WHERE mi.session_id = ?
+          AND mi.id IN (${placeholders})
+          AND COALESCE(decision.selected_for_output, 1) = 1
+      `
+    )
+    .all(sessionId, ...itemIds) as MediaRow[];
+};
+
 const listDeletedMediaRows = (sessionId: string): MediaRow[] => {
   const db = getDb();
   return db
@@ -562,6 +592,30 @@ const isRowPreserved = (
   );
 
   return candidates.some((candidatePath) => isCandidatePathPreserved(candidatePath, preservedScopes, reorganizedScopes));
+};
+
+const assertItemsAreNotPreserved = (groupingSessionId: string, sourceSessionId: string, itemIds: string[]) => {
+  const uniqueItemIds = Array.from(new Set(itemIds));
+  if (uniqueItemIds.length === 0) {
+    return;
+  }
+
+  const session = getSessionRow(groupingSessionId);
+  const groupingManifest = getGroupingManifest(groupingSessionId);
+  const preservedDirectories = groupingManifest?.preservedDirectories ?? [];
+
+  if (!session || preservedDirectories.length === 0) {
+    return;
+  }
+
+  const reorganizedDirectories = groupingManifest?.reorganizedDirectories ?? [];
+  const preservedRows = listMediaRowsByIds(sourceSessionId, uniqueItemIds).filter((row) =>
+    isRowPreserved(session.source_dir, row, preservedDirectories, reorganizedDirectories)
+  );
+
+  if (preservedRows.length > 0) {
+    throw new Error('Cannot modify media inside a preserved folder.');
+  }
 };
 
 const clearGeneratedGrouping = (groupingSessionId: string, sourceSessionId: string) => {
@@ -964,6 +1018,7 @@ export const assignGroupingItems = (sessionId: string, itemIds: string[], target
   runMigrations();
   const safeLabel = sanitizeFolderLabel(targetGroupLabel);
   const sourceSessionId = getCompressionSourceSessionId(sessionId) ?? sessionId;
+  assertItemsAreNotPreserved(sessionId, sourceSessionId, itemIds);
   upsertFolder(sessionId, safeLabel, 'manual');
 
   for (const itemId of itemIds) {
@@ -984,6 +1039,7 @@ export const deleteGroupingItems = (sessionId: string, itemIds: string[]) => {
   const timestamp = nowIso();
   const sourceSessionId = getCompressionSourceSessionId(sessionId) ?? sessionId;
   const uniqueItemIds = Array.from(new Set(itemIds));
+  assertItemsAreNotPreserved(sessionId, sourceSessionId, uniqueItemIds);
 
   db.exec('BEGIN TRANSACTION');
 

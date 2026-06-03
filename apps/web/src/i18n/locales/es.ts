@@ -419,6 +419,7 @@ export const es: TranslationDictionary = {
   'grouping.keepStructure': 'Mantener estructura',
   'grouping.reorganizeMode': 'Reorganizar',
   'grouping.originalStructure': 'Estructura original',
+  'grouping.preservedFolderLocked': 'Bloqueada para mantener estructura.',
   'grouping.noProposedFolder': 'Sin carpeta propuesta',
   'grouping.noProposedFolderNote': 'Medios no cubiertos por la estrategia seleccionada.',
   'grouping.keepOverride': 'Personalizado',
