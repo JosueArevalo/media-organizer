@@ -36,9 +36,9 @@ export const exportProviders: ExportProvider[] = [
   {
     id: 'google-photos',
     route: '/export/google-photos',
-    status: 'spike',
+    status: 'available',
     visual: 'photos',
-    targetType: 'google-drive',
+    targetType: 'google-photos',
     titleKey: 'export.provider.googlePhotos.title',
     subtitleKey: 'export.provider.googlePhotos.subtitle'
   },
@@ -47,7 +47,7 @@ export const exportProviders: ExportProvider[] = [
     route: '/export/google-drive',
     status: 'planned',
     visual: 'drive',
-    targetType: 'google-photos',
+    targetType: 'google-drive',
     titleKey: 'export.provider.googleDrive.title',
     subtitleKey: 'export.provider.googleDrive.subtitle'
   }

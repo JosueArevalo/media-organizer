@@ -12,6 +12,9 @@ import type {
   ExportProgressData,
   ExportTarget,
   ExportTargetTestResult,
+  GooglePhotosAlbumProgress,
+  GooglePhotosExportPreview,
+  GooglePhotosTarget,
   NetworkCredentials
 } from './export.types.js';
 import {
@@ -19,6 +22,12 @@ import {
   getNetworkErrorMessage,
   markNetworkDestinationUsed
 } from './networkDestination.service.js';
+import {
+  ensureGooglePhotosItemMetadata,
+  getCachedGooglePhotosAlbumByTitle,
+  listGooglePhotosAppCreatedAlbums
+} from './googlePhotosApi.service.js';
+import { getGooglePhotosAccount } from './googlePhotosAuth.service.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -96,6 +105,28 @@ const toCheckpointRecord = (row: {
 
 const normalizeExistingPath = (value: string) => path.resolve(value);
 
+const supportedGooglePhotosExtensions = new Set([
+  '.3gp',
+  '.3g2',
+  '.avi',
+  '.bmp',
+  '.gif',
+  '.heic',
+  '.heif',
+  '.jpg',
+  '.jpeg',
+  '.m2ts',
+  '.mkv',
+  '.mov',
+  '.mp4',
+  '.mpg',
+  '.mts',
+  '.png',
+  '.tif',
+  '.tiff',
+  '.webp'
+]);
+
 const isPathInside = (parent: string, child: string) => {
   const relative = path.relative(parent, child);
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
@@ -139,13 +170,92 @@ export const collectExportFilePlan = (sourceRoot: string, destinationRoot: strin
   return items;
 };
 
-const assertNetworkFolderRequest = (request: ExportJobRequest) => {
-  if (request.target.type !== 'network-folder') {
-    throw new Error('Only network-folder export is available in this MVP.');
+const assertExistingSourceRoot = (sourceRoot: string) => {
+  if (!fs.existsSync(sourceRoot) || !fs.statSync(sourceRoot).isDirectory()) {
+    throw new Error('Export sourceRoot must be an existing directory.');
+  }
+};
+
+export const getGooglePhotosAlbumTitleForRelativePath = (relativePath: string) => {
+  const segments = relativePath.split(path.sep).filter(Boolean);
+  return segments.length > 1 ? segments[0] : path.basename(path.dirname(relativePath)) || 'Media Organizer';
+};
+
+export const isGooglePhotosSupportedFile = (filePath: string) =>
+  supportedGooglePhotosExtensions.has(path.extname(filePath).toLocaleLowerCase());
+
+export const collectGooglePhotosFilePlan = (sourceRoot: string) => {
+  const resolvedSourceRoot = normalizeExistingPath(sourceRoot);
+  const items: Array<{
+    sourcePath: string;
+    relativePath: string;
+    destinationPath: string;
+    sizeBytes: number;
+    albumTitle: string;
+    supported: boolean;
+  }> = [];
+
+  const walk = (directoryPath: string) => {
+    const entries = fs.readdirSync(directoryPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.name === INTERNAL_DIRECTORY_NAME) {
+        continue;
+      }
+
+      const sourcePath = path.join(directoryPath, entry.name);
+
+      if (entry.isDirectory()) {
+        walk(sourcePath);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const relativePath = path.relative(resolvedSourceRoot, sourcePath);
+      const albumTitle = getGooglePhotosAlbumTitleForRelativePath(relativePath);
+      items.push({
+        sourcePath,
+        relativePath,
+        destinationPath: albumTitle,
+        sizeBytes: fs.statSync(sourcePath).size,
+        albumTitle,
+        supported: isGooglePhotosSupportedFile(sourcePath)
+      });
+    }
+  };
+
+  walk(resolvedSourceRoot);
+  return items;
+};
+
+const collectFilteredGooglePhotosFilePlan = (sourceRoot: string, target: GooglePhotosTarget) => {
+  const plannedItems = collectGooglePhotosFilePlan(sourceRoot);
+  const albumTitles = target.albumTitles?.map((title) => title.trim()).filter(Boolean);
+
+  if (!albumTitles?.length) {
+    return plannedItems;
   }
 
-  if (!fs.existsSync(request.sourceRoot) || !fs.statSync(request.sourceRoot).isDirectory()) {
-    throw new Error('Export sourceRoot must be an existing directory.');
+  const selectedAlbums = new Set(albumTitles);
+  return plannedItems.filter((item) => selectedAlbums.has(item.albumTitle));
+};
+
+const assertExportJobRequest = (request: ExportJobRequest) => {
+  assertExistingSourceRoot(request.sourceRoot);
+
+  if (request.target.type === 'google-photos') {
+    if (!request.target.accountId?.trim()) {
+      throw new Error('Google Photos accountId is required.');
+    }
+
+    if (!getGooglePhotosAccount(request.target.accountId)) {
+      throw new Error('Connect a Google Photos account before creating this export.');
+    }
+
+    return;
   }
 
   const resolvedSource = normalizeExistingPath(request.sourceRoot);
@@ -158,15 +268,19 @@ const assertNetworkFolderRequest = (request: ExportJobRequest) => {
 
 export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot => {
   runMigrations();
-  assertNetworkFolderRequest(request);
+  assertExportJobRequest(request);
 
   const db = getDb();
   const timestamp = nowIso();
   const jobId = randomUUID();
   const targetPath = request.target.type === 'network-folder' ? request.target.destinationPath : null;
   const plannedItems = request.target.type === 'network-folder'
-    ? collectExportFilePlan(request.sourceRoot, request.target.destinationPath)
-    : [];
+    ? collectExportFilePlan(request.sourceRoot, request.target.destinationPath).map((item) => ({
+        ...item,
+        albumTitle: null,
+        supported: true
+      }))
+    : collectFilteredGooglePhotosFilePlan(request.sourceRoot, request.target);
 
   try {
     db.exec('BEGIN TRANSACTION');
@@ -218,8 +332,32 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
       `
     );
 
+    let skippedItems = 0;
+
     for (const item of plannedItems) {
-      insertItem.run(randomUUID(), jobId, item.sourcePath, item.relativePath, item.destinationPath, item.sizeBytes, timestamp);
+      const itemId = randomUUID();
+      insertItem.run(itemId, jobId, item.sourcePath, item.relativePath, item.destinationPath, item.sizeBytes, timestamp);
+
+      if (request.target.type === 'google-photos') {
+        ensureGooglePhotosItemMetadata(itemId, request.target.accountId, item.albumTitle ?? item.destinationPath);
+
+        if (!item.supported) {
+          skippedItems += 1;
+          db.prepare(
+            `
+              UPDATE export_items
+              SET status = 'skipped',
+                  last_error = 'File type is not supported by Google Photos.',
+                  updated_at = ?
+              WHERE id = ?
+            `
+          ).run(timestamp, itemId);
+        }
+      }
+    }
+
+    if (skippedItems > 0) {
+      db.prepare('UPDATE export_jobs SET skipped_items = ? WHERE id = ?').run(skippedItems, jobId);
     }
 
     db.prepare(
@@ -279,6 +417,10 @@ export const getExportProgress = (jobId: string): ExportProgressData | null => {
     return null;
   }
 
+  const albumProgress = snapshot.job.targetType === 'google-photos'
+    ? getGooglePhotosAlbumProgress(jobId)
+    : undefined;
+
   return {
     jobId,
     status: snapshot.job.status,
@@ -287,8 +429,85 @@ export const getExportProgress = (jobId: string): ExportProgressData | null => {
     failed: snapshot.job.failedItems,
     skipped: snapshot.job.skippedItems,
     pending: Math.max(0, snapshot.job.totalItems - snapshot.job.completedItems - snapshot.job.failedItems - snapshot.job.skippedItems),
-    recentItems: snapshot.recentItems
+    recentItems: snapshot.recentItems,
+    albumProgress
   };
+};
+
+const toAlbumProgressStatus = (row: {
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  running: number;
+}): GooglePhotosAlbumProgress['status'] => {
+  if (row.failed > 0) {
+    return 'failed';
+  }
+
+  if (row.running > 0) {
+    return 'running';
+  }
+
+  if (row.skipped === row.total) {
+    return 'skipped';
+  }
+
+  if (row.completed + row.skipped >= row.total) {
+    return 'completed';
+  }
+
+  return 'pending';
+};
+
+const getGooglePhotosAlbumProgress = (jobId: string): GooglePhotosAlbumProgress[] => {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          destination_path AS album_title,
+          COUNT(*) AS total,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+          SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped,
+          SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running
+        FROM export_items
+        WHERE job_id = ?
+        GROUP BY destination_path
+        ORDER BY destination_path ASC
+      `
+    )
+    .all(jobId) as Array<{
+      album_title: string;
+      total: number;
+      completed: number | null;
+      failed: number | null;
+      skipped: number | null;
+      running: number | null;
+    }>;
+
+  return rows.map((row) => {
+    const completed = row.completed ?? 0;
+    const failed = row.failed ?? 0;
+    const skipped = row.skipped ?? 0;
+
+    return {
+      albumTitle: row.album_title,
+      total: row.total,
+      completed,
+      failed,
+      skipped,
+      pending: Math.max(0, row.total - completed - failed - skipped),
+      status: toAlbumProgressStatus({
+        total: row.total,
+        completed,
+        failed,
+        skipped,
+        running: row.running ?? 0
+      })
+    };
+  });
 };
 
 export const updateExportJobStatus = (jobId: string, status: ExportJobRecord['status'], lastError: string | null = null) => {
@@ -307,7 +526,10 @@ export const updateExportJobStatus = (jobId: string, status: ExportJobRecord['st
   return getExportJob(jobId);
 };
 
-export const pauseExportJob = (jobId: string) => updateExportJobStatus(jobId, 'paused');
+export const pauseExportJob = (jobId: string) => {
+  updateExportJobStatus(jobId, 'paused');
+  return refreshExportJobCounters(jobId, 'paused');
+};
 
 export const markExportJobRunning = (jobId: string) => updateExportJobStatus(jobId, 'running');
 
@@ -361,7 +583,7 @@ export const retryFailedExportItems = (jobId: string): ExportJobSnapshot | null 
     `
       UPDATE export_items
       SET status = 'pending', last_error = NULL, updated_at = ?
-      WHERE job_id = ? AND status = 'failed'
+      WHERE job_id = ? AND status IN ('failed', 'running')
     `
   ).run(timestamp, jobId);
 
@@ -376,14 +598,65 @@ export const retryFailedExportItems = (jobId: string): ExportJobSnapshot | null 
   return getExportJob(jobId);
 };
 
+export const retryExportItem = (jobId: string, itemId: string): ExportJobSnapshot | null => {
+  runMigrations();
+  const snapshot = getExportJob(jobId);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const db = getDb();
+  const row = db
+    .prepare('SELECT status FROM export_items WHERE job_id = ? AND id = ?')
+    .get(jobId, itemId) as { status: ExportItemRecord['status'] } | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  if (row.status !== 'failed') {
+    throw new Error('Only failed export items can be retried.');
+  }
+
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE export_items
+      SET status = 'pending',
+          last_error = NULL,
+          updated_at = ?
+      WHERE job_id = ? AND id = ?
+    `
+  ).run(timestamp, jobId, itemId);
+
+  if (snapshot.job.status !== 'running') {
+    db.prepare(
+      `
+        UPDATE export_jobs
+        SET status = 'draft',
+            last_error = NULL,
+            updated_at = ?,
+            last_opened_at = ?
+        WHERE id = ?
+      `
+    ).run(timestamp, timestamp, jobId);
+  }
+
+  return refreshExportJobCounters(jobId, snapshot.job.status === 'running' ? 'running' : 'draft');
+};
+
 export const testExportTarget = async (target: ExportTarget, credentials?: NetworkCredentials): Promise<ExportTargetTestResult> => {
   if (target.type === 'google-photos') {
+    const account = target.accountId ? getGooglePhotosAccount(target.accountId) : null;
+
     return {
-      ok: false,
+      ok: Boolean(account),
       targetType: target.type,
-      message: 'Google Photos is prepared as a spike only and is not enabled in the MVP UI.',
-      details: null,
-      requiresAuthentication: false
+      message: account ? 'Google Photos account is connected.' : 'Connect a Google Photos account before exporting.',
+      details: account?.email ?? null,
+      requiresAuthentication: !account
     };
   }
 
@@ -426,6 +699,66 @@ export const testExportTarget = async (target: ExportTarget, credentials?: Netwo
   }
 };
 
+export const previewGooglePhotosExport = async (
+  accountId: string,
+  sourceRoot: string
+): Promise<GooglePhotosExportPreview> => {
+  runMigrations();
+  assertExistingSourceRoot(sourceRoot);
+
+  const account = getGooglePhotosAccount(accountId);
+
+  if (!account) {
+    throw new Error('Connect a Google Photos account before previewing this export.');
+  }
+
+  await listGooglePhotosAppCreatedAlbums(accountId);
+  const plannedItems = collectGooglePhotosFilePlan(sourceRoot);
+  const supportedItems = plannedItems.filter((item) => item.supported);
+  const albumMap = new Map<string, {
+    folderName: string;
+    albumTitle: string;
+    itemCount: number;
+    items: Array<{ relativePath: string; sizeBytes: number; supported: boolean }>;
+  }>();
+
+  for (const item of supportedItems) {
+    const existing = albumMap.get(item.albumTitle) ?? {
+      folderName: item.albumTitle,
+      albumTitle: item.albumTitle,
+      itemCount: 0,
+      items: []
+    };
+    existing.itemCount += 1;
+    existing.items.push({
+      relativePath: item.relativePath,
+      sizeBytes: item.sizeBytes,
+      supported: item.supported
+    });
+    albumMap.set(item.albumTitle, existing);
+  }
+
+  return {
+    account: {
+      id: account.id,
+      email: account.email,
+      displayName: account.displayName,
+      expiresAt: account.expiresAt,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+      lastConnectedAt: account.lastConnectedAt
+    },
+    albums: [...albumMap.values()]
+      .sort((left, right) => left.albumTitle.localeCompare(right.albumTitle))
+      .map((album) => ({
+        ...album,
+        status: getCachedGooglePhotosAlbumByTitle(accountId, album.albumTitle) ? 'existing' : 'new'
+      })),
+    supportedItems: supportedItems.length,
+    unsupportedItems: plannedItems.length - supportedItems.length
+  };
+};
+
 export const listRunnableExportItems = (jobId: string) => {
   runMigrations();
   const db = getDb();
@@ -436,11 +769,27 @@ export const listRunnableExportItems = (jobId: string) => {
         SELECT *
         FROM export_items
         WHERE job_id = ?
-          AND status IN ('pending', 'failed', 'running')
+          AND status IN ('pending', 'running')
         ORDER BY relative_path ASC
       `
     )
     .all(jobId) as Array<Parameters<typeof toItemRecord>[0]>;
+};
+
+export const resetRunningExportItems = (jobId: string) => {
+  runMigrations();
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE export_items
+      SET status = 'pending',
+          last_error = NULL,
+          updated_at = ?
+      WHERE job_id = ? AND status = 'running'
+    `
+  ).run(timestamp, jobId);
 };
 
 export const resetInvalidCompletedExportItems = (jobId: string, isCompletedOutputValid: (item: ExportItemRecord) => boolean) => {
@@ -553,17 +902,29 @@ export const refreshExportJobCounters = (jobId: string, statusOverride?: ExportJ
           COUNT(*) AS total,
           SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
           SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
-          SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped
+          SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped,
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+          SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running
         FROM export_items
         WHERE job_id = ?
       `
     )
-    .get(jobId) as { total: number; completed: number | null; failed: number | null; skipped: number | null };
+    .get(jobId) as {
+      total: number;
+      completed: number | null;
+      failed: number | null;
+      skipped: number | null;
+      pending: number | null;
+      running: number | null;
+    };
 
   const completed = counts.completed ?? 0;
   const failed = counts.failed ?? 0;
   const skipped = counts.skipped ?? 0;
-  const nextStatus = statusOverride ?? (failed > 0 ? 'failed' : completed + skipped >= counts.total ? 'completed' : 'running');
+  const pending = counts.pending ?? 0;
+  const running = counts.running ?? 0;
+  const hasWorkLeft = pending + running > 0;
+  const nextStatus = statusOverride ?? (hasWorkLeft ? 'running' : failed > 0 ? 'failed' : completed + skipped >= counts.total ? 'completed' : 'running');
 
   db.prepare(
     `

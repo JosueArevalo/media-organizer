@@ -17,6 +17,8 @@ export type NetworkCredentials = {
 
 export type GooglePhotosTarget = {
   type: 'google-photos';
+  accountId: string;
+  albumTitles?: string[];
 };
 
 export type ExportTarget = NetworkFolderTarget | GooglePhotosTarget;
@@ -80,6 +82,7 @@ export type ExportProgressData = {
   skipped: number;
   pending: number;
   recentItems: ExportItemRecord[];
+  albumProgress?: GooglePhotosAlbumProgress[];
 };
 
 export type ExportTargetTestRequest = {
@@ -93,6 +96,67 @@ export type ExportTargetTestResult = {
   targetType: ExportTargetType;
   details?: string | null;
   requiresAuthentication?: boolean;
+};
+
+export type GooglePhotosAccountRecord = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  lastConnectedAt: string;
+};
+
+export type GooglePhotosAuthStartResult = {
+  authUrl: string;
+  state: string;
+};
+
+export type GooglePhotosOAuthConfigSource = 'local-db' | 'env' | 'none';
+
+export type GooglePhotosOAuthConfigStatus = {
+  configured: boolean;
+  source: GooglePhotosOAuthConfigSource;
+  redirectUri: string;
+  requiredScopes: string[];
+  hasClientSecret: boolean;
+};
+
+export type GooglePhotosOAuthConfigRequest = {
+  clientId: string;
+  clientSecret?: string;
+};
+
+export type GooglePhotosAlbumPreview = {
+  folderName: string;
+  albumTitle: string;
+  status: 'existing' | 'new';
+  itemCount: number;
+  items: GooglePhotosAlbumPreviewItem[];
+};
+
+export type GooglePhotosAlbumPreviewItem = {
+  relativePath: string;
+  sizeBytes: number;
+  supported: boolean;
+};
+
+export type GooglePhotosAlbumProgress = {
+  albumTitle: string;
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  pending: number;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+};
+
+export type GooglePhotosExportPreview = {
+  account: GooglePhotosAccountRecord;
+  albums: GooglePhotosAlbumPreview[];
+  supportedItems: number;
+  unsupportedItems: number;
 };
 
 export type NetworkDestinationRecord = {
