@@ -73,10 +73,11 @@ export const GooglePhotosExportPage = () => {
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [isLoadingOAuthConfig, setIsLoadingOAuthConfig] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isClearingConfig, setIsClearingConfig] = useState(false);
-  const [isLoadingAccounts, setIsLoadingAccounts] = useState(false);
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
@@ -129,11 +130,12 @@ export const GooglePhotosExportPage = () => {
   );
   const recommendedOpenSection = useMemo<GooglePhotosAccordionSection>(() => {
     if (shouldFocusProgress) return 'albums';
+    if (isLoadingOAuthConfig) return 'config';
     if (!oauthConfig?.configured) return 'config';
     if (accounts.length === 0) return 'account';
     if (!preview) return 'albums';
     return 'albums';
-  }, [accounts.length, oauthConfig?.configured, preview, shouldFocusProgress]);
+  }, [accounts.length, isLoadingOAuthConfig, oauthConfig?.configured, preview, shouldFocusProgress]);
   const setupSteps = useMemo(
     () => [
       {
@@ -299,12 +301,16 @@ export const GooglePhotosExportPage = () => {
   }, [openSectionsManually, t]);
 
   const loadOAuthConfig = useCallback(async () => {
+    setIsLoadingOAuthConfig(true);
+
     try {
       const result = await getGooglePhotosOAuthConfigRequest();
       setOauthConfig(result);
       setBackendError(null);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.googlePhotos.configLoadError'));
+    } finally {
+      setIsLoadingOAuthConfig(false);
     }
   }, [t]);
 
@@ -670,10 +676,14 @@ export const GooglePhotosExportPage = () => {
     );
   };
 
-  const configStatus = oauthConfig?.configured
+  const configStatus = isLoadingOAuthConfig
+    ? t('export.googlePhotos.loadingConfig')
+    : oauthConfig?.configured
     ? t(oauthConfig.source === 'env' ? 'export.googlePhotos.configuredFromEnv' : 'export.googlePhotos.configured')
     : t('export.googlePhotos.notConfigured');
-  const accountStatus = accounts.length > 0
+  const accountStatus = isLoadingAccounts && accounts.length === 0
+    ? t('export.googlePhotos.loadingAccounts')
+    : accounts.length > 0
     ? t('export.googlePhotos.accountsConnected', { count: accounts.length })
     : t('export.googlePhotos.noAccountConnected');
   const albumStatus = selectedAccount ? t('export.googlePhotos.ready') : t('export.googlePhotos.waitingForAccount');
@@ -786,14 +796,18 @@ export const GooglePhotosExportPage = () => {
           {renderAccordionHeader('config', t('export.googlePhotos.configStep'), t('export.googlePhotos.configNote'), configStatus, oauthConfig?.configured ? 'completed' : 'pending')}
           {isSectionOpen('config') && (
             <form className="export-accordion-body" onSubmit={handleSaveConfig}>
-              {oauthConfig?.configured && (
+              {isLoadingOAuthConfig && (
+                <p className="network-empty-note">{t('export.googlePhotos.loadingConfig')}</p>
+              )}
+
+              {!isLoadingOAuthConfig && oauthConfig?.configured && (
                 <div className="google-photos-setup-summary">
                   <strong>{t('export.googlePhotos.setupConfiguredSummary')}</strong>
                   <span>{configStatus}</span>
                 </div>
               )}
 
-              {!oauthConfig?.configured && (
+              {!isLoadingOAuthConfig && !oauthConfig?.configured && (
                 <>
                   <div className="network-auth-grid">
                     <label className="folder-path-control">
@@ -828,7 +842,7 @@ export const GooglePhotosExportPage = () => {
               )}
 
               <div className="network-export-tools">
-                {!oauthConfig?.configured && (
+                {!isLoadingOAuthConfig && !oauthConfig?.configured && (
                   <button className="btn btn-primary" type="submit" disabled={isSavingConfig}>
                     {isSavingConfig ? t('export.googlePhotos.savingConfig') : t('export.googlePhotos.saveConfig')}
                   </button>
@@ -837,13 +851,13 @@ export const GooglePhotosExportPage = () => {
                   className="btn btn-secondary"
                   type="button"
                   onClick={() => void handleClearConfig()}
-                  disabled={isClearingConfig || isRunning || oauthConfig?.source !== 'local-db'}
+                  disabled={isLoadingOAuthConfig || isClearingConfig || isRunning || oauthConfig?.source !== 'local-db'}
                 >
                   {isClearingConfig ? t('export.googlePhotos.clearingConfig') : t('export.googlePhotos.clearConfig')}
                 </button>
               </div>
 
-              <details className="google-photos-guide" open={isSetupGuideExpanded} onToggle={(event) => setIsSetupGuideExpanded(event.currentTarget.open)}>
+              {!isLoadingOAuthConfig && <details className="google-photos-guide" open={isSetupGuideExpanded} onToggle={(event) => setIsSetupGuideExpanded(event.currentTarget.open)}>
                 <summary>{t('export.googlePhotos.setupGuideTitle')}</summary>
                 <div className="google-photos-step-list">
                   {setupSteps.map((step, index) => (
@@ -879,7 +893,7 @@ export const GooglePhotosExportPage = () => {
                     </article>
                   ))}
                 </div>
-              </details>
+              </details>}
             </form>
           )}
         </article>
@@ -901,7 +915,9 @@ export const GooglePhotosExportPage = () => {
                 )}
               </div>
 
-              {accounts.length === 0 ? (
+              {isLoadingAccounts && accounts.length === 0 ? (
+                <p className="network-empty-note">{t('export.googlePhotos.loadingAccounts')}</p>
+              ) : accounts.length === 0 ? (
                 <p className="network-empty-note">{t('export.googlePhotos.noAccounts')}</p>
               ) : (
                 <div className="network-location-list" aria-label={t('export.googlePhotos.accountsAria')}>

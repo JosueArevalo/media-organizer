@@ -26,6 +26,9 @@ test('Google Photos setup keeps the simplified OAuth flow', () => {
   assert.match(pageSource, /saveConfig/);
   assert.match(pageSource, /clientSecretRequired/);
   assert.match(pageSource, /connectAnotherAccount/);
+  assert.match(pageSource, /isLoadingOAuthConfig/);
+  assert.match(pageSource, /loadingConfig/);
+  assert.match(pageSource, /loadingAccounts/);
   assert.doesNotMatch(pageSource, /saveAndConnect/);
   assert.doesNotMatch(pageSource, /permissionsTitle|troubleshootingTitle|google-photos-advanced|google-photos-troubleshooting/);
 });
