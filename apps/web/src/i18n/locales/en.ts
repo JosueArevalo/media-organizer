@@ -549,6 +549,7 @@ export const en = {
   'export.failed': 'Failed',
   'export.itemStatus.pending': 'Pending',
   'export.itemStatus.running': 'Running',
+  'export.itemStatus.paused': 'Paused',
   'export.itemStatus.completed': 'Copied',
   'export.itemStatus.failed': 'Failed',
   'export.itemStatus.skipped': 'Skipped',

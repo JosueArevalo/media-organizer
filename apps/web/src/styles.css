@@ -3217,6 +3217,11 @@ body {
   justify-content: flex-end;
 }
 
+.google-photos-upload-action.btn-compact {
+  min-height: 32px;
+  padding: 6px 12px;
+}
+
 .google-photos-album-body {
   border-top: 1px solid var(--line);
   display: grid;
@@ -3686,8 +3691,13 @@ body {
 }
 
 .status-running {
-  background: var(--accent-light);
-  color: var(--accent-deep);
+  background: rgba(59, 130, 246, 0.16);
+  color: #2563eb;
+}
+
+.status-paused {
+  background: rgba(99, 102, 241, 0.14);
+  color: #4f46e5;
 }
 
 .export-spike-panel {

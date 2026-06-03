@@ -187,7 +187,7 @@ test('retryFailedExportItems resets failed and stale running items', async () =>
 });
 
 test('pauseExportJob and start/resume APIs keep resumable job state', async () => {
-  const { createExportJob, pauseExportJob, getExportJob } = await import('../src/pipeline/export/exportJob.service.js');
+  const { createExportJob, pauseExportJob, getExportJob, markExportItemRunning } = await import('../src/pipeline/export/exportJob.service.js');
   const { executeExportJob } = await import('../src/pipeline/export/exportJob.runner.js');
 
   const job = createExportJob({
@@ -198,8 +198,13 @@ test('pauseExportJob and start/resume APIs keep resumable job state', async () =
   assert.equal(job.job.status, 'draft');
   assert.equal(job.job.totalItems, 2);
 
+  const firstItem = getExportJob(job.job.id)?.recentItems[0];
+  assert.ok(firstItem);
+  markExportItemRunning(firstItem.id, firstItem.relativePath);
+
   const paused = pauseExportJob(job.job.id);
   assert.equal(paused?.job.status, 'paused');
+  assert.equal(paused?.job.totalItems, 2);
 
   await executeExportJob(job.job.id);
 

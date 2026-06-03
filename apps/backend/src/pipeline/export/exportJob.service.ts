@@ -526,7 +526,10 @@ export const updateExportJobStatus = (jobId: string, status: ExportJobRecord['st
   return getExportJob(jobId);
 };
 
-export const pauseExportJob = (jobId: string) => updateExportJobStatus(jobId, 'paused');
+export const pauseExportJob = (jobId: string) => {
+  updateExportJobStatus(jobId, 'paused');
+  return refreshExportJobCounters(jobId, 'paused');
+};
 
 export const markExportJobRunning = (jobId: string) => updateExportJobStatus(jobId, 'running');
 

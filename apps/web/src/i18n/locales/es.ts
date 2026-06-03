@@ -551,6 +551,7 @@ export const es: TranslationDictionary = {
   'export.failed': 'Fallidos',
   'export.itemStatus.pending': 'Pendiente',
   'export.itemStatus.running': 'En marcha',
+  'export.itemStatus.paused': 'Pausado',
   'export.itemStatus.completed': 'Copiado',
   'export.itemStatus.failed': 'Fallido',
   'export.itemStatus.skipped': 'Omitido',
