@@ -53,6 +53,8 @@ type MediaStats = {
   copyOnlyImageCount: number;
   videoCount: number;
   videoBytes: number;
+  copyImageCount: number;
+  copyVideoCount: number;
 };
 
 type ScopeSets = {
@@ -178,7 +180,9 @@ const createEmptyMediaStats = (): MediaStats => ({
   heicImageCount: 0,
   copyOnlyImageCount: 0,
   videoCount: 0,
-  videoBytes: 0
+  videoBytes: 0,
+  copyImageCount: 0,
+  copyVideoCount: 0
 });
 
 const getFileExtension = (fileName: string) => fileName.split('.').pop()?.toLowerCase() ?? '';
@@ -193,7 +197,9 @@ const createImageStats = (fileName: string, sizeBytes: number): MediaStats => {
     heicImageCount: ['heic', 'heif'].includes(extension) ? 1 : 0,
     copyOnlyImageCount: ['png', 'gif', 'webp'].includes(extension) ? 1 : 0,
     videoCount: 0,
-    videoBytes: 0
+    videoBytes: 0,
+    copyImageCount: 0,
+    copyVideoCount: 0
   };
 };
 
@@ -204,7 +210,21 @@ const createVideoStats = (sizeBytes: number): MediaStats => ({
   heicImageCount: 0,
   copyOnlyImageCount: 0,
   videoCount: 1,
-  videoBytes: sizeBytes
+  videoBytes: sizeBytes,
+  copyImageCount: 0,
+  copyVideoCount: 0
+});
+
+const createCopyStats = (kind: 'image' | 'video', sizeBytes: number): MediaStats => ({
+  imageCount: 0,
+  imageBytes: 0,
+  jpegImageCount: 0,
+  heicImageCount: 0,
+  copyOnlyImageCount: 0,
+  videoCount: 0,
+  videoBytes: 0,
+  copyImageCount: kind === 'image' ? 1 : 0,
+  copyVideoCount: kind === 'video' ? 1 : 0
 });
 
 const createDefaultScopeSets = (): ScopeSets => ({
@@ -325,16 +345,18 @@ const mergeMediaStats = (base: MediaStats, extra: MediaStats): MediaStats => ({
   heicImageCount: base.heicImageCount + extra.heicImageCount,
   copyOnlyImageCount: base.copyOnlyImageCount + extra.copyOnlyImageCount,
   videoCount: base.videoCount + extra.videoCount,
-  videoBytes: base.videoBytes + extra.videoBytes
+  videoBytes: base.videoBytes + extra.videoBytes,
+  copyImageCount: base.copyImageCount + extra.copyImageCount,
+  copyVideoCount: base.copyVideoCount + extra.copyVideoCount
 });
 
 const summarizeSnapshotNode = (node: SourceTreeNode, scope: ScopeSets): MediaStats => {
   if (node.kind === 'file') {
-    if (!isFileIncludedByScope(node.path, scope)) {
-      return createEmptyMediaStats();
-    }
-
     const kind = getMediaKind(node.name, '', node.fileType);
+
+    if (!isFileIncludedByScope(node.path, scope)) {
+      return kind === 'other' ? createEmptyMediaStats() : createCopyStats(kind, node.sizeBytes);
+    }
 
     if (kind === 'image') {
       return createImageStats(node.name, node.sizeBytes);
@@ -371,13 +393,17 @@ const summarizeNativeDirectory = async (
       continue;
     }
 
-    if (!isFileIncludedByScope(entryPath, scope)) {
-      continue;
-    }
-
     const fileHandle = entry as FileSystemFileHandle;
     const file = await fileHandle.getFile();
     const kind = getMediaKind(file.name, file.type);
+
+    if (!isFileIncludedByScope(entryPath, scope)) {
+      if (kind !== 'other') {
+        stats = mergeMediaStats(stats, createCopyStats(kind, file.size));
+      }
+
+      continue;
+    }
 
     if (kind === 'image') {
       stats = mergeMediaStats(stats, createImageStats(file.name, file.size));
@@ -813,6 +839,9 @@ export const CompressionPage = () => {
   const destinationPath = destinationSelection?.path ?? '';
   const selectedStats = mediaStatsState.status === 'ready' ? mediaStatsState.data : createEmptyMediaStats();
   const estimatedTotalMediaCount = selectedStats.imageCount + selectedStats.videoCount;
+  const estimatedCopyMediaCount = selectedStats.copyImageCount + selectedStats.copyVideoCount;
+  const estimatedProcessableMediaCount = estimatedTotalMediaCount + estimatedCopyMediaCount;
+  const isCopyOnlySession = estimatedProcessableMediaCount > 0 && estimatedTotalMediaCount === 0;
   const hasSelectedJpegImages = selectedStats.jpegImageCount > 0;
   const hasSelectedHeicImages = selectedStats.heicImageCount > 0;
   const hasCopyOnlyImages = selectedStats.copyOnlyImageCount > 0;
@@ -840,7 +869,7 @@ export const CompressionPage = () => {
     hasSelectedFolders &&
     hasAbsolutePaths &&
     mediaStatsState.status === 'ready' &&
-    estimatedTotalMediaCount > 0 &&
+    estimatedProcessableMediaCount > 0 &&
     hasRequiredTools &&
     hasAvailableVideoPresets;
   const toolWarnings = [
@@ -864,8 +893,12 @@ export const CompressionPage = () => {
       return t('compression.readingStats');
     }
 
-    if (estimatedTotalMediaCount === 0) {
+    if (estimatedProcessableMediaCount === 0) {
       return t('compression.noFiles');
+    }
+
+    if (isCopyOnlySession) {
+      return t('compression.copyOnlyReady');
     }
 
     if (needsMozJpeg && !hasConfiguredMozJpeg) {
@@ -1148,6 +1181,7 @@ export const CompressionPage = () => {
   const isCompressionPaused = compressionSessionState.status === 'paused';
   const isCompressionRunning = compressionSessionState.status === 'running' || isStartingCompression;
   const isCompressionComplete = compressionSessionState.status === 'completed';
+  const estimatedProgressMediaCount = estimatedProcessableMediaCount;
 
   return (
     <div className="page-stack">
@@ -1208,20 +1242,20 @@ export const CompressionPage = () => {
       {(isCompressionRunning || isCompressionPaused || progressData) && progressData && (
         <div className="page-card compression-progress-card">
           <p className="page-section-title">{t('compression.progressTitle')}</p>
-          {progressData.total === 0 && estimatedTotalMediaCount > 0 && (
+          {progressData.total === 0 && estimatedProgressMediaCount > 0 && (
             <p className="page-summary-note">
-              {t('compression.preparingFiles', { count: estimatedTotalMediaCount })}
+              {t('compression.preparingFiles', { count: estimatedProgressMediaCount })}
             </p>
           )}
           
           <div className="compression-progress-stats">
             <div className="progress-stat">
               <span className="progress-label">{t('compression.total')}</span>
-              <span className="progress-value">{progressData.total > 0 ? progressData.total : estimatedTotalMediaCount} {t('compression.files')}</span>
+              <span className="progress-value">{progressData.total > 0 ? progressData.total : estimatedProgressMediaCount} {t('compression.files')}</span>
             </div>
             <div className="progress-stat">
               <span className="progress-label">{t('compression.completed')}</span>
-              <span className="progress-value" style={{ color: '#10b981' }}>{progressData.completed} / {progressData.total > 0 ? progressData.total : estimatedTotalMediaCount}</span>
+              <span className="progress-value" style={{ color: '#10b981' }}>{progressData.completed} / {progressData.total > 0 ? progressData.total : estimatedProgressMediaCount}</span>
             </div>
             <div className="progress-stat">
               <span className="progress-label">{t('compression.failedLabel')}</span>
@@ -1241,7 +1275,7 @@ export const CompressionPage = () => {
           <div className="compression-progress-bar">
             <div 
               className="compression-progress-fill"
-              style={{ width: (progressData.total > 0 ? progressData.total : estimatedTotalMediaCount) > 0 ? `${(progressData.completed / (progressData.total > 0 ? progressData.total : estimatedTotalMediaCount)) * 100}%` : '0%' }}
+              style={{ width: (progressData.total > 0 ? progressData.total : estimatedProgressMediaCount) > 0 ? `${(progressData.completed / (progressData.total > 0 ? progressData.total : estimatedProgressMediaCount)) * 100}%` : '0%' }}
             />
           </div>
           
@@ -1253,7 +1287,7 @@ export const CompressionPage = () => {
             ) : (
               <p className="page-summary-note">
                 {t('compression.gatheringFiles', {
-                  detected: estimatedTotalMediaCount > 0 ? t('compression.detected', { count: estimatedTotalMediaCount }) : ''
+                  detected: estimatedProgressMediaCount > 0 ? t('compression.detected', { count: estimatedProgressMediaCount }) : ''
                 })}
               </p>
             )
@@ -1485,6 +1519,11 @@ export const CompressionPage = () => {
                   {t('compression.copyOnlyImagesSummary', { count: selectedStats.copyOnlyImageCount })}
                 </p>
               )}
+              {isCopyOnlySession && (
+                <p className="page-summary-note">
+                  {t('compression.copyOnlySessionSummary', { count: estimatedCopyMediaCount })}
+                </p>
+              )}
               {hasSelectedHeicImages && (
                 <p className="page-summary-note">
                   {t('compression.heicSummary', { count: selectedStats.heicImageCount })}
@@ -1513,6 +1552,8 @@ export const CompressionPage = () => {
               ? t('compression.completedButton')
               : isCompressionSetupLoading
                 ? t('compression.loadingSetupButton')
+                : isCopyOnlySession
+                  ? t('compression.startCopyButton')
                 : t('compression.startButton')}
         </button>
         <button className="btn btn-ghost" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })} disabled={!isCompressionComplete}>
