@@ -41,6 +41,7 @@ export type GooglePhotosBatchCreateResult = {
   status?: {
     code?: number;
     message?: string;
+    details?: unknown;
   };
   mediaItem?: {
     id: string;

@@ -214,12 +214,98 @@ test('Google Photos export creates one album per folder and batches media item c
   assert.deepEqual(batchSizes, [50, 1]);
 });
 
+test('Google Photos export job can be filtered to one album', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+  fs.mkdirSync(path.join(sourceRoot, 'Family Photos'), { recursive: true });
+  fs.writeFileSync(path.join(sourceRoot, 'Family Photos', 'photo-b.jpg'), 'image-b');
+
+  const { createExportJob, getExportProgress } = await import('../src/pipeline/export/exportJob.service.js?google-album-filter=1');
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1', albumTitles: ['Family Photos'] }
+  });
+
+  const progress = getExportProgress(job.job.id);
+  assert.equal(progress?.total, 1);
+  assert.equal(progress?.albumProgress?.length, 1);
+  assert.equal(progress?.albumProgress?.[0]?.albumTitle, 'Family Photos');
+});
+
+test('Google Photos preview returns supported items per album', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'notes.txt'), 'not-media');
+
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+
+    if (url.includes('/albums') && init?.method !== 'POST') {
+      return new Response(JSON.stringify({ albums: [] }), { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  const { previewGooglePhotosExport } = await import('../src/pipeline/export/exportJob.service.js?google-preview-items=1');
+  const preview = await previewGooglePhotosExport('account-1', sourceRoot);
+
+  assert.equal(preview.supportedItems, 1);
+  assert.equal(preview.unsupportedItems, 1);
+  assert.deepEqual(preview.albums[0]?.items, [
+    {
+      relativePath: path.join('2026.04 - Trip', 'photo-a.jpg'),
+      sizeBytes: 7,
+      supported: true
+    }
+  ]);
+});
+
+test('Google Photos export progress groups items by album', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+  fs.mkdirSync(path.join(sourceRoot, 'Family Photos'), { recursive: true });
+  fs.writeFileSync(path.join(sourceRoot, 'Family Photos', 'photo-b.jpg'), 'image-b');
+
+  const { createExportJob, getExportProgress } = await import('../src/pipeline/export/exportJob.service.js?google-album-progress=1');
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1' }
+  });
+
+  const progress = getExportProgress(job.job.id);
+  assert.equal(progress?.total, 2);
+  assert.deepEqual(
+    progress?.albumProgress?.map((album) => ({
+      albumTitle: album.albumTitle,
+      total: album.total,
+      pending: album.pending,
+      status: album.status
+    })),
+    [
+      { albumTitle: '2026.04 - Trip', total: 1, pending: 1, status: 'pending' },
+      { albumTitle: 'Family Photos', total: 1, pending: 1, status: 'pending' }
+    ]
+  );
+});
+
 test('Google Photos export persists partial failures and does not retry completed media items', async () => {
   await insertGooglePhotosAccount();
   fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
   fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-b.jpg'), 'image-b');
 
   let batchAttempt = 0;
+  let uploadCount = 0;
+  const logs: string[] = [];
+  const originalInfo = console.info;
+  const originalWarn = console.warn;
+
+  console.info = (...values: unknown[]) => {
+    logs.push(values.join(' '));
+  };
+  console.warn = (...values: unknown[]) => {
+    logs.push(values.join(' '));
+  };
 
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
@@ -233,7 +319,8 @@ test('Google Photos export persists partial failures and does not retry complete
     }
 
     if (url.endsWith('/uploads')) {
-      return new Response(`upload-token-${Math.random()}`, { status: 200 });
+      uploadCount += 1;
+      return new Response(`upload-token-sensitive-${uploadCount}`, { status: 200 });
     }
 
     if (url.endsWith('/mediaItems:batchCreate')) {
@@ -243,7 +330,11 @@ test('Google Photos export persists partial failures and does not retry complete
         if (batchAttempt === 1 && index === 1) {
           return {
             uploadToken: item.simpleMediaItem.uploadToken,
-            status: { message: 'Rejected by Google Photos' }
+            status: {
+              code: 3,
+              message: 'NOT_IMAGE: There was an error while trying to create this media item.',
+              details: [{ reason: 'IMAGE_PROCESSING_FAILED' }]
+            }
           };
         }
 
@@ -268,23 +359,40 @@ test('Google Photos export persists partial failures and does not retry complete
     target: { type: 'google-photos', accountId: 'account-1' }
   });
 
-  await executeExportJob(job.job.id);
-  const failedProgress = getExportProgress(job.job.id);
-  assert.equal(failedProgress?.status, 'failed');
-  assert.equal(failedProgress?.completed, 1);
-  assert.equal(failedProgress?.failed, 1);
+  try {
+    await executeExportJob(job.job.id);
+    const failedProgress = getExportProgress(job.job.id);
+    assert.equal(failedProgress?.status, 'failed');
+    assert.equal(failedProgress?.completed, 1);
+    assert.equal(failedProgress?.failed, 1);
 
-  retryFailedExportItems(job.job.id);
-  await executeExportJob(job.job.id);
-  const finalProgress = getExportProgress(job.job.id);
-  assert.equal(finalProgress?.status, 'completed');
-  assert.equal(finalProgress?.completed, 2);
-  assert.equal(finalProgress?.failed, 0);
+    const failedItem = failedProgress?.recentItems.find((item) => item.status === 'failed');
+    assert.match(failedItem?.lastError ?? '', /Google Photos rejected media item/);
+    assert.match(failedItem?.lastError ?? '', /Code: 3/);
+    assert.match(failedItem?.lastError ?? '', /NOT_IMAGE/);
+    assert.match(failedItem?.lastError ?? '', /IMAGE_PROCESSING_FAILED/);
+    assert.match(failedItem?.lastError ?? '', /Upload token: upload\.\.\.tive-2/);
+    assert.doesNotMatch(failedItem?.lastError ?? '', /upload-token-sensitive-2/);
 
-  const createdRows = getDb()
-    .prepare("SELECT media_item_id FROM export_google_photos_items WHERE phase = 'created'")
-    .all() as Array<{ media_item_id: string | null }>;
-  assert.equal(createdRows.length, 2);
+    assert.ok(logs.some((entry) => entry.includes('[google-photos]')));
+    assert.ok(logs.some((entry) => entry.includes('Google Photos rejected media item')));
+    assert.equal(logs.some((entry) => entry.includes('upload-token-sensitive-2')), false);
+
+    retryFailedExportItems(job.job.id);
+    await executeExportJob(job.job.id);
+    const finalProgress = getExportProgress(job.job.id);
+    assert.equal(finalProgress?.status, 'completed');
+    assert.equal(finalProgress?.completed, 2);
+    assert.equal(finalProgress?.failed, 0);
+
+    const createdRows = getDb()
+      .prepare("SELECT media_item_id FROM export_google_photos_items WHERE phase = 'created'")
+      .all() as Array<{ media_item_id: string | null }>;
+    assert.equal(createdRows.length, 2);
+  } finally {
+    console.info = originalInfo;
+    console.warn = originalWarn;
+  }
 });
 
 test('Google Photos planning skips unsupported file types before upload', async () => {

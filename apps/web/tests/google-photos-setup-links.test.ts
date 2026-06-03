@@ -59,3 +59,18 @@ test('Google Photos setup guide stays collapsed after reset', () => {
   assert.match(pageSource, /setIsSetupGuideExpanded\(false\);[\s\S]*resetGooglePhotosExportState\(t\('export\.googlePhotos\.configCleared'\)\)/);
   assert.doesNotMatch(pageSource, /setIsSetupGuideExpanded\(true\)/);
 });
+
+test('Google Photos albums section owns upload progress', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(pageSource, /uploadAllAlbums/);
+  assert.match(pageSource, /uploadAlbum/);
+  assert.match(pageSource, /albumTitles: \[albumTitle\]/);
+  assert.match(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items\)/);
+  assert.match(pageSource, /getAlbumFailureSummary/);
+  assert.match(pageSource, /item\.lastError/);
+  assert.match(pageSource, /progressByAlbum/);
+  assert.doesNotMatch(pageSource, /google-photos-progress-panel/);
+  assert.doesNotMatch(pageSource, /albumNoProgress/);
+  assert.doesNotMatch(pageSource, /renderAccordionHeader\('progress'/);
+});

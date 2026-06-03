@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ExportProviderIcon } from '../components/ExportProviderIcon';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation } from '../i18n';
@@ -19,7 +18,9 @@ import {
   startExportJobRequest,
   startGooglePhotosOAuthRequest,
   testExportTargetRequest,
+  type ExportItemStatus,
   type ExportProgress,
+  type GooglePhotosAlbumProgress,
   type GooglePhotosAccount,
   type GooglePhotosExportPreview,
   type GooglePhotosOAuthConfigStatus
@@ -52,7 +53,8 @@ const googlePhotosSetupLinks = {
   credentials: 'https://console.cloud.google.com/apis/credentials'
 } as const;
 
-type GooglePhotosAccordionSection = 'config' | 'account' | 'albums' | 'progress';
+type GooglePhotosAccordionSection = 'config' | 'account' | 'albums';
+type GooglePhotosAlbumSessionStatus = 'completed' | 'failed' | 'skipped';
 
 const createOpenSectionSet = (section: GooglePhotosAccordionSection) => new Set<GooglePhotosAccordionSection>([section]);
 
@@ -81,6 +83,8 @@ export const GooglePhotosExportPage = () => {
   const [isGoogleSignInPendingRefresh, setIsGoogleSignInPendingRefresh] = useState(false);
   const [openSections, setOpenSections] = useState<Set<GooglePhotosAccordionSection>>(() => createOpenSectionSet('config'));
   const [isAccordionManual, setIsAccordionManual] = useState(false);
+  const [expandedAlbumTitles, setExpandedAlbumTitles] = useState<Set<string>>(() => new Set());
+  const [albumSessionStatuses, setAlbumSessionStatuses] = useState<Record<string, GooglePhotosAlbumSessionStatus>>({});
 
   const sourceRoot = groupingSessionState.outputRootLabel ?? '';
   const backendJobId = exportJobState.backendJobId;
@@ -90,12 +94,31 @@ export const GooglePhotosExportPage = () => {
   );
   const isPaused = progress?.status === 'paused' || exportJobState.status === 'paused';
   const isRunning = progress?.status === 'running' || exportJobState.status === 'running';
-  const completeCount = (progress?.completed ?? 0) + (progress?.skipped ?? 0);
-  const progressPercent = progress?.total ? Math.round((completeCount / progress.total) * 100) : 0;
-  const canStart = Boolean(sourceRoot && selectedAccountId && !isStarting && (preview || isPaused));
+  const hasActiveUpload = isRunning || isPaused;
+  const canStart = Boolean(sourceRoot && selectedAccountId && !isStarting && (preview || isPaused) && (!hasActiveUpload || isPaused));
   const canConnect = Boolean(oauthConfig?.configured && !isConnecting);
   const shouldShowConnectAccount = Boolean(oauthConfig?.configured && (!isGoogleSignInPendingRefresh || accounts.length > 0));
   const recentItems = useMemo(() => progress?.recentItems ?? [], [progress]);
+  const progressByAlbum = useMemo(() => {
+    const entries = new Map<string, GooglePhotosAlbumProgress>();
+
+    for (const album of progress?.albumProgress ?? []) {
+      entries.set(album.albumTitle, album);
+    }
+
+    return entries;
+  }, [progress?.albumProgress]);
+  const recentItemsByAlbum = useMemo(() => {
+    const entries = new Map<string, typeof recentItems>();
+
+    for (const item of recentItems) {
+      const albumItems = entries.get(item.destinationPath) ?? [];
+      albumItems.push(item);
+      entries.set(item.destinationPath, albumItems);
+    }
+
+    return entries;
+  }, [recentItems]);
   const shouldFocusProgress = Boolean(
     progress?.status && ['running', 'paused', 'completed'].includes(progress.status)
       || exportJobState.status === 'running'
@@ -103,7 +126,7 @@ export const GooglePhotosExportPage = () => {
       || exportJobState.status === 'completed'
   );
   const recommendedOpenSection = useMemo<GooglePhotosAccordionSection>(() => {
-    if (shouldFocusProgress) return 'progress';
+    if (shouldFocusProgress) return 'albums';
     if (!oauthConfig?.configured) return 'config';
     if (accounts.length === 0) return 'account';
     if (!preview) return 'albums';
@@ -149,6 +172,28 @@ export const GooglePhotosExportPage = () => {
     [t]
   );
 
+  const rememberCompletedAlbumProgress = useCallback((nextProgress: ExportProgress) => {
+    if (!['completed', 'failed', 'cancelled'].includes(nextProgress.status)) {
+      return;
+    }
+
+    setAlbumSessionStatuses((current) => {
+      const next = { ...current };
+
+      for (const album of nextProgress.albumProgress ?? []) {
+        if (album.failed > 0 || album.status === 'failed') {
+          next[album.albumTitle] = 'failed';
+        } else if (album.skipped === album.total) {
+          next[album.albumTitle] = 'skipped';
+        } else if (album.completed + album.skipped >= album.total) {
+          next[album.albumTitle] = 'completed';
+        }
+      }
+
+      return next;
+    });
+  }, []);
+
   const syncSnapshot = useCallback(
     (nextProgress: ExportProgress) => {
       saveExportJobSnapshot({
@@ -161,13 +206,16 @@ export const GooglePhotosExportPage = () => {
         errorMessage: nextProgress.failed > 0 ? t('export.completedWithErrors', { count: nextProgress.failed }) : null,
         updatedAt: Date.now()
       });
+      rememberCompletedAlbumProgress(nextProgress);
     },
-    [exportJobState.startedAt, selectedAccount?.email, sourceRoot, t]
+    [exportJobState.startedAt, rememberCompletedAlbumProgress, selectedAccount?.email, sourceRoot, t]
   );
 
   const resetGooglePhotosExportState = useCallback((message?: string | null) => {
     setPreview(null);
     setProgress(null);
+    setAlbumSessionStatuses({});
+    setExpandedAlbumTitles(new Set());
     setBackendError(null);
     setStatusMessage(message ?? null);
     setIsGoogleSignInPendingRefresh(false);
@@ -195,6 +243,20 @@ export const GooglePhotosExportPage = () => {
         next.delete(section);
       } else {
         next.add(section);
+      }
+
+      return next;
+    });
+  }, []);
+
+  const toggleAlbum = useCallback((albumTitle: string) => {
+    setExpandedAlbumTitles((current) => {
+      const next = new Set(current);
+
+      if (next.has(albumTitle)) {
+        next.delete(albumTitle);
+      } else {
+        next.add(albumTitle);
       }
 
       return next;
@@ -289,6 +351,8 @@ export const GooglePhotosExportPage = () => {
 
   useEffect(() => {
     setPreview(null);
+    setAlbumSessionStatuses({});
+    setExpandedAlbumTitles(new Set());
   }, [selectedAccountId, sourceRoot]);
 
   const handleConnect = async () => {
@@ -445,6 +509,7 @@ export const GooglePhotosExportPage = () => {
       await testExportTargetRequest({ type: 'google-photos', accountId: selectedAccountId });
       const nextPreview = await previewGooglePhotosExportRequest({ accountId: selectedAccountId, sourceRoot });
       setPreview(nextPreview);
+      setExpandedAlbumTitles(new Set());
       setBackendError(null);
       openOnlySection('albums');
     } catch (error) {
@@ -455,7 +520,7 @@ export const GooglePhotosExportPage = () => {
     }
   };
 
-  const handleStart = async () => {
+  const handleStart = async (albumTitle?: string) => {
     if (!canStart) {
       return;
     }
@@ -463,12 +528,20 @@ export const GooglePhotosExportPage = () => {
     setIsStarting(true);
 
     try {
-      const job = backendJobId
-        ? await startExportJobRequest(backendJobId)
+      const shouldResume = Boolean(isPaused && backendJobId);
+      const resumeJobId = shouldResume ? backendJobId : null;
+      const job = resumeJobId
+        ? await startExportJobRequest(resumeJobId)
         : await createExportJobRequest({
-            name: t('export.googlePhotos.defaultJobName'),
+            name: albumTitle
+              ? t('export.googlePhotos.albumJobName', { albumTitle })
+              : t('export.googlePhotos.defaultJobName'),
             sourceRoot,
-            target: { type: 'google-photos', accountId: selectedAccountId }
+            target: {
+              type: 'google-photos',
+              accountId: selectedAccountId,
+              ...(albumTitle ? { albumTitles: [albumTitle] } : {})
+            }
           });
 
       saveExportJobSnapshot({
@@ -482,7 +555,7 @@ export const GooglePhotosExportPage = () => {
         updatedAt: Date.now()
       });
 
-      if (!backendJobId) {
+      if (!shouldResume) {
         await startExportJobRequest(job.job.id);
       }
 
@@ -490,7 +563,10 @@ export const GooglePhotosExportPage = () => {
       setProgress(nextProgress);
       syncSnapshot(nextProgress);
       setBackendError(null);
-      openOnlySection('progress');
+      openOnlySection('albums');
+      if (albumTitle) {
+        setExpandedAlbumTitles((current) => new Set([...current, albumTitle]));
+      }
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.startError'));
     } finally {
@@ -573,13 +649,81 @@ export const GooglePhotosExportPage = () => {
     ? t('export.googlePhotos.accountsConnected', { count: accounts.length })
     : t('export.googlePhotos.noAccountConnected');
   const albumStatus = selectedAccount ? t('export.googlePhotos.ready') : t('export.googlePhotos.waitingForAccount');
-  const progressStatus = progress ? `${progressPercent}%` : t('export.googlePhotos.noJobStatus');
-  const progressSummaryText = progress ? t('export.progressSummary', {
-    completed: progress.completed,
-    skipped: progress.skipped,
-    failed: progress.failed,
-    total: progress.total
-  }) : t('export.noJob');
+
+  const getAlbumProgressPercent = (albumProgress: GooglePhotosAlbumProgress | undefined) => {
+    if (!albumProgress?.total) {
+      return 0;
+    }
+
+    return Math.round(((albumProgress.completed + albumProgress.skipped) / albumProgress.total) * 100);
+  };
+
+  const getAlbumResultLabel = (albumTitle: string) => {
+    const progressStatus = progressByAlbum.get(albumTitle)?.status;
+    const sessionStatus = albumSessionStatuses[albumTitle];
+    const status = progressStatus && progressStatus !== 'pending' ? progressStatus : sessionStatus;
+
+    if (status === 'completed') {
+      return t('export.googlePhotos.albumUploaded');
+    }
+
+    if (status === 'failed') {
+      return t('export.googlePhotos.albumFailed');
+    }
+
+    if (status === 'skipped') {
+      return t('export.googlePhotos.albumSkipped');
+    }
+
+    if (status === 'running') {
+      return t('export.googlePhotos.albumUploading');
+    }
+
+    return null;
+  };
+
+  const getAlbumResultStatus = (albumTitle: string): ExportItemStatus | 'pending' => {
+    const progressStatus = progressByAlbum.get(albumTitle)?.status;
+    const sessionStatus = albumSessionStatuses[albumTitle];
+    const status = progressStatus && progressStatus !== 'pending' ? progressStatus : sessionStatus;
+
+    if (status === 'completed') return 'completed';
+    if (status === 'failed') return 'failed';
+    if (status === 'skipped') return 'skipped';
+    if (status === 'running') return 'running';
+    return 'pending';
+  };
+
+  const getAlbumDisplayItems = (albumTitle: string, previewItems: GooglePhotosExportPreview['albums'][number]['items']) => {
+    const progressItems = recentItemsByAlbum.get(albumTitle) ?? [];
+    const progressByRelativePath = new Map(progressItems.map((item) => [item.relativePath, item]));
+
+    return previewItems.map((item) => {
+      const progressItem = progressByRelativePath.get(item.relativePath);
+
+      return {
+        relativePath: item.relativePath,
+        sizeBytes: progressItem?.sizeBytes ?? item.sizeBytes,
+        status: progressItem?.status ?? 'pending',
+        lastError: progressItem?.lastError ?? null
+      };
+    });
+  };
+
+  const getAlbumFailureSummary = (items: ReturnType<typeof getAlbumDisplayItems>) => {
+    if (items.length === 0) {
+      return null;
+    }
+
+    const failedItems = items.filter((item) => item.status === 'failed' && item.lastError);
+
+    if (failedItems.length !== items.length) {
+      return null;
+    }
+
+    const uniqueErrors = new Set(failedItems.map((item) => item.lastError));
+    return uniqueErrors.size === 1 ? failedItems[0].lastError : null;
+  };
 
   return (
     <div className="page-stack export-page">
@@ -771,7 +915,7 @@ export const GooglePhotosExportPage = () => {
                   {isPreviewing ? t('export.googlePhotos.previewing') : t('export.googlePhotos.preview')}
                 </button>
                 <button className="btn btn-primary" type="button" onClick={() => void handleStart()} disabled={!canStart}>
-                  {isStarting ? t('export.starting') : isPaused ? t('export.resume') : t('export.start')}
+                  {isStarting ? t('export.starting') : isPaused ? t('export.resume') : t('export.googlePhotos.uploadAllAlbums')}
                 </button>
                 <button className="btn btn-secondary" type="button" onClick={() => void handlePause()} disabled={!backendJobId || !isRunning}>
                   {t('export.pause')}
@@ -783,92 +927,104 @@ export const GooglePhotosExportPage = () => {
 
               {preview && (
                 <>
-                  <div className="export-stats">
-                    <div>
-                      <strong>{preview.supportedItems}</strong>
-                      <span>{t('export.googlePhotos.supported')}</span>
-                    </div>
-                    <div>
-                      <strong>{preview.unsupportedItems}</strong>
-                      <span>{t('export.googlePhotos.unsupported')}</span>
-                    </div>
-                    <div>
-                      <strong>{preview.albums.length}</strong>
-                      <span>{t('export.googlePhotos.albums')}</span>
-                    </div>
-                  </div>
-
                   {preview.albums.length > 0 && (
-                    <div className="export-item-list">
-                      {preview.albums.map((album) => (
-                        <div key={album.albumTitle} className="export-item-row">
-                          <div>
-                            <strong title={album.albumTitle}>{album.albumTitle}</strong>
-                            <span>{t('export.googlePhotos.albumItemCount', { count: album.itemCount })}</span>
-                          </div>
-                          <span className={`status-pill status-${album.status === 'existing' ? 'completed' : 'pending'}`}>
-                            {album.status === 'existing' ? t('export.googlePhotos.albumExisting') : t('export.googlePhotos.albumNew')}
-                          </span>
-                        </div>
-                      ))}
+                    <div className="google-photos-album-list">
+                      {preview.albums.map((album) => {
+                        const isAlbumOpen = expandedAlbumTitles.has(album.albumTitle);
+                        const albumProgress = progressByAlbum.get(album.albumTitle);
+                        const albumItems = getAlbumDisplayItems(album.albumTitle, album.items);
+                        const albumFailureSummary = getAlbumFailureSummary(albumItems);
+                        const albumPercent = getAlbumProgressPercent(albumProgress);
+                        const resultLabel = getAlbumResultLabel(album.albumTitle);
+                        const resultStatus = getAlbumResultStatus(album.albumTitle);
+
+                        return (
+                          <article className="google-photos-album-panel" key={album.albumTitle}>
+                            <div className="google-photos-album-header">
+                              <button
+                                className="google-photos-album-toggle"
+                                type="button"
+                                onClick={() => toggleAlbum(album.albumTitle)}
+                                aria-expanded={isAlbumOpen}
+                              >
+                                <span className={`export-accordion-chevron${isAlbumOpen ? ' is-open' : ''}`}>›</span>
+                                <span>
+                                  <strong title={album.albumTitle}>{album.albumTitle}</strong>
+                                  <small>{t('export.googlePhotos.albumItemCount', { count: album.itemCount })}</small>
+                                </span>
+                              </button>
+                              <div className="google-photos-album-actions">
+                                <span className={`status-pill status-${album.status === 'existing' ? 'completed' : 'pending'}`}>
+                                  {album.status === 'existing' ? t('export.googlePhotos.albumExisting') : t('export.googlePhotos.albumNew')}
+                                </span>
+                                {resultLabel && (
+                                  <span className={`status-pill status-${resultStatus}`}>{resultLabel}</span>
+                                )}
+                                <button
+                                  className="btn btn-secondary"
+                                  type="button"
+                                  onClick={() => void handleStart(album.albumTitle)}
+                                  disabled={!canStart || hasActiveUpload}
+                                >
+                                  {t('export.googlePhotos.uploadAlbum')}
+                                </button>
+                              </div>
+                            </div>
+
+                            {isAlbumOpen && (
+                              <div className="google-photos-album-body">
+                                {albumProgress ? (
+                                  <>
+                                    <div className="progress-track" aria-label={t('export.progressAria')}>
+                                      <div className="export-progress-fill" style={{ width: `${albumPercent}%` }} />
+                                    </div>
+                                    <div className="export-stats">
+                                      <div>
+                                        <strong>{albumProgress.total}</strong>
+                                        <span>{t('export.total')}</span>
+                                      </div>
+                                      <div>
+                                        <strong>{albumProgress.completed}</strong>
+                                        <span>{t('export.completed')}</span>
+                                      </div>
+                                      <div>
+                                        <strong>{albumProgress.skipped}</strong>
+                                        <span>{t('export.skipped')}</span>
+                                      </div>
+                                      <div>
+                                        <strong>{albumProgress.failed}</strong>
+                                        <span>{t('export.failed')}</span>
+                                      </div>
+                                    </div>
+                                  </>
+                                ) : null}
+
+                                {albumFailureSummary && (
+                                  <p className="google-photos-album-error-summary">{albumFailureSummary}</p>
+                                )}
+
+                                {albumItems.length > 0 && (
+                                  <div className="export-item-list">
+                                    {albumItems.map((item) => (
+                                      <div key={item.relativePath} className="export-item-row">
+                                        <div>
+                                          <strong title={item.relativePath}>{item.relativePath}</strong>
+                                          <span>{formatBytes(item.sizeBytes)}</span>
+                                          {item.lastError && <span>{item.lastError}</span>}
+                                        </div>
+                                        <span className={`status-pill status-${item.status}`}>{t(itemStatusLabels[item.status])}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </article>
+                        );
+                      })}
                     </div>
                   )}
                 </>
-              )}
-            </div>
-          )}
-        </article>
-
-        <article className="export-accordion-section">
-          {renderAccordionHeader('progress', t('export.progressTitle'), progressSummaryText, progressStatus, progress ? 'running' : 'pending')}
-          {isSectionOpen('progress') && (
-            <div className="export-accordion-body">
-              <div className="grouping-main-head">
-                <div>
-                  <p className="page-section-title">{t('export.progressTitle')}</p>
-                  <p className="page-summary-note">{progressSummaryText}</p>
-                </div>
-                <div className="export-provider-inline">
-                  <ExportProviderIcon visual="photos" />
-                  <strong>{progressPercent}%</strong>
-                </div>
-              </div>
-
-              <div className="progress-track" aria-label={t('export.progressAria')}>
-                <div className="export-progress-fill" style={{ width: `${progressPercent}%` }} />
-              </div>
-
-              <div className="export-stats">
-                <div>
-                  <strong>{progress?.total ?? 0}</strong>
-                  <span>{t('export.total')}</span>
-                </div>
-                <div>
-                  <strong>{progress?.completed ?? 0}</strong>
-                  <span>{t('export.completed')}</span>
-                </div>
-                <div>
-                  <strong>{progress?.skipped ?? 0}</strong>
-                  <span>{t('export.skipped')}</span>
-                </div>
-                <div>
-                  <strong>{progress?.failed ?? 0}</strong>
-                  <span>{t('export.failed')}</span>
-                </div>
-              </div>
-
-              {recentItems.length > 0 && (
-                <div className="export-item-list">
-                  {recentItems.map((item) => (
-                    <div key={item.id} className="export-item-row">
-                      <div>
-                        <strong title={item.relativePath}>{item.relativePath}</strong>
-                        <span>{formatBytes(item.sizeBytes)}</span>
-                      </div>
-                      <span className={`status-pill status-${item.status}`}>{t(itemStatusLabels[item.status])}</span>
-                    </div>
-                  ))}
-                </div>
               )}
             </div>
           )}

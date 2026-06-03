@@ -11,8 +11,55 @@ import type {
 } from './googlePhotos.types.js';
 
 const GOOGLE_PHOTOS_API_URL = 'https://photoslibrary.googleapis.com/v1';
+const GOOGLE_PHOTOS_LOG_PREFIX = '[google-photos]';
+const GOOGLE_ERROR_BODY_LIMIT = 4000;
 
 const nowIso = () => new Date().toISOString();
+
+export const redactGooglePhotosUploadToken = (uploadToken: string | null | undefined) => {
+  if (!uploadToken) {
+    return 'none';
+  }
+
+  if (uploadToken.length <= 12) {
+    return `${uploadToken.slice(0, 3)}...${uploadToken.slice(-3)}`;
+  }
+
+  return `${uploadToken.slice(0, 6)}...${uploadToken.slice(-6)}`;
+};
+
+const getGooglePhotosEndpointLabel = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname;
+  } catch {
+    return url;
+  }
+};
+
+const formatGooglePhotosResponseBody = (body: string) => {
+  const trimmed = body.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const serialized = JSON.stringify(JSON.parse(trimmed));
+    return serialized.length > GOOGLE_ERROR_BODY_LIMIT
+      ? `${serialized.slice(0, GOOGLE_ERROR_BODY_LIMIT)}...`
+      : serialized;
+  } catch {
+    return trimmed.length > GOOGLE_ERROR_BODY_LIMIT
+      ? `${trimmed.slice(0, GOOGLE_ERROR_BODY_LIMIT)}...`
+      : trimmed;
+  }
+};
+
+const formatGooglePhotosHttpError = (fallbackMessage: string, body: string) => {
+  const googleBody = formatGooglePhotosResponseBody(body);
+  return googleBody ? `${fallbackMessage} Google response: ${googleBody}` : fallbackMessage;
+};
 
 export const normalizeGooglePhotosAlbumTitle = (title: string) => title.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 
@@ -72,7 +119,9 @@ const requestJson = async <T>(accountId: string, url: string, fallbackMessage: s
   const body = await response.text();
 
   if (!response.ok) {
-    throw new Error(body || fallbackMessage);
+    const message = formatGooglePhotosHttpError(fallbackMessage, body);
+    console.warn(`${GOOGLE_PHOTOS_LOG_PREFIX} HTTP request failed endpoint=${getGooglePhotosEndpointLabel(url)} status=${response.status} message="${message}"`);
+    throw new Error(message);
   }
 
   return JSON.parse(body) as T;
@@ -147,6 +196,7 @@ export const getOrCreateGooglePhotosAlbum = async (accountId: string, title: str
   const cached = getCachedGooglePhotosAlbumByTitle(accountId, title);
 
   if (cached) {
+    console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Reusing cached album albumId=${cached.googleAlbumId} title="${cached.title}"`);
     return cached;
   }
 
@@ -154,9 +204,11 @@ export const getOrCreateGooglePhotosAlbum = async (accountId: string, title: str
   const fromRemoteList = getCachedGooglePhotosAlbumByTitle(accountId, title);
 
   if (fromRemoteList) {
+    console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Reusing app-created album albumId=${fromRemoteList.googleAlbumId} title="${fromRemoteList.title}"`);
     return fromRemoteList;
   }
 
+  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Creating album title="${title}"`);
   const body = await requestJson<{ id: string; title: string; productUrl?: string }>(
     accountId,
     `${GOOGLE_PHOTOS_API_URL}/albums`,
@@ -168,7 +220,9 @@ export const getOrCreateGooglePhotosAlbum = async (accountId: string, title: str
     }
   );
 
-  return cacheGooglePhotosAlbum(accountId, body);
+  const album = cacheGooglePhotosAlbum(accountId, body);
+  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Created album albumId=${album.googleAlbumId} title="${album.title}"`);
+  return album;
 };
 
 export const ensureGooglePhotosItemMetadata = (
@@ -253,6 +307,8 @@ export const uploadGooglePhotosMedia = async (
   fileName: string
 ): Promise<{ uploadToken: string; createdAt: string }> => {
   const accessToken = await getValidGooglePhotosAccessToken(accountId);
+  const file = fs.readFileSync(filePath);
+  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Uploading media bytes file="${fileName}" sizeBytes=${file.byteLength} contentType=application/octet-stream`);
   const response = await fetch(`${GOOGLE_PHOTOS_API_URL}/uploads`, {
     method: 'POST',
     headers: {
@@ -261,13 +317,17 @@ export const uploadGooglePhotosMedia = async (
       'X-Goog-Upload-File-Name': encodeURIComponent(fileName),
       'X-Goog-Upload-Protocol': 'raw'
     },
-    body: fs.readFileSync(filePath)
+    body: file
   });
   const body = await response.text();
 
   if (!response.ok) {
-    throw new Error(body || 'Could not upload media bytes to Google Photos.');
+    const message = formatGooglePhotosHttpError('Could not upload media bytes to Google Photos.', body);
+    console.warn(`${GOOGLE_PHOTOS_LOG_PREFIX} Upload failed file="${fileName}" status=${response.status} message="${message}"`);
+    throw new Error(message);
   }
+
+  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Uploaded media bytes file="${fileName}" sizeBytes=${file.byteLength} uploadToken=${redactGooglePhotosUploadToken(body)}`);
 
   return {
     uploadToken: body,
@@ -280,6 +340,7 @@ export const createGooglePhotosMediaItems = async (
   albumId: string,
   items: Array<{ uploadToken: string; description: string }>
 ): Promise<GooglePhotosBatchCreateResult[]> => {
+  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Creating media items albumId=${albumId} count=${items.length}`);
   const body = await requestJson<{ newMediaItemResults?: GooglePhotosBatchCreateResult[] }>(
     accountId,
     `${GOOGLE_PHOTOS_API_URL}/mediaItems:batchCreate`,

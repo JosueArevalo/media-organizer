@@ -4,6 +4,7 @@ import {
   ensureGooglePhotosItemMetadata,
   getOrCreateGooglePhotosAlbum,
   isUploadTokenFresh,
+  redactGooglePhotosUploadToken,
   updateGooglePhotosItemCreated,
   updateGooglePhotosItemUploaded,
   uploadGooglePhotosMedia
@@ -18,8 +19,10 @@ import {
   refreshExportJobCounters
 } from './exportJob.service.js';
 import type { ExportItemRecord } from './export.types.js';
+import type { GooglePhotosBatchCreateResult } from './googlePhotos.types.js';
 
 const batchSize = 50;
+const GOOGLE_PHOTOS_LOG_PREFIX = '[google-photos]';
 
 const yieldToEventLoop = async () => {
   await new Promise<void>((resolve) => {
@@ -65,6 +68,80 @@ const toItemRecord = (row: {
   updatedAt: row.updated_at
 });
 
+const inferContentType = (filePath: string) => {
+  const extension = path.extname(filePath).toLocaleLowerCase();
+
+  const contentTypes: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif',
+    '.tif': 'image/tiff',
+    '.tiff': 'image/tiff',
+    '.bmp': 'image/bmp',
+    '.mp4': 'video/mp4',
+    '.m4v': 'video/mp4',
+    '.mov': 'video/quicktime',
+    '.avi': 'video/x-msvideo',
+    '.mkv': 'video/x-matroska',
+    '.mts': 'video/mp2t',
+    '.m2ts': 'video/mp2t',
+    '.3gp': 'video/3gpp',
+    '.3g2': 'video/3gpp2'
+  };
+
+  return contentTypes[extension] ?? 'application/octet-stream';
+};
+
+const serializeGooglePhotosStatusDetails = (details: unknown) => {
+  if (!details) {
+    return null;
+  }
+
+  try {
+    const serialized = JSON.stringify(details);
+    return serialized.length > 1000 ? `${serialized.slice(0, 1000)}...` : serialized;
+  } catch {
+    return 'Could not serialize Google Photos status details.';
+  }
+};
+
+const formatGooglePhotosBatchCreateError = (
+  result: GooglePhotosBatchCreateResult | undefined,
+  albumId: string,
+  queued: { item: ExportItemRecord; uploadToken: string }
+) => {
+  const status = result?.status;
+  const details = serializeGooglePhotosStatusDetails(status?.details);
+  const parts = ['Google Photos rejected media item.'];
+
+  if (typeof status?.code === 'number') {
+    parts.push(`Code: ${status.code}.`);
+  }
+
+  if (status?.message) {
+    parts.push(`Message: ${status.message}.`);
+  } else {
+    parts.push('Message: Google Photos did not create this media item.');
+  }
+
+  if (details) {
+    parts.push(`Details: ${details}.`);
+  }
+
+  parts.push(`Album: ${queued.item.destinationPath}.`);
+  parts.push(`Album ID: ${albumId}.`);
+  parts.push(`File: ${path.basename(queued.item.sourcePath)}.`);
+  parts.push(`Size: ${queued.item.sizeBytes} bytes.`);
+  parts.push(`Inferred Content-Type: ${inferContentType(queued.item.sourcePath)}.`);
+  parts.push(`Upload token: ${redactGooglePhotosUploadToken(queued.uploadToken)}.`);
+
+  return parts.join(' ');
+};
+
 const createUploadedBatch = async (
   accountId: string,
   albumId: string,
@@ -83,12 +160,16 @@ const createUploadedBatch = async (
     const result = results.find((candidate) => candidate.uploadToken === queued.uploadToken);
 
     if (result?.mediaItem?.id) {
+      console.info(
+        `${GOOGLE_PHOTOS_LOG_PREFIX} Created media item albumId=${albumId} file="${queued.item.relativePath}" mediaItemId=${result.mediaItem.id} uploadToken=${redactGooglePhotosUploadToken(queued.uploadToken)}`
+      );
       updateGooglePhotosItemCreated(queued.item.id, result.mediaItem.id, result.mediaItem.productUrl ?? null);
       persistExportItemResult(queued.item.id, 'completed', null, queued.item.relativePath);
       continue;
     }
 
-    const message = result?.status?.message ?? 'Google Photos did not create this media item.';
+    const message = formatGooglePhotosBatchCreateError(result, albumId, queued);
+    console.warn(`${GOOGLE_PHOTOS_LOG_PREFIX} ${message}`);
     persistExportItemResult(queued.item.id, 'failed', message, queued.item.relativePath);
   }
 };

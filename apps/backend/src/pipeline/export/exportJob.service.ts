@@ -12,7 +12,9 @@ import type {
   ExportProgressData,
   ExportTarget,
   ExportTargetTestResult,
+  GooglePhotosAlbumProgress,
   GooglePhotosExportPreview,
+  GooglePhotosTarget,
   NetworkCredentials
 } from './export.types.js';
 import {
@@ -229,6 +231,18 @@ export const collectGooglePhotosFilePlan = (sourceRoot: string) => {
   return items;
 };
 
+const collectFilteredGooglePhotosFilePlan = (sourceRoot: string, target: GooglePhotosTarget) => {
+  const plannedItems = collectGooglePhotosFilePlan(sourceRoot);
+  const albumTitles = target.albumTitles?.map((title) => title.trim()).filter(Boolean);
+
+  if (!albumTitles?.length) {
+    return plannedItems;
+  }
+
+  const selectedAlbums = new Set(albumTitles);
+  return plannedItems.filter((item) => selectedAlbums.has(item.albumTitle));
+};
+
 const assertExportJobRequest = (request: ExportJobRequest) => {
   assertExistingSourceRoot(request.sourceRoot);
 
@@ -266,7 +280,7 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
         albumTitle: null,
         supported: true
       }))
-    : collectGooglePhotosFilePlan(request.sourceRoot);
+    : collectFilteredGooglePhotosFilePlan(request.sourceRoot, request.target);
 
   try {
     db.exec('BEGIN TRANSACTION');
@@ -403,6 +417,10 @@ export const getExportProgress = (jobId: string): ExportProgressData | null => {
     return null;
   }
 
+  const albumProgress = snapshot.job.targetType === 'google-photos'
+    ? getGooglePhotosAlbumProgress(jobId)
+    : undefined;
+
   return {
     jobId,
     status: snapshot.job.status,
@@ -411,8 +429,85 @@ export const getExportProgress = (jobId: string): ExportProgressData | null => {
     failed: snapshot.job.failedItems,
     skipped: snapshot.job.skippedItems,
     pending: Math.max(0, snapshot.job.totalItems - snapshot.job.completedItems - snapshot.job.failedItems - snapshot.job.skippedItems),
-    recentItems: snapshot.recentItems
+    recentItems: snapshot.recentItems,
+    albumProgress
   };
+};
+
+const toAlbumProgressStatus = (row: {
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  running: number;
+}): GooglePhotosAlbumProgress['status'] => {
+  if (row.failed > 0) {
+    return 'failed';
+  }
+
+  if (row.running > 0) {
+    return 'running';
+  }
+
+  if (row.skipped === row.total) {
+    return 'skipped';
+  }
+
+  if (row.completed + row.skipped >= row.total) {
+    return 'completed';
+  }
+
+  return 'pending';
+};
+
+const getGooglePhotosAlbumProgress = (jobId: string): GooglePhotosAlbumProgress[] => {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          destination_path AS album_title,
+          COUNT(*) AS total,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+          SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped,
+          SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running
+        FROM export_items
+        WHERE job_id = ?
+        GROUP BY destination_path
+        ORDER BY destination_path ASC
+      `
+    )
+    .all(jobId) as Array<{
+      album_title: string;
+      total: number;
+      completed: number | null;
+      failed: number | null;
+      skipped: number | null;
+      running: number | null;
+    }>;
+
+  return rows.map((row) => {
+    const completed = row.completed ?? 0;
+    const failed = row.failed ?? 0;
+    const skipped = row.skipped ?? 0;
+
+    return {
+      albumTitle: row.album_title,
+      total: row.total,
+      completed,
+      failed,
+      skipped,
+      pending: Math.max(0, row.total - completed - failed - skipped),
+      status: toAlbumProgressStatus({
+        total: row.total,
+        completed,
+        failed,
+        skipped,
+        running: row.running ?? 0
+      })
+    };
+  });
 };
 
 export const updateExportJobStatus = (jobId: string, status: ExportJobRecord['status'], lastError: string | null = null) => {
@@ -568,15 +663,26 @@ export const previewGooglePhotosExport = async (
   await listGooglePhotosAppCreatedAlbums(accountId);
   const plannedItems = collectGooglePhotosFilePlan(sourceRoot);
   const supportedItems = plannedItems.filter((item) => item.supported);
-  const albumMap = new Map<string, { folderName: string; albumTitle: string; itemCount: number }>();
+  const albumMap = new Map<string, {
+    folderName: string;
+    albumTitle: string;
+    itemCount: number;
+    items: Array<{ relativePath: string; sizeBytes: number; supported: boolean }>;
+  }>();
 
   for (const item of supportedItems) {
     const existing = albumMap.get(item.albumTitle) ?? {
       folderName: item.albumTitle,
       albumTitle: item.albumTitle,
-      itemCount: 0
+      itemCount: 0,
+      items: []
     };
     existing.itemCount += 1;
+    existing.items.push({
+      relativePath: item.relativePath,
+      sizeBytes: item.sizeBytes,
+      supported: item.supported
+    });
     albumMap.set(item.albumTitle, existing);
   }
 

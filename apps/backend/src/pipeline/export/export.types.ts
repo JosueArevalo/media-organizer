@@ -18,6 +18,7 @@ export type NetworkCredentials = {
 export type GooglePhotosTarget = {
   type: 'google-photos';
   accountId: string;
+  albumTitles?: string[];
 };
 
 export type ExportTarget = NetworkFolderTarget | GooglePhotosTarget;
@@ -81,6 +82,7 @@ export type ExportProgressData = {
   skipped: number;
   pending: number;
   recentItems: ExportItemRecord[];
+  albumProgress?: GooglePhotosAlbumProgress[];
 };
 
 export type ExportTargetTestRequest = {
@@ -131,6 +133,23 @@ export type GooglePhotosAlbumPreview = {
   albumTitle: string;
   status: 'existing' | 'new';
   itemCount: number;
+  items: GooglePhotosAlbumPreviewItem[];
+};
+
+export type GooglePhotosAlbumPreviewItem = {
+  relativePath: string;
+  sizeBytes: number;
+  supported: boolean;
+};
+
+export type GooglePhotosAlbumProgress = {
+  albumTitle: string;
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  pending: number;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 };
 
 export type GooglePhotosExportPreview = {
