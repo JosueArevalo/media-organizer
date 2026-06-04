@@ -80,6 +80,7 @@ type CompressionCheckpointPayload = {
     completedCopyCount?: number;
     failedCompressCount?: number;
     failedCopyCount?: number;
+    retainedOriginalBecauseLargerCount?: number;
   };
   activeItems?: unknown[];
   processedItems?: unknown[];
@@ -380,6 +381,9 @@ export interface CompressionProgressData {
     finishedAt?: number;
     durationMs?: number;
     skipped?: boolean;
+    outcome?: 'original-retained-size';
+    sourceBytes?: number;
+    encodedBytes?: number;
   }>;
   totalCompress: number;
   totalCopy: number;
@@ -387,6 +391,7 @@ export interface CompressionProgressData {
   completedCopy: number;
   failedCompress: number;
   failedCopy: number;
+  retainedOriginalBecauseLarger: number;
 }
 
 export const getCompressionProgress = (sessionId: string): CompressionProgressData | null => {
@@ -415,6 +420,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   let checkpointCompletedCopyCount: number | null = null;
   let checkpointFailedCompressCount: number | null = null;
   let checkpointFailedCopyCount: number | null = null;
+  let retainedOriginalBecauseLargerCount = 0;
   let activeItems: Array<{ id: string; sourcePath: string; operation: 'compress' | 'copy'; startedAt?: number }> = [];
   let checkpointProcessedItems: CompressionProgressData['processedItems'] = [];
   if (checkpoint?.payload_json) {
@@ -429,6 +435,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
       checkpointCompletedCopyCount = parsed.summary?.completedCopyCount ?? null;
       checkpointFailedCompressCount = parsed.summary?.failedCompressCount ?? null;
       checkpointFailedCopyCount = parsed.summary?.failedCopyCount ?? null;
+      retainedOriginalBecauseLargerCount = parsed.summary?.retainedOriginalBecauseLargerCount ?? 0;
       activeItems = Array.isArray(parsed.activeItems)
         ? parsed.activeItems
             .filter((item: { id?: unknown; sourcePath?: unknown; operation?: unknown }) =>
@@ -458,6 +465,9 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
               finishedAt?: unknown;
               durationMs?: unknown;
               skipped?: unknown;
+              outcome?: unknown;
+              sourceBytes?: unknown;
+              encodedBytes?: unknown;
             }) => ({
               id: item.source,
               sourcePath: item.source,
@@ -466,7 +476,10 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
               ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {}),
               ...(typeof item.finishedAt === 'number' ? { finishedAt: item.finishedAt } : {}),
               ...(typeof item.durationMs === 'number' ? { durationMs: item.durationMs } : {}),
-              ...(typeof item.skipped === 'boolean' ? { skipped: item.skipped } : {})
+              ...(typeof item.skipped === 'boolean' ? { skipped: item.skipped } : {}),
+              ...(item.outcome === 'original-retained-size' ? { outcome: item.outcome } : {}),
+              ...(typeof item.sourceBytes === 'number' ? { sourceBytes: item.sourceBytes } : {}),
+              ...(typeof item.encodedBytes === 'number' ? { encodedBytes: item.encodedBytes } : {})
             }))
         : [];
     } catch (e) {
@@ -555,7 +568,8 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
     completedCompress: completedCompressCount,
     completedCopy: completedCopyCount,
     failedCompress: failedCompressCount,
-    failedCopy: failedCopyCount
+    failedCopy: failedCopyCount,
+    retainedOriginalBecauseLarger: retainedOriginalBecauseLargerCount
   };
 };
 

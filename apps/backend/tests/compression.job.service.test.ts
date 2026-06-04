@@ -413,7 +413,16 @@ test('compression progress reports the actively processing video and clears it a
   assert.equal(finalProgress?.currentlyProcessing.length, 0);
   assert.equal(finalProgress?.processedItems.length, 1);
   assert.equal(finalProgress?.processedItems[0].operation, 'compress');
+  assert.equal(finalProgress?.processedItems[0].outcome, 'original-retained-size');
+  assert.equal(finalProgress?.completedCompress, 0);
+  assert.equal(finalProgress?.completedCopy, 0);
+  assert.equal(finalProgress?.retainedOriginalBecauseLarger, 1);
   assert.equal(typeof finalProgress?.processedItems[0].durationMs, 'number');
+
+  await executeCompressionSession(started.session.id);
+  const resumedProgress = getCompressionProgress(started.session.id);
+  assert.equal(resumedProgress?.retainedOriginalBecauseLarger, 1);
+  assert.equal(resumedProgress?.processedItems[0].outcome, 'original-retained-size');
 });
 
 test('interrupted compression sessions pause on startup and resume only unconfirmed image outputs', async () => {

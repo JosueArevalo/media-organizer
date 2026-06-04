@@ -177,6 +177,10 @@ def build_temp_output_path(output_file: Path) -> Path:
     return output_file.with_name(f'.{output_file.name}.media-organizer-tmp-{os.getpid()}-{time.time_ns()}{output_file.suffix}')
 
 
+def should_keep_larger_mp4_conversion(source_file: Path, output_format_mode: str) -> bool:
+    return output_format_mode == 'mp4' and source_file.suffix.lower() != '.mp4'
+
+
 def cleanup_stale_temp_outputs(output_file: Path):
     pattern = f'.{output_file.name}.media-organizer-tmp-*{output_file.suffix}'
 
@@ -409,6 +413,9 @@ def main() -> int:
         status = 'completed'
         error_message = None
         skipped = False
+        outcome = None
+        source_bytes = None
+        encoded_bytes = None
         started_at = now_ms()
 
         emit_event({
@@ -427,7 +434,14 @@ def main() -> int:
         else:
             try:
                 run_handbrake(command, fallback_command if hw_decode else None)
-                os.replace(command_output_file, output_file)
+                source_bytes = source_file.stat().st_size
+                encoded_bytes = command_output_file.stat().st_size
+
+                if encoded_bytes >= source_bytes and not should_keep_larger_mp4_conversion(source_file, args.output_format_mode):
+                    outcome = 'original-retained-size'
+                    copy_if_changed(source_file, output_file)
+                else:
+                    os.replace(command_output_file, output_file)
             except FileNotFoundError:
                 status = 'failed'
                 error_message = f"Video encoder command not found: {args.encoder_command}"
@@ -457,6 +471,9 @@ def main() -> int:
             'durationMs': finished_at - started_at,
             'skipped': skipped,
             'error': error_message,
+            'outcome': outcome,
+            'sourceBytes': source_bytes,
+            'encodedBytes': encoded_bytes,
         }
 
         manifest.append(item)

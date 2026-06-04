@@ -56,6 +56,9 @@ export type CompressionProgressApiResponse = {
     finishedAt?: number;
     durationMs?: number;
     skipped?: boolean;
+    outcome?: 'original-retained-size';
+    sourceBytes?: number;
+    encodedBytes?: number;
   }>;
   totalCompress: number;
   totalCopy: number;
@@ -63,6 +66,7 @@ export type CompressionProgressApiResponse = {
   completedCopy: number;
   failedCompress: number;
   failedCopy: number;
+  retainedOriginalBecauseLarger: number;
 };
 
 export type ActiveCompressionSessionApiResponse = (CompressionSessionApiResponse & {

@@ -21,6 +21,9 @@ type ScriptResultItem = {
   skipped?: boolean;
   error?: string;
   warning?: string;
+  outcome?: 'original-retained-size';
+  sourceBytes?: number;
+  encodedBytes?: number;
 };
 
 type ScriptActiveItem = {
@@ -85,6 +88,7 @@ type OperationCounts = {
   completedCopyCount: number;
   failedCompressCount: number;
   failedCopyCount: number;
+  retainedOriginalBecauseLargerCount: number;
 };
 
 const getFileSize = (filePath: string) => {
@@ -351,7 +355,8 @@ const getOperationCounts = (counts: OperationCounts): OperationCounts => ({
   completedCompressCount: counts.completedCompressCount,
   completedCopyCount: counts.completedCopyCount,
   failedCompressCount: counts.failedCompressCount,
-  failedCopyCount: counts.failedCopyCount
+  failedCopyCount: counts.failedCopyCount,
+  retainedOriginalBecauseLargerCount: counts.retainedOriginalBecauseLargerCount
 });
 
 const isUnderExcludedAncestor = (
@@ -684,7 +689,9 @@ const persistCompressionItem = (
   if (item.status === 'completed') {
     counters.completedCount += 1;
 
-    if (operation === 'compress') {
+    if (item.outcome === 'original-retained-size') {
+      counters.retainedOriginalBecauseLargerCount += 1;
+    } else if (operation === 'compress') {
       counters.completedCompressCount += 1;
     } else {
       counters.completedCopyCount += 1;
@@ -709,7 +716,8 @@ const seedProgressFromCompletedItems = (items: ScriptResultItem[]) => {
     completedCompressCount: 0,
     completedCopyCount: 0,
     failedCompressCount: 0,
-    failedCopyCount: 0
+    failedCopyCount: 0,
+    retainedOriginalBecauseLargerCount: 0
   };
 
   for (const item of items) {
@@ -719,7 +727,9 @@ const seedProgressFromCompletedItems = (items: ScriptResultItem[]) => {
 
     counters.completedCount += 1;
 
-    if (item.operation === 'compress') {
+    if (item.outcome === 'original-retained-size') {
+      counters.retainedOriginalBecauseLargerCount += 1;
+    } else if (item.operation === 'compress') {
       counters.completedCompressCount += 1;
     } else {
       counters.completedCopyCount += 1;
@@ -822,19 +832,22 @@ export const executeCompressionSession = async (sessionId: string) => {
   }, videoResumeItems);
 
   const { totalCount, totalCompressCount, totalCopyCount } = countFilesToProcess(checkpointData.manifest.sourceDir, resolvedSelectionScope);
-  const seededProgress = seedProgressFromCompletedItems(resumeCompletedItems);
+  const checkpointProcessedItems = checkpointData.processedItems ?? [];
+  const checkpointItemsBySource = new Map(checkpointProcessedItems.map((item) => [normalizePath(item.source), item]));
+  const enrichedResumeCompletedItems = resumeCompletedItems.map((item) => checkpointItemsBySource.get(normalizePath(item.source)) ?? item);
+  const seededProgress = seedProgressFromCompletedItems(enrichedResumeCompletedItems);
   const progressState = {
     ...seededProgress,
     totalCompressCount,
     totalCopyCount,
     failedCompressCount: 0,
-    failedCopyCount: 0
+    failedCopyCount: 0,
+    retainedOriginalBecauseLargerCount: seededProgress.retainedOriginalBecauseLargerCount
   };
   let activeItems: ActiveCompressionItem[] = [];
   const completedSources = new Set(resumeCompletedItems.map((item) => normalizePath(item.source)));
-  const checkpointProcessedItems = checkpointData.processedItems ?? [];
   const processedItems: ScriptResultItem[] = [
-    ...resumeCompletedItems,
+    ...enrichedResumeCompletedItems,
     ...checkpointProcessedItems.filter((item) => item.status === 'failed' && !completedSources.has(normalizePath(item.source)))
   ];
 

@@ -15,6 +15,9 @@ type ScriptItem = {
   finishedAt?: number;
   durationMs?: number;
   skipped?: boolean;
+  outcome?: 'original-retained-size';
+  sourceBytes?: number;
+  encodedBytes?: number;
 };
 
 const repoRoot = path.resolve(process.cwd(), '..', '..');
@@ -107,6 +110,45 @@ cp "$2" "$4"
   return filePath;
 };
 
+const writeSizedVideoTool = (toolsDir: string, mode: 'smaller' | 'larger') => {
+  const extension = process.platform === 'win32' ? '.cmd' : '.sh';
+  const filePath = path.join(toolsDir, `handbrake-${mode}${extension}`);
+  const outputCommand = mode === 'smaller'
+    ? process.platform === 'win32'
+      ? `type nul > "%~4"`
+      : `: > "$4"`
+    : process.platform === 'win32'
+      ? `copy /Y "%~2" "%~4" >nul
+echo encoded-output-is-larger>>"%~4"`
+      : `cp "$2" "$4"
+printf 'encoded-output-is-larger\\n' >> "$4"`;
+  const script = process.platform === 'win32'
+    ? `@echo off
+if "%~1"=="--preset-list" (
+  echo General/
+  echo     Fast 1080p30
+  exit /b 0
+)
+${outputCommand}
+exit /b 0
+`
+    : `#!/usr/bin/env sh
+if [ "$1" = "--preset-list" ]; then
+  printf 'General/\\n    Fast 1080p30\\n'
+  exit 0
+fi
+${outputCommand}
+`;
+
+  fs.writeFileSync(filePath, script, 'utf8');
+
+  if (process.platform !== 'win32') {
+    fs.chmodSync(filePath, 0o755);
+  }
+
+  return filePath;
+};
+
 test('compress_videos emits start before completed item for selected videos', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-script-'));
   const sourceDir = path.join(tempRoot, 'source');
@@ -163,6 +205,85 @@ test('compress_videos emits start before completed item for selected videos', ()
   assert.equal(typeof complete?.items?.[0]?.durationMs, 'number');
   assert.equal(fs.existsSync(path.join(outputDir, '.media-organizer', 'debug', 'handbrake')), false);
   assert.ok(fs.existsSync(path.join(outputDir, 'clip.mp4')));
+});
+
+test('compress_videos keeps a compressed video when it is smaller than the source', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-smaller-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'clip.mp4'), 'source-video-content', 'utf8');
+
+  const result = spawnSync(
+    process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python',
+    [
+      scriptPath,
+      '--source-dir',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+      '--encoder-command',
+      writeSizedVideoTool(toolsDir, 'smaller')
+    ],
+    { encoding: 'utf8' }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const complete = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const item = complete?.items?.[0];
+
+  assert.equal(item?.outcome, null);
+  assert.equal(item?.sourceBytes, 'source-video-content'.length);
+  assert.equal(item?.encodedBytes, 0);
+  assert.equal(fs.statSync(path.join(outputDir, 'clip.mp4')).size, 0);
+});
+
+test('compress_videos retains the original when compression would make an MP4 larger', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-larger-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+  const sourceFile = path.join(sourceDir, 'clip.mp4');
+  const outputFile = path.join(outputDir, 'clip.mp4');
+  fs.writeFileSync(sourceFile, 'source-video-content', 'utf8');
+
+  const result = spawnSync(
+    process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python',
+    [
+      scriptPath,
+      '--source-dir',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+      '--encoder-command',
+      writeSizedVideoTool(toolsDir, 'larger')
+    ],
+    { encoding: 'utf8' }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const complete = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const item = complete?.items?.[0];
+
+  assert.equal(item?.operation, 'compress');
+  assert.equal(item?.outcome, 'original-retained-size');
+  assert.ok((item?.encodedBytes ?? 0) > (item?.sourceBytes ?? 0));
+  assert.equal(fs.readFileSync(outputFile, 'utf8'), fs.readFileSync(sourceFile, 'utf8'));
+  assert.equal(fs.readdirSync(outputDir).some((name) => name.includes('media-organizer-tmp')), false);
 });
 
 test('compress_videos preserves MOV extension by default', () => {
@@ -259,6 +380,45 @@ test('compress_videos converts selected MOV outputs to MP4 when requested', () =
   assert.ok(item?.command?.includes('av_mp4'));
   assert.ok(fs.existsSync(path.join(outputDir, 'clip.mp4')));
   assert.equal(fs.existsSync(path.join(outputDir, 'clip.mov')), false);
+});
+
+test('compress_videos keeps an explicitly requested MOV to MP4 conversion even when it is larger', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-larger-mp4-conversion-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'clip.mov'), 'source-video-content', 'utf8');
+
+  const result = spawnSync(
+    process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python',
+    [
+      scriptPath,
+      '--source-dir',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+      '--output-format-mode',
+      'mp4',
+      '--encoder-command',
+      writeSizedVideoTool(toolsDir, 'larger')
+    ],
+    { encoding: 'utf8' }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const complete = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const item = complete?.items?.[0];
+
+  assert.equal(item?.outcome, null);
+  assert.ok((item?.encodedBytes ?? 0) > (item?.sourceBytes ?? 0));
+  assert.ok(fs.statSync(path.join(outputDir, 'clip.mp4')).size > fs.statSync(path.join(sourceDir, 'clip.mov')).size);
 });
 
 test('compress_videos keeps excluded MOV copies in their original container', () => {
