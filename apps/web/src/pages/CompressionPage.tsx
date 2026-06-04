@@ -79,6 +79,9 @@ type CompressionProgressItem = {
   finishedAt?: number;
   durationMs?: number;
   skipped?: boolean;
+  outcome?: 'original-retained-size';
+  sourceBytes?: number;
+  encodedBytes?: number;
 };
 
 type CompressionActiveItem = {
@@ -492,6 +495,7 @@ export const CompressionPage = () => {
     completedCopy: number;
     failedCompress: number;
     failedCopy: number;
+    retainedOriginalBecauseLarger: number;
   } | null>(null);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const completionTimerRef = useRef<number | null>(null);
@@ -510,7 +514,8 @@ export const CompressionPage = () => {
       completedCompress: progress.completedCompress,
       completedCopy: progress.completedCopy,
       failedCompress: progress.failedCompress,
-      failedCopy: progress.failedCopy
+      failedCopy: progress.failedCopy,
+      retainedOriginalBecauseLarger: progress.retainedOriginalBecauseLarger
     });
   };
 
@@ -796,7 +801,8 @@ export const CompressionPage = () => {
           completedCompress: progress.completedCompress,
           completedCopy: progress.completedCopy,
           failedCompress: progress.failedCompress,
-          failedCopy: progress.failedCopy
+          failedCopy: progress.failedCopy,
+          retainedOriginalBecauseLarger: progress.retainedOriginalBecauseLarger
         });
       })
       .catch(() => {
@@ -1023,7 +1029,8 @@ export const CompressionPage = () => {
             completedCompress: progress.completedCompress,
             completedCopy: progress.completedCopy,
             failedCompress: progress.failedCompress,
-            failedCopy: progress.failedCopy
+            failedCopy: progress.failedCopy,
+            retainedOriginalBecauseLarger: progress.retainedOriginalBecauseLarger
           });
 
           const status = progress.status;
@@ -1271,6 +1278,11 @@ export const CompressionPage = () => {
               totalCopy: progressData.totalCopy
             })}
           </p>
+          {progressData.retainedOriginalBecauseLarger > 0 && (
+            <p className="page-summary-note compression-warning">
+              {t('compression.retainedOriginalBecauseLarger', { count: progressData.retainedOriginalBecauseLarger })}
+            </p>
+          )}
 
           <div className="compression-progress-bar">
             <div 
@@ -1339,7 +1351,9 @@ export const CompressionPage = () => {
                         {item.status === 'completed' ? '✓' : '✗'}
                       </span>
                       <span className="compression-log-name">
-                        {t(item.skipped && item.operation === 'copy'
+                        {t(item.outcome === 'original-retained-size'
+                          ? 'compression.logOriginalRetainedSize'
+                          : item.skipped && item.operation === 'copy'
                           ? 'compression.logCopySkipped'
                           : item.operation === 'compress'
                             ? 'compression.logCompressed'

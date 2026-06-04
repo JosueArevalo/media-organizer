@@ -80,6 +80,7 @@ type CompressionCheckpointPayload = {
     completedCopyCount?: number;
     failedCompressCount?: number;
     failedCopyCount?: number;
+    retainedOriginalBecauseLargerCount?: number;
   };
   activeItems?: unknown[];
   processedItems?: unknown[];
@@ -287,10 +288,6 @@ export const getCompressionSession = (sessionId: string) => {
       }
     | undefined;
 
-  if (!session) {
-    return null;
-  }
-
   const checkpointRow = db
     .prepare('SELECT id, session_id, stage, cursor, payload_json, updated_at FROM session_checkpoints WHERE session_id = ? AND stage = ?')
     .get(sessionId, 'compress') as
@@ -304,6 +301,10 @@ export const getCompressionSession = (sessionId: string) => {
       }
     | undefined;
 
+  if (!session || !checkpointRow) {
+    return null;
+  }
+
   return {
     session: {
       id: session.id,
@@ -315,16 +316,14 @@ export const getCompressionSession = (sessionId: string) => {
       updatedAt: session.updated_at,
       lastOpenedAt: session.last_opened_at
     },
-    checkpoint: checkpointRow
-      ? {
-          id: checkpointRow.id,
-          sessionId: checkpointRow.session_id,
-          stage: checkpointRow.stage,
-          cursor: checkpointRow.cursor,
-          payloadJson: checkpointRow.payload_json,
-          updatedAt: checkpointRow.updated_at
-        }
-      : null
+    checkpoint: {
+      id: checkpointRow.id,
+      sessionId: checkpointRow.session_id,
+      stage: checkpointRow.stage,
+      cursor: checkpointRow.cursor,
+      payloadJson: checkpointRow.payload_json,
+      updatedAt: checkpointRow.updated_at
+    }
   };
 };
 
@@ -334,10 +333,11 @@ export const getActiveCompressionSession = () => {
   const row = db
     .prepare(
       `
-        SELECT id
-        FROM sessions
-        WHERE status IN ('running', 'paused')
-        ORDER BY datetime(updated_at) DESC
+        SELECT s.id
+        FROM sessions s
+        JOIN session_checkpoints sc ON sc.session_id = s.id AND sc.stage = 'compress'
+        WHERE s.status IN ('running', 'paused')
+        ORDER BY datetime(s.updated_at) DESC
         LIMIT 1
       `
     )
@@ -381,6 +381,9 @@ export interface CompressionProgressData {
     finishedAt?: number;
     durationMs?: number;
     skipped?: boolean;
+    outcome?: 'original-retained-size';
+    sourceBytes?: number;
+    encodedBytes?: number;
   }>;
   totalCompress: number;
   totalCopy: number;
@@ -388,6 +391,7 @@ export interface CompressionProgressData {
   completedCopy: number;
   failedCompress: number;
   failedCopy: number;
+  retainedOriginalBecauseLarger: number;
 }
 
 export const getCompressionProgress = (sessionId: string): CompressionProgressData | null => {
@@ -398,14 +402,14 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
     .prepare('SELECT id, status FROM sessions WHERE id = ?')
     .get(sessionId) as { id: string; status: string } | undefined;
 
-  if (!session) {
-    return null;
-  }
-
   // Get total count from checkpoint
   const checkpoint = db
     .prepare('SELECT payload_json FROM session_checkpoints WHERE session_id = ? AND stage = ?')
     .get(sessionId, 'compress') as { payload_json: string } | undefined;
+
+  if (!session || !checkpoint) {
+    return null;
+  }
 
   let totalCount = 0;
   let checkpointCompletedCount: number | null = null;
@@ -416,6 +420,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   let checkpointCompletedCopyCount: number | null = null;
   let checkpointFailedCompressCount: number | null = null;
   let checkpointFailedCopyCount: number | null = null;
+  let retainedOriginalBecauseLargerCount = 0;
   let activeItems: Array<{ id: string; sourcePath: string; operation: 'compress' | 'copy'; startedAt?: number }> = [];
   let checkpointProcessedItems: CompressionProgressData['processedItems'] = [];
   if (checkpoint?.payload_json) {
@@ -430,6 +435,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
       checkpointCompletedCopyCount = parsed.summary?.completedCopyCount ?? null;
       checkpointFailedCompressCount = parsed.summary?.failedCompressCount ?? null;
       checkpointFailedCopyCount = parsed.summary?.failedCopyCount ?? null;
+      retainedOriginalBecauseLargerCount = parsed.summary?.retainedOriginalBecauseLargerCount ?? 0;
       activeItems = Array.isArray(parsed.activeItems)
         ? parsed.activeItems
             .filter((item: { id?: unknown; sourcePath?: unknown; operation?: unknown }) =>
@@ -459,6 +465,9 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
               finishedAt?: unknown;
               durationMs?: unknown;
               skipped?: unknown;
+              outcome?: unknown;
+              sourceBytes?: unknown;
+              encodedBytes?: unknown;
             }) => ({
               id: item.source,
               sourcePath: item.source,
@@ -467,7 +476,10 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
               ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {}),
               ...(typeof item.finishedAt === 'number' ? { finishedAt: item.finishedAt } : {}),
               ...(typeof item.durationMs === 'number' ? { durationMs: item.durationMs } : {}),
-              ...(typeof item.skipped === 'boolean' ? { skipped: item.skipped } : {})
+              ...(typeof item.skipped === 'boolean' ? { skipped: item.skipped } : {}),
+              ...(item.outcome === 'original-retained-size' ? { outcome: item.outcome } : {}),
+              ...(typeof item.sourceBytes === 'number' ? { sourceBytes: item.sourceBytes } : {}),
+              ...(typeof item.encodedBytes === 'number' ? { encodedBytes: item.encodedBytes } : {})
             }))
         : [];
     } catch (e) {
@@ -556,7 +568,8 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
     completedCompress: completedCompressCount,
     completedCopy: completedCopyCount,
     failedCompress: failedCompressCount,
-    failedCopy: failedCopyCount
+    failedCopy: failedCopyCount,
+    retainedOriginalBecauseLarger: retainedOriginalBecauseLargerCount
   };
 };
 
@@ -569,7 +582,7 @@ export const reconcileInterruptedCompressionSessions = () => {
       `
         SELECT s.id, sc.payload_json
         FROM sessions s
-        LEFT JOIN session_checkpoints sc ON sc.session_id = s.id AND sc.stage = 'compress'
+        JOIN session_checkpoints sc ON sc.session_id = s.id AND sc.stage = 'compress'
         WHERE s.status = 'running'
       `
     )
