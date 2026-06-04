@@ -117,6 +117,11 @@ export const executeExportJob = async (jobId: string) => {
 
     refreshExportJobCounters(jobId);
     await yieldToEventLoop();
+
+    const statusAfterItem = getExportJobStatus(jobId);
+    if (statusAfterItem === 'paused' || statusAfterItem === 'cancelled') {
+      return refreshExportJobCounters(jobId, statusAfterItem);
+    }
   }
 
   return refreshExportJobCounters(jobId);

@@ -47,7 +47,10 @@ export const NetworkFolderExportPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const groupingSessionState = useGroupingSessionState();
-  const exportJobState = useExportJobState();
+  const exportJobState = useExportJobState('network-folder', {
+    groupingSessionId: groupingSessionState.backendSessionId,
+    sourceRoot: groupingSessionState.outputRootLabel
+  });
   const [destinationPath, setDestinationPath] = useState(exportJobState.destinationPath ?? '');
   const [targetTest, setTargetTest] = useState<ExportTargetTestResult | null>(null);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
@@ -88,14 +91,17 @@ export const NetworkFolderExportPage = () => {
         backendJobId: nextProgress.jobId,
         status: nextProgress.status,
         sourceRoot,
+        groupingSessionId: groupingSessionState.backendSessionId,
         destinationPath,
+        googlePhotosAccountId: null,
+        targetType: 'network-folder',
         startedAt: exportJobState.startedAt ?? Date.now(),
         completedAt: ['completed', 'failed', 'cancelled'].includes(nextProgress.status) ? Date.now() : null,
         errorMessage: nextProgress.failed > 0 ? t('export.completedWithErrors', { count: nextProgress.failed }) : null,
         updatedAt: Date.now()
       });
     },
-    [destinationPath, exportJobState.startedAt, sourceRoot, t]
+    [destinationPath, exportJobState.startedAt, groupingSessionState.backendSessionId, sourceRoot, t]
   );
 
   const refreshProgress = useCallback(async () => {
@@ -408,6 +414,7 @@ export const NetworkFolderExportPage = () => {
         : await createExportJobRequest({
             name: t('export.defaultJobName'),
             sourceRoot,
+            groupingSessionId: groupingSessionState.backendSessionId ?? undefined,
             target: { type: 'network-folder', destinationPath }
           });
 
@@ -415,7 +422,10 @@ export const NetworkFolderExportPage = () => {
         backendJobId: job.job.id,
         status: job.job.status,
         sourceRoot,
+        groupingSessionId: groupingSessionState.backendSessionId,
         destinationPath,
+        googlePhotosAccountId: null,
+        targetType: 'network-folder',
         startedAt: Date.now(),
         completedAt: null,
         errorMessage: null,
@@ -446,7 +456,10 @@ export const NetworkFolderExportPage = () => {
         backendJobId,
         status: job.job.status,
         sourceRoot,
+        groupingSessionId: groupingSessionState.backendSessionId,
         destinationPath,
+        googlePhotosAccountId: null,
+        targetType: 'network-folder',
         startedAt: exportJobState.startedAt,
         completedAt: null,
         errorMessage: null,
@@ -467,7 +480,10 @@ export const NetworkFolderExportPage = () => {
         backendJobId,
         status: job.job.status,
         sourceRoot,
+        groupingSessionId: groupingSessionState.backendSessionId,
         destinationPath,
+        googlePhotosAccountId: null,
+        targetType: 'network-folder',
         startedAt: exportJobState.startedAt ?? Date.now(),
         completedAt: null,
         errorMessage: null,

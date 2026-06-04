@@ -606,6 +606,7 @@ const updateSessionAndCheckpoint = (
     originalBytes: sizeMetrics.originalBytes,
     finalBytes: sizeMetrics.finalBytes,
     imageProfileLabel: payload.manifest.imageProfileLabel,
+    imageQuality: payload.manifest.imageQuality,
     videoPresetLabel: payload.manifest.videoPresetLabel,
     errorSummary: collectFailedItems(payload.image, payload.video)
   });
@@ -668,6 +669,7 @@ const updateCompressionProgressCheckpoint = (
     completedItems: payload.completedCount,
     failedItems: payload.failedCount,
     imageProfileLabel: payload.manifest.imageProfileLabel,
+    imageQuality: payload.manifest.imageQuality,
     videoPresetLabel: payload.manifest.videoPresetLabel,
     errorSummary: []
   });

@@ -48,6 +48,73 @@ test('collectExportFilePlan preserves nested relative paths and ignores internal
   assert.ok(plan.every((item) => item.destinationPath.startsWith(destinationRoot)));
 });
 
+test('createExportJob links the grouping execution and stores stable coverage metadata', async () => {
+  const { upsertExecutionHistory, linkGroupingExecution } = await import('../src/dashboard/dashboard.service.js?export-link=1');
+  const execution = upsertExecutionHistory({
+    sessionId: 'compression-export-link',
+    name: null,
+    sourceDir: sourceRoot,
+    outputDir: destinationRoot,
+    outputRoot: sourceRoot,
+    status: 'completed',
+    startedAt: '2026-06-01T10:00:00.000Z',
+    finishedAt: '2026-06-01T10:05:00.000Z',
+    updatedAt: '2026-06-01T10:05:00.000Z',
+    totalItems: 2,
+    imageItems: 1,
+    videoItems: 1,
+    completedItems: 2,
+    failedItems: 0,
+    imageProfileLabel: null,
+    videoPresetLabel: null,
+    errorSummary: []
+  });
+  linkGroupingExecution('compression-export-link', 'grouping-export-link');
+
+  const { createExportJob } = await import('../src/pipeline/export/exportJob.service.js?export-link=1');
+  const job = createExportJob({
+    sourceRoot,
+    groupingSessionId: 'grouping-export-link',
+    target: { type: 'network-folder', destinationPath: destinationRoot }
+  });
+
+  assert.equal(job.job.executionId, execution.id);
+  assert.equal(job.job.destinationLabel, destinationRoot);
+  assert.equal(job.job.eligibleItems, 2);
+  assert.equal(job.job.eligibleAlbums, 0);
+});
+
+test('createExportJob falls back to the latest execution matching the source root', async () => {
+  const { upsertExecutionHistory } = await import('../src/dashboard/dashboard.service.js?export-link-fallback=1');
+  const execution = upsertExecutionHistory({
+    sessionId: 'compression-export-fallback',
+    name: null,
+    sourceDir: sourceRoot,
+    outputDir: destinationRoot,
+    outputRoot: sourceRoot,
+    status: 'completed',
+    startedAt: '2026-06-01T10:00:00.000Z',
+    finishedAt: '2026-06-01T10:05:00.000Z',
+    updatedAt: '2026-06-01T10:05:00.000Z',
+    totalItems: 2,
+    imageItems: 1,
+    videoItems: 1,
+    completedItems: 2,
+    failedItems: 0,
+    imageProfileLabel: null,
+    videoPresetLabel: null,
+    errorSummary: []
+  });
+
+  const { createExportJob } = await import('../src/pipeline/export/exportJob.service.js?export-link-fallback=1');
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'network-folder', destinationPath: destinationRoot }
+  });
+
+  assert.equal(job.job.executionId, execution.id);
+});
+
 test('executeExportJob copies files and skips already matching destination files on retry', async () => {
   const { createExportJob, getExportProgress } = await import('../src/pipeline/export/exportJob.service.js');
   const { executeExportJob } = await import('../src/pipeline/export/exportJob.runner.js');
@@ -209,6 +276,24 @@ test('pauseExportJob and start/resume APIs keep resumable job state', async () =
   await executeExportJob(job.job.id);
 
   const completed = getExportJob(job.job.id);
+  assert.equal(completed?.job.status, 'completed');
+  assert.equal(completed?.job.completedItems, 2);
+});
+
+test('paused job becomes completed when its final in-flight item finishes', async () => {
+  const { createExportJob, pauseExportJob, refreshExportJobCounters } = await import(
+    '../src/pipeline/export/exportJob.service.js?pause-final-item=1'
+  );
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'network-folder', destinationPath: destinationRoot }
+  });
+  const db = getDb();
+
+  pauseExportJob(job.job.id);
+  db.prepare("UPDATE export_items SET status = 'completed' WHERE job_id = ?").run(job.job.id);
+
+  const completed = refreshExportJobCounters(job.job.id, 'paused');
   assert.equal(completed?.job.status, 'completed');
   assert.equal(completed?.job.completedItems, 2);
 });

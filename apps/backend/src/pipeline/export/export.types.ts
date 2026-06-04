@@ -3,6 +3,29 @@ export type ExportTargetType = 'network-folder' | 'google-photos';
 export type ExportJobStatus = 'draft' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 export type ExportItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+export type ExportCoverageStatus = 'not_started' | 'partial' | 'completed';
+
+export type ExportDestinationSummary = {
+  label: string;
+  completedJobs: number;
+  lastCompletedAt: string;
+};
+
+export type ExportProviderSummary = {
+  provider: ExportTargetType;
+  coverageStatus: ExportCoverageStatus;
+  eligibleItems: number;
+  coveredItems: number;
+  eligibleAlbums: number | null;
+  coveredAlbums: number | null;
+  completedJobs: number;
+  lastAttempt: {
+    status: ExportJobStatus;
+    updatedAt: string;
+    error: string | null;
+  } | null;
+  completedDestinations: ExportDestinationSummary[];
+};
 
 export type NetworkFolderTarget = {
   type: 'network-folder';
@@ -26,6 +49,7 @@ export type ExportTarget = NetworkFolderTarget | GooglePhotosTarget;
 export type ExportJobRequest = {
   name?: string;
   sourceRoot: string;
+  groupingSessionId?: string;
   target: ExportTarget;
 };
 
@@ -35,6 +59,10 @@ export type ExportJobRecord = {
   sourceRoot: string;
   targetType: ExportTargetType;
   targetPath: string | null;
+  executionId: string | null;
+  destinationLabel: string | null;
+  eligibleItems: number;
+  eligibleAlbums: number;
   status: ExportJobStatus;
   totalItems: number;
   completedItems: number;

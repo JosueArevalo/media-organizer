@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useExportJobState } from '../hooks/useExportJobState';
@@ -19,6 +19,7 @@ import {
   type ExecutionStatus,
   type ExecutionVerification
 } from '../services/dashboard.service';
+import type { ExportCoverageStatus, ExportJobStatus, ExportProviderSummary } from '../services/export.service';
 
 const formatDateTime = (value: string | null) => {
   if (!value) {
@@ -99,6 +100,14 @@ const formatSizeDelta = (originalBytes: number | null, finalBytes: number | null
   return `+${formatBytes(Math.abs(delta))} (${percentage}%)`;
 };
 
+const formatImageCompression = (label: string | null, quality: number | null) => {
+  if (!label) {
+    return quality === null ? '-' : String(quality);
+  }
+
+  return quality === null ? label : `${label} (${quality})`;
+};
+
 const STATUS_LABEL_KEYS: Record<ExecutionStatus, TranslationKey> = {
   running: 'dashboard.status.running',
   completed: 'dashboard.status.completed',
@@ -114,19 +123,96 @@ const VERIFICATION_STATUS_LABEL_KEYS: Record<ExecutionVerification['status'], Tr
 
 const statusClassName = (status: ExecutionStatus) => `dashboard-status dashboard-status-${status}`;
 
-const getExecutionTitle = (execution: DashboardExecution) => execution.name || basename(execution.sourceDir) || execution.sessionId;
-
 const hasRealVerification = (verification: ExecutionVerification | null | undefined) =>
   Boolean(verification?.verifiedAt && verification.expected.total > 0);
 
-const VerificationSummary = ({ verification }: { verification: ExecutionVerification }) => {
+const EXPORT_COVERAGE_LABEL_KEYS: Record<ExportCoverageStatus, TranslationKey> = {
+  not_started: 'export.coverage.notStarted',
+  partial: 'export.coverage.partial',
+  completed: 'export.coverage.completed'
+};
+
+const EXPORT_JOB_STATUS_LABEL_KEYS: Record<ExportJobStatus, TranslationKey> = {
+  draft: 'export.jobStatus.draft',
+  running: 'export.jobStatus.running',
+  paused: 'export.jobStatus.paused',
+  completed: 'export.jobStatus.completed',
+  failed: 'export.jobStatus.failed',
+  cancelled: 'export.jobStatus.cancelled'
+};
+
+const DetailSection = ({
+  title,
+  className = '',
+  children
+}: {
+  title: string;
+  className?: string;
+  children: ReactNode;
+}) => (
+  <section className={`dashboard-detail-section ${className}`.trim()}>
+    <h4 className="dashboard-detail-section-title">{title}</h4>
+    {children}
+  </section>
+);
+
+const ExportSummary = ({ exports }: { exports: ExportProviderSummary[] }) => {
   const { t } = useTranslation();
+  const started = exports.filter((item) => item.lastAttempt);
+  if (started.length === 0) return null;
+
+  return (
+    <DetailSection title={t('dashboard.exports')} className="dashboard-export-summary">
+      <div className="dashboard-export-list">
+        {started.map((summary) => (
+          <div key={summary.provider} className="dashboard-export-row">
+            <div className="dashboard-export-provider-copy">
+              <strong>{t(summary.provider === 'network-folder' ? 'export.provider.networkFolder.title' : 'export.provider.googlePhotos.title')}</strong>
+              <span>{t('export.coverage.items', { covered: summary.coveredItems, eligible: summary.eligibleItems })}</span>
+              {summary.eligibleAlbums !== null && (
+                <span>{t('export.coverage.albums', { covered: summary.coveredAlbums ?? 0, eligible: summary.eligibleAlbums })}</span>
+              )}
+            </div>
+            <div className="dashboard-export-meta">
+              <span>{t('export.coverage.completedJobs', { count: summary.completedJobs })}</span>
+              {summary.completedDestinations.slice(0, 2).map((destination) => (
+                <span key={destination.label} title={destination.label}>{destination.label}</span>
+              ))}
+              {summary.lastAttempt && (
+                <span>{t('dashboard.exportLastAttempt', {
+                  status: t(EXPORT_JOB_STATUS_LABEL_KEYS[summary.lastAttempt.status]),
+                  date: formatDateTime(summary.lastAttempt.updatedAt)
+                })}</span>
+              )}
+              {summary.lastAttempt?.error && <span className="error">{summary.lastAttempt.error}</span>}
+            </div>
+            <div className="dashboard-export-status">
+              <span className={`status-pill export-provider-status-${summary.coverageStatus}`}>
+                {t(EXPORT_COVERAGE_LABEL_KEYS[summary.coverageStatus])}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </DetailSection>
+  );
+};
+
+const VerificationSummary = ({
+  verification,
+  showTitle = true
+}: {
+  verification: ExecutionVerification;
+  showTitle?: boolean;
+}) => {
+  const { t } = useTranslation();
+  const isMismatch = verification.status === 'mismatch';
 
   return (
     <div className={`verification-panel verification-panel-${verification.status}`}>
       <div className="verification-head">
         <div>
-          <p className="page-section-title">{t('verification.title')}</p>
+          {showTitle && <p className="page-section-title">{t('verification.title')}</p>}
           <p className="page-summary-note">
             {verification.status === 'ok'
               ? t('verification.okDescription')
@@ -140,24 +226,38 @@ const VerificationSummary = ({ verification }: { verification: ExecutionVerifica
         </span>
       </div>
       <div className="verification-grid">
-        <div>
-          <strong>{t('verification.expected')}</strong>
-          <span>{t('verification.counts', {
-            total: verification.expected.total,
-            images: verification.expected.images,
-            videos: verification.expected.videos,
-            unknown: verification.expected.unknown
-          })}</span>
-        </div>
-        <div>
-          <strong>{t('verification.destination')}</strong>
-          <span>{t('verification.counts', {
-            total: verification.destination.total,
-            images: verification.destination.images,
-            videos: verification.destination.videos,
-            unknown: verification.destination.unknown
-          })}</span>
-        </div>
+        {isMismatch ? (
+          <>
+            <div>
+              <strong>{t('verification.expected')}</strong>
+              <span>{t('verification.counts', {
+                total: verification.expected.total,
+                images: verification.expected.images,
+                videos: verification.expected.videos,
+                unknown: verification.expected.unknown
+              })}</span>
+            </div>
+            <div>
+              <strong>{t('verification.destination')}</strong>
+              <span>{t('verification.counts', {
+                total: verification.destination.total,
+                images: verification.destination.images,
+                videos: verification.destination.videos,
+                unknown: verification.destination.unknown
+              })}</span>
+            </div>
+          </>
+        ) : (
+          <div>
+            <strong>{t('verification.verifiedMedia')}</strong>
+            <span>{t('verification.counts', {
+              total: verification.destination.total,
+              images: verification.destination.images,
+              videos: verification.destination.videos,
+              unknown: verification.destination.unknown
+            })}</span>
+          </div>
+        )}
         <div>
           <strong>{t('verification.verifiedAt')}</strong>
           <span>{formatDateTime(verification.verifiedAt)}</span>
@@ -173,7 +273,11 @@ export const DashboardPage = () => {
   const { sourceSelection, destinationSelection } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
   const groupingSessionState = useGroupingSessionState();
-  const exportJobState = useExportJobState();
+  const networkExportJobState = useExportJobState('network-folder');
+  const googlePhotosExportJobState = useExportJobState('google-photos');
+  const exportJobState = networkExportJobState.updatedAt >= googlePhotosExportJobState.updatedAt
+    ? networkExportJobState
+    : googlePhotosExportJobState;
   const backendHealth = useBackendHealth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [executions, setExecutions] = useState<DashboardExecution[]>([]);
@@ -249,7 +353,7 @@ export const DashboardPage = () => {
       return {
         title: t('dashboard.workflow.exportRunningTitle'),
         description: t('dashboard.workflow.exportRunningDescription'),
-        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+        action: { to: exportJobState.targetType === 'google-photos' ? '/export/google-photos' : '/export/network-folder', label: t('dashboard.action.openExport') }
       };
     }
 
@@ -257,7 +361,7 @@ export const DashboardPage = () => {
       return {
         title: t('dashboard.workflow.exportFailedTitle'),
         description: exportJobState.errorMessage ?? t('dashboard.workflow.exportFailedDescription'),
-        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+        action: { to: exportJobState.targetType === 'google-photos' ? '/export/google-photos' : '/export/network-folder', label: t('dashboard.action.openExport') }
       };
     }
 
@@ -265,7 +369,7 @@ export const DashboardPage = () => {
       return {
         title: t('dashboard.workflow.exportCompletedTitle'),
         description: t('dashboard.workflow.exportCompletedDescription'),
-        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+        action: { to: exportJobState.targetType === 'google-photos' ? '/export/google-photos' : '/export/network-folder', label: t('dashboard.action.openExport') }
       };
     }
 
@@ -518,9 +622,16 @@ export const DashboardPage = () => {
                     onClick={() => setExpandedExecutionId(isExpanded ? null : execution.id)}
                   >
                     <span className="dashboard-execution-copy">
-                      <span className="job-title">{getExecutionTitle(execution)}</span>
                       <span className="job-meta">
                         {formatDateTime(execution.finishedAt ?? execution.updatedAt)} - {execution.totalItems} {t('dashboard.files')}
+                      </span>
+                      <span className="dashboard-execution-path-summary">
+                        <span title={execution.sourceDir}>
+                          <strong>{t('dashboard.source')}:</strong> {execution.sourceDir}
+                        </span>
+                        <span title={execution.outputRoot ?? execution.outputDir}>
+                          <strong>{t('dashboard.destination')}:</strong> {execution.outputRoot ?? execution.outputDir}
+                        </span>
                       </span>
                     </span>
                     <span className="dashboard-execution-side">
@@ -531,20 +642,62 @@ export const DashboardPage = () => {
 
                   {isExpanded && (
                     <div className="dashboard-execution-details">
-                      <div className="dashboard-detail-grid">
-                        <p><strong>{t('dashboard.compressionStarted')}</strong><br />{formatDateTime(execution.startedAt)}</p>
-                        <p><strong>{t('dashboard.compressionFinished')}</strong><br />{formatDateTime(execution.finishedAt)}</p>
-                        <p><strong>{t('dashboard.compressionDuration')}</strong><br />{formatDuration(execution.startedAt, execution.finishedAt, t)}</p>
-                        <p><strong>{t('dashboard.media')}</strong><br />{execution.imageItems} {t('dashboard.photos')} / {execution.videoItems} {t('dashboard.videos')}</p>
-                        <p><strong>{t('dashboard.originalSize')}</strong><br />{formatBytes(execution.originalBytes)}</p>
-                        <p><strong>{t('dashboard.finalSize')}</strong><br />{formatBytes(execution.finalBytes)}</p>
-                        <p><strong>{t('dashboard.savedSize')}</strong><br />{formatSizeDelta(execution.originalBytes, execution.finalBytes)}</p>
-                        <p><strong>{t('dashboard.source')}</strong><br />{execution.sourceDir}</p>
-                        <p><strong>{t('dashboard.destination')}</strong><br />{execution.outputRoot ?? execution.outputDir}</p>
-                        <p><strong>{t('dashboard.presets')}</strong><br />{execution.imageProfileLabel ?? '-'} / {execution.videoPresetLabel ?? '-'}</p>
-                        <p><strong>{t('dashboard.grouping')}</strong><br />{execution.groupingStatus ? `${t(STATUS_LABEL_KEYS[execution.groupingStatus])} (${execution.groupingCompletedItems}/${execution.groupingTotalItems})` : t('dashboard.groupingNone')}</p>
-                      </div>
-                      {hasRealVerification(execution.verification) && <VerificationSummary verification={execution.verification} />}
+                      <DetailSection title={t('dashboard.compression')} className="dashboard-compression-section">
+                        <div className="dashboard-compression-row dashboard-compression-row-sizes">
+                          <p><strong>{t('dashboard.originalSize')}</strong><br />{formatBytes(execution.originalBytes)}</p>
+                          <p><strong>{t('dashboard.finalSize')}</strong><br />{formatBytes(execution.finalBytes)}</p>
+                          <p className="dashboard-compression-saving"><strong>{t('dashboard.savedSize')}</strong><br />{formatSizeDelta(execution.originalBytes, execution.finalBytes)}</p>
+                        </div>
+                        <div className="dashboard-compression-row dashboard-compression-row-timing">
+                          <p><strong>{t('dashboard.compressionStarted')}</strong><br />{formatDateTime(execution.startedAt)}</p>
+                          <p><strong>{t('dashboard.compressionFinished')}</strong><br />{formatDateTime(execution.finishedAt)}</p>
+                          <p><strong>{t('dashboard.compressionDuration')}</strong><br />{formatDuration(execution.startedAt, execution.finishedAt, t)}</p>
+                        </div>
+                        <div className="dashboard-compression-row dashboard-compression-row-profiles">
+                          <p>
+                            <strong>{t('dashboard.imageCompression')}</strong>
+                            <br />
+                            {formatImageCompression(execution.imageProfileLabel, execution.imageQuality)}
+                          </p>
+                          <p><strong>{t('dashboard.handBrakePreset')}</strong><br />{execution.videoPresetLabel ?? '-'}</p>
+                          <p><strong>{t('dashboard.media')}</strong><br />{execution.imageItems} {t('dashboard.photos')} / {execution.videoItems} {t('dashboard.videos')}</p>
+                        </div>
+                      </DetailSection>
+
+                      <DetailSection title={t('dashboard.organization')} className="dashboard-organization-section">
+                        <div className="dashboard-organization-head">
+                          <div>
+                            <span className="dashboard-organization-description">
+                              {execution.groupingStatus === 'completed'
+                                ? t('dashboard.organizationCompletedDescription')
+                                : execution.groupingStatus
+                                  ? t('dashboard.organizationActiveDescription')
+                                  : t('dashboard.groupingNone')}
+                            </span>
+                            {execution.groupingStatus && execution.groupingStatus !== 'completed' && (
+                              <span>
+                                {t('dashboard.organizationProgress', {
+                                  completed: execution.groupingCompletedItems,
+                                  total: execution.groupingTotalItems
+                                })}
+                              </span>
+                            )}
+                            {execution.groupingFailedItems > 0 && (
+                              <span className="error">{t('dashboard.organizationFailed', { count: execution.groupingFailedItems })}</span>
+                            )}
+                          </div>
+                          {execution.groupingStatus && (
+                            <span className={statusClassName(execution.groupingStatus)}>
+                              {t(STATUS_LABEL_KEYS[execution.groupingStatus])}
+                            </span>
+                          )}
+                        </div>
+                        {hasRealVerification(execution.verification) && (
+                          <VerificationSummary verification={execution.verification} showTitle={false} />
+                        )}
+                      </DetailSection>
+
+                      <ExportSummary exports={execution.exports} />
                       {execution.errorSummary.length > 0 && (
                         <div className="dashboard-error-summary">
                           <strong>{t('dashboard.errors')}</strong>
@@ -553,14 +706,16 @@ export const DashboardPage = () => {
                           ))}
                         </div>
                       )}
-                      <button
-                        className="btn btn-danger-secondary"
-                        type="button"
-                        onClick={() => void handleDeleteExecution(execution.id)}
-                        disabled={isDeletingId === execution.id}
-                      >
-                        {isDeletingId === execution.id ? t('dashboard.deleting') : t('dashboard.deleteExecution')}
-                      </button>
+                      <div className="dashboard-execution-footer">
+                        <button
+                          className="btn btn-danger-secondary"
+                          type="button"
+                          onClick={() => void handleDeleteExecution(execution.id)}
+                          disabled={isDeletingId === execution.id}
+                        >
+                          {isDeletingId === execution.id ? t('dashboard.deleting') : t('dashboard.deleteExecution')}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </li>
