@@ -42,6 +42,7 @@ export type DashboardExecution = {
   groupingCompletedItems: number;
   groupingFailedItems: number;
   verification: ExecutionVerification;
+  exports: ExportProviderSummary[];
 };
 
 export type DashboardSummary = {
@@ -100,3 +101,4 @@ export const deleteDashboardExecution = async (executionId: string): Promise<voi
 };
 
 export const getBackendHealth = async (): Promise<BackendHealth> => requestJson<BackendHealth>('/api/health');
+import type { ExportProviderSummary } from './export.service';

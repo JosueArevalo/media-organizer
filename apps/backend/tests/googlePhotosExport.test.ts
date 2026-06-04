@@ -413,6 +413,87 @@ test('Google Photos export persists partial failures and does not retry complete
   }
 });
 
+test('Google Photos pause during media creation stops before the next item and resumes remaining work', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-b.jpg'), 'image-b');
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-c.jpg'), 'image-c');
+
+  let batchCount = 0;
+  let releaseFirstBatch: (() => void) | null = null;
+  let notifyFirstBatch: (() => void) | null = null;
+  const firstBatchStarted = new Promise<void>((resolve) => {
+    notifyFirstBatch = resolve;
+  });
+  const firstBatchReleased = new Promise<void>((resolve) => {
+    releaseFirstBatch = resolve;
+  });
+
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+
+    if (url.includes('/albums') && init?.method !== 'POST') {
+      return new Response(JSON.stringify({ albums: [] }), { status: 200 });
+    }
+
+    if (url.endsWith('/albums') && init?.method === 'POST') {
+      return new Response(JSON.stringify({ id: 'album-1', title: '2026.04 - Trip' }), { status: 200 });
+    }
+
+    if (url.endsWith('/uploads')) {
+      return new Response(`upload-token-${batchCount + 1}`, { status: 200 });
+    }
+
+    if (url.endsWith('/mediaItems:batchCreate')) {
+      batchCount += 1;
+      const body = JSON.parse(String(init?.body)) as { newMediaItems: Array<{ simpleMediaItem: { uploadToken: string } }> };
+
+      if (batchCount === 1) {
+        notifyFirstBatch?.();
+        await firstBatchReleased;
+      }
+
+      return new Response(JSON.stringify({
+        newMediaItemResults: body.newMediaItems.map((item) => ({
+          uploadToken: item.simpleMediaItem.uploadToken,
+          mediaItem: { id: `media-${batchCount}` }
+        }))
+      }), { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  const { createExportJob, getExportProgress, pauseExportJob } = await import(
+    '../src/pipeline/export/exportJob.service.js?google-pause-race=1'
+  );
+  const { executeExportJob } = await import('../src/pipeline/export/exportJob.runner.js?google-pause-race=1');
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1' }
+  });
+
+  const execution = executeExportJob(job.job.id);
+  await firstBatchStarted;
+  pauseExportJob(job.job.id);
+  releaseFirstBatch?.();
+  await execution;
+
+  const pausedProgress = getExportProgress(job.job.id);
+  assert.equal(pausedProgress?.status, 'paused');
+  assert.equal(pausedProgress?.completed, 1);
+  assert.equal(pausedProgress?.pending, 2);
+  assert.equal(batchCount, 1);
+
+  await executeExportJob(job.job.id);
+
+  const completedProgress = getExportProgress(job.job.id);
+  assert.equal(completedProgress?.status, 'completed');
+  assert.equal(completedProgress?.completed, 3);
+  assert.equal(completedProgress?.pending, 0);
+  assert.equal(batchCount, 3);
+});
+
 test('Google Photos planning skips unsupported file types before upload', async () => {
   await insertGooglePhotosAccount();
   fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'notes.txt'), 'not media');
@@ -425,6 +506,8 @@ test('Google Photos planning skips unsupported file types before upload', async 
 
   const progress = getExportProgress(job.job.id);
   assert.equal(progress?.total, 1);
+  assert.equal(job.job.eligibleItems, 0);
+  assert.equal(job.job.eligibleAlbums, 0);
   assert.equal(progress?.recentItems[0].status, 'skipped');
   assert.match(progress?.recentItems[0].lastError ?? '', /not supported/);
 });

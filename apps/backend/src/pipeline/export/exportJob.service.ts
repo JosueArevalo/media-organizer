@@ -39,6 +39,10 @@ const toJobRecord = (row: {
   source_root: string;
   target_type: ExportJobRecord['targetType'];
   target_path: string | null;
+  execution_id: string | null;
+  destination_label: string | null;
+  eligible_items: number;
+  eligible_albums: number;
   status: ExportJobRecord['status'];
   total_items: number;
   completed_items: number;
@@ -54,6 +58,10 @@ const toJobRecord = (row: {
   sourceRoot: row.source_root,
   targetType: row.target_type,
   targetPath: row.target_path,
+  executionId: row.execution_id,
+  destinationLabel: row.destination_label,
+  eligibleItems: row.eligible_items,
+  eligibleAlbums: row.eligible_albums,
   status: row.status,
   totalItems: row.total_items,
   completedItems: row.completed_items,
@@ -266,6 +274,25 @@ const assertExportJobRequest = (request: ExportJobRequest) => {
   }
 };
 
+const resolveExecutionId = (groupingSessionId: string | undefined, sourceRoot: string) => {
+  const db = getDb();
+  const groupingRow = groupingSessionId
+    ? db.prepare('SELECT id FROM execution_history WHERE grouping_session_id = ?').get(groupingSessionId) as { id: string } | undefined
+    : undefined;
+  if (groupingRow) return groupingRow.id;
+
+  const row = db
+    .prepare(
+      `SELECT id
+       FROM execution_history
+       WHERE output_root = ?
+       ORDER BY datetime(updated_at) DESC
+       LIMIT 1`
+    )
+    .get(sourceRoot) as { id: string } | undefined;
+  return row?.id ?? null;
+};
+
 export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot => {
   runMigrations();
   assertExportJobRequest(request);
@@ -274,6 +301,17 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
   const timestamp = nowIso();
   const jobId = randomUUID();
   const targetPath = request.target.type === 'network-folder' ? request.target.destinationPath : null;
+  const executionId = resolveExecutionId(request.groupingSessionId, request.sourceRoot);
+  const destinationLabel = request.target.type === 'network-folder'
+    ? request.target.destinationPath
+    : getGooglePhotosAccount(request.target.accountId)?.email ?? null;
+  const fullGooglePhotosPlan = request.target.type === 'google-photos' ? collectGooglePhotosFilePlan(request.sourceRoot) : null;
+  const eligibleItems = request.target.type === 'network-folder'
+    ? collectExportFilePlan(request.sourceRoot, request.target.destinationPath).length
+    : fullGooglePhotosPlan?.filter((item) => item.supported).length ?? 0;
+  const eligibleAlbums = request.target.type === 'google-photos'
+    ? new Set(fullGooglePhotosPlan?.filter((item) => item.supported).map((item) => item.albumTitle)).size
+    : 0;
   const plannedItems = request.target.type === 'network-folder'
     ? collectExportFilePlan(request.sourceRoot, request.target.destinationPath).map((item) => ({
         ...item,
@@ -292,6 +330,10 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
           source_root,
           target_type,
           target_path,
+          execution_id,
+          destination_label,
+          eligible_items,
+          eligible_albums,
           status,
           total_items,
           completed_items,
@@ -301,7 +343,7 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
           created_at,
           updated_at,
           last_opened_at
-        ) VALUES (?, ?, ?, ?, ?, 'draft', ?, 0, 0, 0, NULL, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, 0, 0, 0, NULL, ?, ?, ?)
       `
     ).run(
       jobId,
@@ -309,6 +351,10 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
       request.sourceRoot,
       request.target.type,
       targetPath,
+      executionId,
+      destinationLabel,
+      eligibleItems,
+      eligibleAlbums,
       plannedItems.length,
       timestamp,
       timestamp,
@@ -895,6 +941,7 @@ export const markExportItemRunning = (itemId: string, cursor: string | null) => 
 export const refreshExportJobCounters = (jobId: string, statusOverride?: ExportJobRecord['status']) => {
   const db = getDb();
   const timestamp = nowIso();
+  const currentStatus = getExportJobStatus(jobId);
   const counts = db
     .prepare(
       `
@@ -924,7 +971,14 @@ export const refreshExportJobCounters = (jobId: string, statusOverride?: ExportJ
   const pending = counts.pending ?? 0;
   const running = counts.running ?? 0;
   const hasWorkLeft = pending + running > 0;
-  const nextStatus = statusOverride ?? (hasWorkLeft ? 'running' : failed > 0 ? 'failed' : completed + skipped >= counts.total ? 'completed' : 'running');
+  const derivedStatus = hasWorkLeft ? 'running' : failed > 0 ? 'failed' : completed + skipped >= counts.total ? 'completed' : 'running';
+  const effectiveOverride = statusOverride === 'paused' && !hasWorkLeft ? undefined : statusOverride;
+  const nextStatus = effectiveOverride
+    ?? (currentStatus === 'cancelled'
+      ? 'cancelled'
+      : currentStatus === 'paused' && hasWorkLeft
+        ? 'paused'
+        : derivedStatus);
 
   db.prepare(
     `

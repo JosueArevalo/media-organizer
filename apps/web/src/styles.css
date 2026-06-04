@@ -2864,6 +2864,7 @@ body {
 }
 
 .export-provider-card {
+  position: relative;
   min-height: 128px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2876,6 +2877,77 @@ body {
   padding: 18px;
   text-decoration: none;
   transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.export-provider-card-completed {
+  border-color: rgba(16, 185, 129, 0.55);
+}
+
+.export-provider-card-partial {
+  border-color: rgba(245, 158, 11, 0.55);
+}
+
+.export-provider-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #059669;
+  color: white;
+  font-weight: 800;
+}
+
+.export-provider-coverage {
+  font-weight: 600;
+}
+
+.export-provider-status-not_started {
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--text-muted);
+}
+
+.export-provider-status-partial {
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
+}
+
+.export-provider-status-completed {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+.dashboard-export-summary {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.dashboard-export-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.dashboard-export-provider {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.dashboard-export-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text);
 }
 
 .export-provider-card:hover {

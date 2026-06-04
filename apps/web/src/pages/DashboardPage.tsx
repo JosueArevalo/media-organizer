@@ -19,6 +19,7 @@ import {
   type ExecutionStatus,
   type ExecutionVerification
 } from '../services/dashboard.service';
+import type { ExportCoverageStatus, ExportJobStatus, ExportProviderSummary } from '../services/export.service';
 
 const formatDateTime = (value: string | null) => {
   if (!value) {
@@ -119,6 +120,60 @@ const getExecutionTitle = (execution: DashboardExecution) => execution.name || b
 const hasRealVerification = (verification: ExecutionVerification | null | undefined) =>
   Boolean(verification?.verifiedAt && verification.expected.total > 0);
 
+const EXPORT_COVERAGE_LABEL_KEYS: Record<ExportCoverageStatus, TranslationKey> = {
+  not_started: 'export.coverage.notStarted',
+  partial: 'export.coverage.partial',
+  completed: 'export.coverage.completed'
+};
+
+const EXPORT_JOB_STATUS_LABEL_KEYS: Record<ExportJobStatus, TranslationKey> = {
+  draft: 'export.jobStatus.draft',
+  running: 'export.jobStatus.running',
+  paused: 'export.jobStatus.paused',
+  completed: 'export.jobStatus.completed',
+  failed: 'export.jobStatus.failed',
+  cancelled: 'export.jobStatus.cancelled'
+};
+
+const ExportSummary = ({ exports }: { exports: ExportProviderSummary[] }) => {
+  const { t } = useTranslation();
+  const started = exports.filter((item) => item.lastAttempt);
+  if (started.length === 0) return null;
+
+  return (
+    <div className="dashboard-export-summary">
+      <p className="page-section-title">{t('dashboard.exports')}</p>
+      <div className="dashboard-export-grid">
+        {started.map((summary) => (
+          <div key={summary.provider} className={`dashboard-export-provider dashboard-export-provider-${summary.coverageStatus}`}>
+            <div className="dashboard-export-head">
+              <strong>{t(summary.provider === 'network-folder' ? 'export.provider.networkFolder.title' : 'export.provider.googlePhotos.title')}</strong>
+              <span className={`status-pill export-provider-status-${summary.coverageStatus}`}>
+                {t(EXPORT_COVERAGE_LABEL_KEYS[summary.coverageStatus])}
+              </span>
+            </div>
+            <span>{t('export.coverage.items', { covered: summary.coveredItems, eligible: summary.eligibleItems })}</span>
+            {summary.eligibleAlbums !== null && (
+              <span>{t('export.coverage.albums', { covered: summary.coveredAlbums ?? 0, eligible: summary.eligibleAlbums })}</span>
+            )}
+            <span>{t('export.coverage.completedJobs', { count: summary.completedJobs })}</span>
+            {summary.lastAttempt && (
+              <span>{t('dashboard.exportLastAttempt', {
+                status: t(EXPORT_JOB_STATUS_LABEL_KEYS[summary.lastAttempt.status]),
+                date: formatDateTime(summary.lastAttempt.updatedAt)
+              })}</span>
+            )}
+            {summary.completedDestinations.slice(0, 3).map((destination) => (
+              <span key={destination.label}>{destination.label} ({destination.completedJobs})</span>
+            ))}
+            {summary.lastAttempt?.error && <span className="error">{summary.lastAttempt.error}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const VerificationSummary = ({ verification }: { verification: ExecutionVerification }) => {
   const { t } = useTranslation();
 
@@ -173,7 +228,11 @@ export const DashboardPage = () => {
   const { sourceSelection, destinationSelection } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
   const groupingSessionState = useGroupingSessionState();
-  const exportJobState = useExportJobState();
+  const networkExportJobState = useExportJobState('network-folder');
+  const googlePhotosExportJobState = useExportJobState('google-photos');
+  const exportJobState = networkExportJobState.updatedAt >= googlePhotosExportJobState.updatedAt
+    ? networkExportJobState
+    : googlePhotosExportJobState;
   const backendHealth = useBackendHealth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [executions, setExecutions] = useState<DashboardExecution[]>([]);
@@ -249,7 +308,7 @@ export const DashboardPage = () => {
       return {
         title: t('dashboard.workflow.exportRunningTitle'),
         description: t('dashboard.workflow.exportRunningDescription'),
-        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+        action: { to: exportJobState.targetType === 'google-photos' ? '/export/google-photos' : '/export/network-folder', label: t('dashboard.action.openExport') }
       };
     }
 
@@ -257,7 +316,7 @@ export const DashboardPage = () => {
       return {
         title: t('dashboard.workflow.exportFailedTitle'),
         description: exportJobState.errorMessage ?? t('dashboard.workflow.exportFailedDescription'),
-        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+        action: { to: exportJobState.targetType === 'google-photos' ? '/export/google-photos' : '/export/network-folder', label: t('dashboard.action.openExport') }
       };
     }
 
@@ -265,7 +324,7 @@ export const DashboardPage = () => {
       return {
         title: t('dashboard.workflow.exportCompletedTitle'),
         description: t('dashboard.workflow.exportCompletedDescription'),
-        action: { to: '/export/network-folder', label: t('dashboard.action.openExport') }
+        action: { to: exportJobState.targetType === 'google-photos' ? '/export/google-photos' : '/export/network-folder', label: t('dashboard.action.openExport') }
       };
     }
 
@@ -545,6 +604,7 @@ export const DashboardPage = () => {
                         <p><strong>{t('dashboard.grouping')}</strong><br />{execution.groupingStatus ? `${t(STATUS_LABEL_KEYS[execution.groupingStatus])} (${execution.groupingCompletedItems}/${execution.groupingTotalItems})` : t('dashboard.groupingNone')}</p>
                       </div>
                       {hasRealVerification(execution.verification) && <VerificationSummary verification={execution.verification} />}
+                      <ExportSummary exports={execution.exports} />
                       {execution.errorSummary.length > 0 && (
                         <div className="dashboard-error-summary">
                           <strong>{t('dashboard.errors')}</strong>

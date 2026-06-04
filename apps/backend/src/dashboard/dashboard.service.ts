@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from '../state/db.js';
 import { runMigrations } from '../state/migrations/runMigrations.js';
 import type { SessionRecord } from '../state/dto/state.types.js';
+import { listExportProviderSummaries } from '../pipeline/export/exportSummary.service.js';
+import type { ExportProviderSummary } from '../pipeline/export/export.types.js';
 
 type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -71,6 +73,7 @@ export type ExecutionHistoryRecord = {
   groupingCompletedItems: number;
   groupingFailedItems: number;
   verification: ExecutionVerification;
+  exports: ExportProviderSummary[];
 };
 
 export type DashboardSummary = {
@@ -224,7 +227,8 @@ const toExecution = (row: ExecutionHistoryRow): ExecutionHistoryRecord => ({
   groupingTotalItems: row.grouping_total_items,
   groupingCompletedItems: row.grouping_completed_items,
   groupingFailedItems: row.grouping_failed_items,
-  verification: parseVerification(row.verification_json, row.output_root)
+  verification: parseVerification(row.verification_json, row.output_root),
+  exports: listExportProviderSummaries({ executionId: row.id })
 });
 
 const listExecutionRows = () => {
@@ -423,8 +427,16 @@ export const listExecutionHistory = (): ExecutionHistoryRecord[] => {
 export const deleteExecutionHistory = (id: string): boolean => {
   runMigrations();
   const db = getDb();
-  const result = db.prepare('DELETE FROM execution_history WHERE id = ?').run(id);
-  return result.changes > 0;
+  try {
+    db.exec('BEGIN TRANSACTION');
+    db.prepare('UPDATE export_jobs SET execution_id = NULL WHERE execution_id = ?').run(id);
+    const result = db.prepare('DELETE FROM execution_history WHERE id = ?').run(id);
+    db.exec('COMMIT');
+    return result.changes > 0;
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 };
 
 const getActiveRuntimeSession = (): SessionRecord | null => {
@@ -501,7 +513,8 @@ export const getDashboardSummary = (): DashboardSummary => {
           groupingTotalItems: 0,
           groupingCompletedItems: 0,
           groupingFailedItems: 0,
-          verification: createNotVerifiedSnapshot(null)
+          verification: createNotVerifiedSnapshot(null),
+          exports: listExportProviderSummaries({ executionId: activeRuntimeSession.id })
       }
       : null);
   const lastExecution = executions.find((execution) => execution.id !== currentExecution?.id && execution.status !== 'running') ?? executions[0] ?? null;

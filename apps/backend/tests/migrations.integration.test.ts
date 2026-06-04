@@ -38,7 +38,8 @@ test('initial migration creates core state tables', async () => {
     '008_execution_verification.sql',
     '009_execution_size_metrics.sql',
     '010_google_photos_export.sql',
-    '011_google_photos_oauth_config.sql'
+    '011_google_photos_oauth_config.sql',
+    '012_export_execution_history.sql'
   ]);
 
   const db = getDb();
@@ -74,7 +75,8 @@ test('initial migration creates core state tables', async () => {
     '008_execution_verification.sql',
     '009_execution_size_metrics.sql',
     '010_google_photos_export.sql',
-    '011_google_photos_oauth_config.sql'
+    '011_google_photos_oauth_config.sql',
+    '012_export_execution_history.sql'
   ]);
 });
 
@@ -195,7 +197,8 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '008_execution_verification.sql',
     '009_execution_size_metrics.sql',
     '010_google_photos_export.sql',
-    '011_google_photos_oauth_config.sql'
+    '011_google_photos_oauth_config.sql',
+    '012_export_execution_history.sql'
   ]);
 
   const tableNames = db
@@ -247,6 +250,7 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '008_execution_verification.sql',
     '009_execution_size_metrics.sql',
     '010_google_photos_export.sql',
-    '011_google_photos_oauth_config.sql'
+    '011_google_photos_oauth_config.sql',
+    '012_export_execution_history.sql'
   ]);
 });

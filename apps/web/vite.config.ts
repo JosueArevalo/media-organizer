@@ -39,7 +39,9 @@ const formatElapsed = (elapsedMs: number | null) => elapsedMs === null ? 'unknow
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: '127.0.0.1',
     port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
         target: 'http://localhost:4000',
