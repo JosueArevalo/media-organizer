@@ -19,6 +19,57 @@ test('dashboard renders persisted provider summaries and completed destinations'
   assert.match(source, /ExportSummary exports=\{execution\.exports\}/);
   assert.match(source, /completedDestinations\.slice/);
   assert.match(source, /dashboard\.exportLastAttempt/);
+  assert.match(source, /dashboard-export-row/);
+  assert.doesNotMatch(source, /destination\.completedJobs/);
+  assert.doesNotMatch(source, /dashboard-export-provider dashboard-export-provider-/);
+});
+
+test('saved executions header labels source and destination without arrows or a paths section', () => {
+  const source = fs.readFileSync(path.join(pagesRoot, 'DashboardPage.tsx'), 'utf8');
+
+  assert.match(source, /dashboard-execution-path-summary/);
+  assert.match(source, /t\('dashboard\.source'\)\}:<\/strong>/);
+  assert.match(source, /t\('dashboard\.destination'\)\}:<\/strong>/);
+  assert.doesNotMatch(source, /title=\{t\('dashboard\.paths'\)\}/);
+  assert.doesNotMatch(source, /navigator\.clipboard|handleCopyPath|dashboard-path-row/);
+  assert.doesNotMatch(source, /aria-hidden="true">→/);
+});
+
+test('compression uses aligned sizes, timing, and profiles rows', () => {
+  const source = fs.readFileSync(path.join(pagesRoot, 'DashboardPage.tsx'), 'utf8');
+  const styles = fs.readFileSync(path.resolve(process.cwd(), 'src', 'styles.css'), 'utf8');
+  const sizesIndex = source.indexOf('dashboard-compression-row-sizes');
+  const timingIndex = source.indexOf('dashboard-compression-row-timing');
+  const profilesIndex = source.indexOf('dashboard-compression-row-profiles');
+
+  assert.ok(sizesIndex >= 0);
+  assert.ok(timingIndex > sizesIndex);
+  assert.ok(profilesIndex > timingIndex);
+  assert.match(source, /dashboard\.imageCompression/);
+  assert.match(source, /dashboard\.handBrakePreset/);
+  assert.doesNotMatch(source.slice(sizesIndex, timingIndex), /aria-hidden="true"/);
+  assert.match(styles, /\.dashboard-compression-row\s*\{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /\.dashboard-compression-row strong\s*\{[\s\S]*font-size: 12px/);
+});
+
+test('completed organization hides progress while incomplete organization shows it', () => {
+  const source = fs.readFileSync(path.join(pagesRoot, 'DashboardPage.tsx'), 'utf8');
+  const english = fs.readFileSync(path.resolve(process.cwd(), 'src', 'i18n', 'locales', 'en.ts'), 'utf8');
+
+  assert.match(source, /execution\.groupingStatus !== 'completed'/);
+  assert.match(source, /dashboard\.organizationProgress/);
+  assert.match(source, /dashboard\.organizationFailed/);
+  assert.match(english, /destination media count matches the expected output/);
+});
+
+test('destination verification is compact when correct and compares counts on mismatch', () => {
+  const source = fs.readFileSync(path.join(pagesRoot, 'DashboardPage.tsx'), 'utf8');
+  const styles = fs.readFileSync(path.resolve(process.cwd(), 'src', 'styles.css'), 'utf8');
+
+  assert.match(source, /const isMismatch = verification\.status === 'mismatch'/);
+  assert.match(source, /verification\.verifiedMedia/);
+  assert.match(source, /isMismatch \?/);
+  assert.match(styles, /\.verification-panel-ok\s*\{[\s\S]*background: transparent;/);
 });
 
 test('provider pages consume only their own active export snapshot', () => {
