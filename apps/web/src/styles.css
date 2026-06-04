@@ -736,7 +736,6 @@ body {
   min-width: 0;
 }
 
-.dashboard-execution-copy .job-title,
 .dashboard-execution-copy .job-meta {
   display: block;
   overflow-wrap: anywhere;
@@ -832,7 +831,7 @@ body {
 
 .dashboard-compression-row:first-of-type {
   border-top: 0;
-  padding-top: 0;
+  padding-top: 8px;
 }
 
 .dashboard-compression-row:last-child {
@@ -875,8 +874,9 @@ body {
   font-size: 12px;
 }
 
-.dashboard-organization-head strong {
-  color: var(--text);
+.dashboard-organization-description {
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .dashboard-alert-list {

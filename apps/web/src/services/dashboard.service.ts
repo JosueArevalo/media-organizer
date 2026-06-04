@@ -35,6 +35,7 @@ export type DashboardExecution = {
   originalBytes: number | null;
   finalBytes: number | null;
   imageProfileLabel: string | null;
+  imageQuality: number | null;
   videoPresetLabel: string | null;
   errorSummary: Array<{ source: string; error: string | null }>;
   groupingStatus: ExecutionStatus | null;

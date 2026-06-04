@@ -42,6 +42,7 @@ export type ExecutionHistoryInput = {
   originalBytes?: number | null;
   finalBytes?: number | null;
   imageProfileLabel: string | null;
+  imageQuality?: number | null;
   videoPresetLabel: string | null;
   errorSummary: Array<{ source: string; error: string | null }>;
 };
@@ -66,6 +67,7 @@ export type ExecutionHistoryRecord = {
   originalBytes: number | null;
   finalBytes: number | null;
   imageProfileLabel: string | null;
+  imageQuality: number | null;
   videoPresetLabel: string | null;
   errorSummary: Array<{ source: string; error: string | null }>;
   groupingStatus: ExecutionStatus | null;
@@ -113,6 +115,7 @@ type ExecutionHistoryRow = {
   original_bytes: number | null;
   final_bytes: number | null;
   image_profile_label: string | null;
+  image_quality: number | null;
   video_preset_label: string | null;
   error_summary_json: string | null;
   grouping_status: ExecutionStatus | null;
@@ -221,6 +224,7 @@ const toExecution = (row: ExecutionHistoryRow): ExecutionHistoryRecord => ({
   originalBytes: row.original_bytes,
   finalBytes: row.final_bytes,
   imageProfileLabel: row.image_profile_label,
+  imageQuality: row.image_quality,
   videoPresetLabel: row.video_preset_label,
   errorSummary: parseErrorSummary(row.error_summary_json),
   groupingStatus: row.grouping_status,
@@ -256,6 +260,7 @@ const listExecutionRows = () => {
           original_bytes,
           final_bytes,
           image_profile_label,
+          image_quality,
           video_preset_label,
           error_summary_json,
           grouping_status,
@@ -300,10 +305,11 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
         original_bytes,
         final_bytes,
         image_profile_label,
+        image_quality,
         video_preset_label,
         error_summary_json,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
         name = excluded.name,
         source_dir = excluded.source_dir,
@@ -321,6 +327,7 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
         original_bytes = excluded.original_bytes,
         final_bytes = excluded.final_bytes,
         image_profile_label = excluded.image_profile_label,
+        image_quality = excluded.image_quality,
         video_preset_label = excluded.video_preset_label,
         error_summary_json = excluded.error_summary_json
     `
@@ -343,6 +350,7 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
     input.originalBytes ?? null,
     input.finalBytes ?? null,
     input.imageProfileLabel,
+    input.imageQuality ?? null,
     input.videoPresetLabel,
     JSON.stringify(input.errorSummary.slice(0, 10)),
     createdAt
@@ -507,6 +515,7 @@ export const getDashboardSummary = (): DashboardSummary => {
           originalBytes: null,
           finalBytes: null,
           imageProfileLabel: null,
+          imageQuality: null,
           videoPresetLabel: null,
           errorSummary: [],
           groupingStatus: null,

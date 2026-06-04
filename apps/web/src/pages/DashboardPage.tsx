@@ -100,6 +100,14 @@ const formatSizeDelta = (originalBytes: number | null, finalBytes: number | null
   return `+${formatBytes(Math.abs(delta))} (${percentage}%)`;
 };
 
+const formatImageCompression = (label: string | null, quality: number | null) => {
+  if (!label) {
+    return quality === null ? '-' : String(quality);
+  }
+
+  return quality === null ? label : `${label} (${quality})`;
+};
+
 const STATUS_LABEL_KEYS: Record<ExecutionStatus, TranslationKey> = {
   running: 'dashboard.status.running',
   completed: 'dashboard.status.completed',
@@ -114,8 +122,6 @@ const VERIFICATION_STATUS_LABEL_KEYS: Record<ExecutionVerification['status'], Tr
 };
 
 const statusClassName = (status: ExecutionStatus) => `dashboard-status dashboard-status-${status}`;
-
-const getExecutionTitle = (execution: DashboardExecution) => execution.name || basename(execution.sourceDir) || execution.sessionId;
 
 const hasRealVerification = (verification: ExecutionVerification | null | undefined) =>
   Boolean(verification?.verifiedAt && verification.expected.total > 0);
@@ -616,7 +622,6 @@ export const DashboardPage = () => {
                     onClick={() => setExpandedExecutionId(isExpanded ? null : execution.id)}
                   >
                     <span className="dashboard-execution-copy">
-                      <span className="job-title">{getExecutionTitle(execution)}</span>
                       <span className="job-meta">
                         {formatDateTime(execution.finishedAt ?? execution.updatedAt)} - {execution.totalItems} {t('dashboard.files')}
                       </span>
@@ -649,7 +654,11 @@ export const DashboardPage = () => {
                           <p><strong>{t('dashboard.compressionDuration')}</strong><br />{formatDuration(execution.startedAt, execution.finishedAt, t)}</p>
                         </div>
                         <div className="dashboard-compression-row dashboard-compression-row-profiles">
-                          <p><strong>{t('dashboard.imageCompression')}</strong><br />{execution.imageProfileLabel ?? '-'}</p>
+                          <p>
+                            <strong>{t('dashboard.imageCompression')}</strong>
+                            <br />
+                            {formatImageCompression(execution.imageProfileLabel, execution.imageQuality)}
+                          </p>
                           <p><strong>{t('dashboard.handBrakePreset')}</strong><br />{execution.videoPresetLabel ?? '-'}</p>
                           <p><strong>{t('dashboard.media')}</strong><br />{execution.imageItems} {t('dashboard.photos')} / {execution.videoItems} {t('dashboard.videos')}</p>
                         </div>
@@ -658,13 +667,13 @@ export const DashboardPage = () => {
                       <DetailSection title={t('dashboard.organization')} className="dashboard-organization-section">
                         <div className="dashboard-organization-head">
                           <div>
-                            <strong>
+                            <span className="dashboard-organization-description">
                               {execution.groupingStatus === 'completed'
                                 ? t('dashboard.organizationCompletedDescription')
                                 : execution.groupingStatus
                                   ? t('dashboard.organizationActiveDescription')
                                   : t('dashboard.groupingNone')}
-                            </strong>
+                            </span>
                             {execution.groupingStatus && execution.groupingStatus !== 'completed' && (
                               <span>
                                 {t('dashboard.organizationProgress', {

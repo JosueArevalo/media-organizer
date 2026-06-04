@@ -30,6 +30,7 @@ test('saved executions header labels source and destination without arrows or a 
   assert.match(source, /dashboard-execution-path-summary/);
   assert.match(source, /t\('dashboard\.source'\)\}:<\/strong>/);
   assert.match(source, /t\('dashboard\.destination'\)\}:<\/strong>/);
+  assert.doesNotMatch(source, /getExecutionTitle|className="job-title"/);
   assert.doesNotMatch(source, /title=\{t\('dashboard\.paths'\)\}/);
   assert.doesNotMatch(source, /navigator\.clipboard|handleCopyPath|dashboard-path-row/);
   assert.doesNotMatch(source, /aria-hidden="true">→/);
@@ -46,19 +47,27 @@ test('compression uses aligned sizes, timing, and profiles rows', () => {
   assert.ok(timingIndex > sizesIndex);
   assert.ok(profilesIndex > timingIndex);
   assert.match(source, /dashboard\.imageCompression/);
+  assert.match(source, /formatImageCompression\(execution\.imageProfileLabel, execution\.imageQuality\)/);
+  assert.match(source, /`\$\{label\} \(\$\{quality\}\)`/);
   assert.match(source, /dashboard\.handBrakePreset/);
   assert.doesNotMatch(source.slice(sizesIndex, timingIndex), /aria-hidden="true"/);
   assert.match(styles, /\.dashboard-compression-row\s*\{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(styles, /\.dashboard-compression-row strong\s*\{[\s\S]*font-size: 12px/);
+  assert.match(styles, /\.dashboard-compression-row:first-of-type\s*\{[\s\S]*padding-top: 8px/);
 });
 
 test('completed organization hides progress while incomplete organization shows it', () => {
   const source = fs.readFileSync(path.join(pagesRoot, 'DashboardPage.tsx'), 'utf8');
   const english = fs.readFileSync(path.resolve(process.cwd(), 'src', 'i18n', 'locales', 'en.ts'), 'utf8');
+  const organizationStart = source.indexOf('className="dashboard-organization-head"');
+  const organizationEnd = source.indexOf('<ExportSummary exports={execution.exports}', organizationStart);
+  const organizationSource = source.slice(organizationStart, organizationEnd);
 
   assert.match(source, /execution\.groupingStatus !== 'completed'/);
   assert.match(source, /dashboard\.organizationProgress/);
   assert.match(source, /dashboard\.organizationFailed/);
+  assert.match(organizationSource, /className="dashboard-organization-description"/);
+  assert.doesNotMatch(organizationSource, /<strong>/);
   assert.match(english, /destination media count matches the expected output/);
 });
 
