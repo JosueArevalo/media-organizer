@@ -131,6 +131,38 @@ test('active session route returns the latest resumable compression session with
   assert.ok(started.session.id);
 });
 
+test('compression routes reject grouping session ids', async () => {
+  const { startGroupingSession } = await import('../src/pipeline/grouping/groupingJob.service.js?compression-routes-domain=1');
+  const grouping = startGroupingSession({
+    sourceDir,
+    outputDir
+  });
+
+  for (const suffix of ['', '/progress']) {
+    const { response, responsePromise } = createResponse();
+    const handled = handleCompressionRoutes({
+      req: createRequest('GET'),
+      res: response,
+      requestUrl: new URL(`http://localhost/api/compression/sessions/${grouping.session.id}${suffix}`)
+    });
+
+    assert.equal(handled, true);
+    const captured = await responsePromise;
+    assert.equal(captured.statusCode, 404);
+  }
+
+  const { response, responsePromise } = createResponse();
+  const handled = handleCompressionRoutes({
+    req: createRequest('POST'),
+    res: response,
+    requestUrl: new URL(`http://localhost/api/compression/sessions/${grouping.session.id}/resume`)
+  });
+
+  assert.equal(handled, true);
+  const captured = await responsePromise;
+  assert.equal(captured.statusCode, 404);
+});
+
 test('resume route accepts a resumable session and returns initial progress', async () => {
   const { startCompressionSession, reconcileInterruptedCompressionSessions } = await import('../src/pipeline/compression/compressionJob.service.js?routes-resume=1');
   const started = startCompressionSession({

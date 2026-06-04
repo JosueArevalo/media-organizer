@@ -288,10 +288,6 @@ export const getCompressionSession = (sessionId: string) => {
       }
     | undefined;
 
-  if (!session) {
-    return null;
-  }
-
   const checkpointRow = db
     .prepare('SELECT id, session_id, stage, cursor, payload_json, updated_at FROM session_checkpoints WHERE session_id = ? AND stage = ?')
     .get(sessionId, 'compress') as
@@ -305,6 +301,10 @@ export const getCompressionSession = (sessionId: string) => {
       }
     | undefined;
 
+  if (!session || !checkpointRow) {
+    return null;
+  }
+
   return {
     session: {
       id: session.id,
@@ -316,16 +316,14 @@ export const getCompressionSession = (sessionId: string) => {
       updatedAt: session.updated_at,
       lastOpenedAt: session.last_opened_at
     },
-    checkpoint: checkpointRow
-      ? {
-          id: checkpointRow.id,
-          sessionId: checkpointRow.session_id,
-          stage: checkpointRow.stage,
-          cursor: checkpointRow.cursor,
-          payloadJson: checkpointRow.payload_json,
-          updatedAt: checkpointRow.updated_at
-        }
-      : null
+    checkpoint: {
+      id: checkpointRow.id,
+      sessionId: checkpointRow.session_id,
+      stage: checkpointRow.stage,
+      cursor: checkpointRow.cursor,
+      payloadJson: checkpointRow.payload_json,
+      updatedAt: checkpointRow.updated_at
+    }
   };
 };
 
@@ -335,10 +333,11 @@ export const getActiveCompressionSession = () => {
   const row = db
     .prepare(
       `
-        SELECT id
-        FROM sessions
-        WHERE status IN ('running', 'paused')
-        ORDER BY datetime(updated_at) DESC
+        SELECT s.id
+        FROM sessions s
+        JOIN session_checkpoints sc ON sc.session_id = s.id AND sc.stage = 'compress'
+        WHERE s.status IN ('running', 'paused')
+        ORDER BY datetime(s.updated_at) DESC
         LIMIT 1
       `
     )
@@ -403,14 +402,14 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
     .prepare('SELECT id, status FROM sessions WHERE id = ?')
     .get(sessionId) as { id: string; status: string } | undefined;
 
-  if (!session) {
-    return null;
-  }
-
   // Get total count from checkpoint
   const checkpoint = db
     .prepare('SELECT payload_json FROM session_checkpoints WHERE session_id = ? AND stage = ?')
     .get(sessionId, 'compress') as { payload_json: string } | undefined;
+
+  if (!session || !checkpoint) {
+    return null;
+  }
 
   let totalCount = 0;
   let checkpointCompletedCount: number | null = null;
@@ -583,7 +582,7 @@ export const reconcileInterruptedCompressionSessions = () => {
       `
         SELECT s.id, sc.payload_json
         FROM sessions s
-        LEFT JOIN session_checkpoints sc ON sc.session_id = s.id AND sc.stage = 'compress'
+        JOIN session_checkpoints sc ON sc.session_id = s.id AND sc.stage = 'compress'
         WHERE s.status = 'running'
       `
     )
