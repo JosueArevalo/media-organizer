@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from '../state/db.js';
 import { runMigrations } from '../state/migrations/runMigrations.js';
 import type { SessionRecord } from '../state/dto/state.types.js';
+import { listExportProviderSummaries } from '../pipeline/export/exportSummary.service.js';
+import type { ExportProviderSummary } from '../pipeline/export/export.types.js';
 
 type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -40,6 +42,7 @@ export type ExecutionHistoryInput = {
   originalBytes?: number | null;
   finalBytes?: number | null;
   imageProfileLabel: string | null;
+  imageQuality?: number | null;
   videoPresetLabel: string | null;
   errorSummary: Array<{ source: string; error: string | null }>;
 };
@@ -64,6 +67,7 @@ export type ExecutionHistoryRecord = {
   originalBytes: number | null;
   finalBytes: number | null;
   imageProfileLabel: string | null;
+  imageQuality: number | null;
   videoPresetLabel: string | null;
   errorSummary: Array<{ source: string; error: string | null }>;
   groupingStatus: ExecutionStatus | null;
@@ -71,6 +75,7 @@ export type ExecutionHistoryRecord = {
   groupingCompletedItems: number;
   groupingFailedItems: number;
   verification: ExecutionVerification;
+  exports: ExportProviderSummary[];
 };
 
 export type DashboardSummary = {
@@ -110,6 +115,7 @@ type ExecutionHistoryRow = {
   original_bytes: number | null;
   final_bytes: number | null;
   image_profile_label: string | null;
+  image_quality: number | null;
   video_preset_label: string | null;
   error_summary_json: string | null;
   grouping_status: ExecutionStatus | null;
@@ -218,13 +224,15 @@ const toExecution = (row: ExecutionHistoryRow): ExecutionHistoryRecord => ({
   originalBytes: row.original_bytes,
   finalBytes: row.final_bytes,
   imageProfileLabel: row.image_profile_label,
+  imageQuality: row.image_quality,
   videoPresetLabel: row.video_preset_label,
   errorSummary: parseErrorSummary(row.error_summary_json),
   groupingStatus: row.grouping_status,
   groupingTotalItems: row.grouping_total_items,
   groupingCompletedItems: row.grouping_completed_items,
   groupingFailedItems: row.grouping_failed_items,
-  verification: parseVerification(row.verification_json, row.output_root)
+  verification: parseVerification(row.verification_json, row.output_root),
+  exports: listExportProviderSummaries({ executionId: row.id })
 });
 
 const listExecutionRows = () => {
@@ -252,6 +260,7 @@ const listExecutionRows = () => {
           original_bytes,
           final_bytes,
           image_profile_label,
+          image_quality,
           video_preset_label,
           error_summary_json,
           grouping_status,
@@ -296,10 +305,11 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
         original_bytes,
         final_bytes,
         image_profile_label,
+        image_quality,
         video_preset_label,
         error_summary_json,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
         name = excluded.name,
         source_dir = excluded.source_dir,
@@ -317,6 +327,7 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
         original_bytes = excluded.original_bytes,
         final_bytes = excluded.final_bytes,
         image_profile_label = excluded.image_profile_label,
+        image_quality = excluded.image_quality,
         video_preset_label = excluded.video_preset_label,
         error_summary_json = excluded.error_summary_json
     `
@@ -339,6 +350,7 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
     input.originalBytes ?? null,
     input.finalBytes ?? null,
     input.imageProfileLabel,
+    input.imageQuality ?? null,
     input.videoPresetLabel,
     JSON.stringify(input.errorSummary.slice(0, 10)),
     createdAt
@@ -423,8 +435,16 @@ export const listExecutionHistory = (): ExecutionHistoryRecord[] => {
 export const deleteExecutionHistory = (id: string): boolean => {
   runMigrations();
   const db = getDb();
-  const result = db.prepare('DELETE FROM execution_history WHERE id = ?').run(id);
-  return result.changes > 0;
+  try {
+    db.exec('BEGIN TRANSACTION');
+    db.prepare('UPDATE export_jobs SET execution_id = NULL WHERE execution_id = ?').run(id);
+    const result = db.prepare('DELETE FROM execution_history WHERE id = ?').run(id);
+    db.exec('COMMIT');
+    return result.changes > 0;
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 };
 
 const getActiveRuntimeSession = (): SessionRecord | null => {
@@ -495,13 +515,15 @@ export const getDashboardSummary = (): DashboardSummary => {
           originalBytes: null,
           finalBytes: null,
           imageProfileLabel: null,
+          imageQuality: null,
           videoPresetLabel: null,
           errorSummary: [],
           groupingStatus: null,
           groupingTotalItems: 0,
           groupingCompletedItems: 0,
           groupingFailedItems: 0,
-          verification: createNotVerifiedSnapshot(null)
+          verification: createNotVerifiedSnapshot(null),
+          exports: listExportProviderSummaries({ executionId: activeRuntimeSession.id })
       }
       : null);
   const lastExecution = executions.find((execution) => execution.id !== currentExecution?.id && execution.status !== 'running') ?? executions[0] ?? null;

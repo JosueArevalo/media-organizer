@@ -245,6 +245,7 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
     completedItems: 0,
     failedItems: 0,
     imageProfileLabel: manifest.imageProfileLabel,
+    imageQuality: manifest.imageQuality,
     videoPresetLabel: manifest.videoPresetLabel,
     errorSummary: []
   });
@@ -706,6 +707,7 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
     completedItems: checkpointPayload.summary?.completedItems ?? 0,
     failedItems: Math.max(1, checkpointPayload.summary?.failedItems ?? 0),
     imageProfileLabel: checkpointPayload.manifest?.imageProfileLabel ?? null,
+    imageQuality: checkpointPayload.manifest?.imageQuality ?? null,
     videoPresetLabel: checkpointPayload.manifest?.videoPresetLabel ?? null,
     errorSummary: [{ source: snapshot.session.sourceDir, error: error.message }]
   });

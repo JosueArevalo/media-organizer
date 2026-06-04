@@ -186,6 +186,11 @@ export const executeGooglePhotosExportJob = async (jobId: string) => {
       await createUploadedBatch(accountId, albumId, queued.splice(0, batchSize));
       refreshExportJobCounters(jobId);
       await yieldToEventLoop();
+
+      const statusAfterBatch = getExportJobStatus(jobId);
+      if (statusAfterBatch === 'paused' || statusAfterBatch === 'cancelled') {
+        return false;
+      }
     }
 
     pendingByAlbum.delete(albumId);
@@ -212,12 +217,22 @@ export const executeGooglePhotosExportJob = async (jobId: string) => {
 
       markExportItemRunning(item.id, item.relativePath);
       const album = await getOrCreateGooglePhotosAlbum(accountId, metadata.localAlbumTitle);
+      const statusAfterAlbum = getExportJobStatus(jobId);
+      if (statusAfterAlbum === 'paused' || statusAfterAlbum === 'cancelled') {
+        return refreshExportJobCounters(jobId, statusAfterAlbum);
+      }
+
       const upload = isUploadTokenFresh(metadata)
         ? { uploadToken: metadata.uploadToken as string, createdAt: metadata.uploadTokenCreatedAt as string }
         : await uploadGooglePhotosMedia(accountId, item.sourcePath, path.basename(item.sourcePath));
 
       if (!isUploadTokenFresh(metadata)) {
         updateGooglePhotosItemUploaded(item.id, album.googleAlbumId, upload.uploadToken, upload.createdAt);
+      }
+
+      const statusAfterUpload = getExportJobStatus(jobId);
+      if (statusAfterUpload === 'paused' || statusAfterUpload === 'cancelled') {
+        return refreshExportJobCounters(jobId, statusAfterUpload);
       }
 
       const queued = pendingByAlbum.get(album.googleAlbumId) ?? [];
@@ -238,6 +253,11 @@ export const executeGooglePhotosExportJob = async (jobId: string) => {
     }
 
     await yieldToEventLoop();
+
+    const statusAfterItem = getExportJobStatus(jobId);
+    if (statusAfterItem === 'paused' || statusAfterItem === 'cancelled') {
+      return refreshExportJobCounters(jobId, statusAfterItem);
+    }
   }
 
   for (const albumId of [...pendingByAlbum.keys()]) {

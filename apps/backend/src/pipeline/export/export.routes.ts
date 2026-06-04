@@ -40,6 +40,7 @@ import type {
   NetworkCreateFolderRequest,
   NetworkDestinationRequest
 } from './export.types.js';
+import { listExportProviderSummaries } from './exportSummary.service.js';
 
 const sendExportRouteError = (res: Parameters<RouteHandler>[0]['res'], error: unknown, fallbackMessage: string) => {
   if (error instanceof NetworkPathError) {
@@ -59,6 +60,17 @@ const escapeHtml = (value: string) =>
     .replaceAll("'", '&#39;');
 
 export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
+  if (requestUrl.pathname === '/api/export/summaries' && req.method === 'GET') {
+    sendJson(res, 200, {
+      summaries: listExportProviderSummaries({
+        executionId: requestUrl.searchParams.get('executionId'),
+        groupingSessionId: requestUrl.searchParams.get('groupingSessionId'),
+        sourceRoot: requestUrl.searchParams.get('sourceRoot')
+      })
+    });
+    return true;
+  }
+
   if (requestUrl.pathname === '/api/export/google-photos/config' && req.method === 'GET') {
     sendJson(res, 200, getGooglePhotosOAuthConfigStatus());
     return true;

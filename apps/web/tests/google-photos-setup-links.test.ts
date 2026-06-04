@@ -69,7 +69,7 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /uploadAllAlbums/);
   assert.match(pageSource, /uploadAlbum/);
   assert.match(pageSource, /hasPreview/);
-  assert.match(pageSource, /disabled=\{!sourceRoot \|\| !selectedAccountId \|\| isPreviewing \|\| hasPreview \|\| isAllVisibleExportCompletedSuccessfully\}/);
+  assert.match(pageSource, /disabled=\{!sourceRoot \|\| !selectedAccountId \|\| isPreviewing \|\| hasPreview \|\| hasActiveUpload \|\| isAllVisibleExportCompletedSuccessfully\}/);
   assert.match(pageSource, /setPreview\(null\)/);
   assert.match(pageSource, /isAllVisibleExportCompletedSuccessfully/);
   assert.match(pageSource, /isAlbumCompletedSuccessfully/);
@@ -84,6 +84,29 @@ test('Google Photos albums section owns upload progress', () => {
   assert.doesNotMatch(pageSource, /google-photos-progress-panel/);
   assert.doesNotMatch(pageSource, /albumNoProgress/);
   assert.doesNotMatch(pageSource, /renderAccordionHeader\('progress'/);
+});
+
+test('Google Photos restores paused album progress without requiring a manual preview', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(pageSource, /useExportJobState\('google-photos'/);
+  assert.match(pageSource, /exportJobState\.googlePhotosAccountId/);
+  assert.match(pageSource, /previewGooglePhotosExportRequest\(\{ accountId: selectedAccountId, sourceRoot \}\)/);
+  assert.match(pageSource, /progress\?\.albumProgress \?\? \[\]/);
+  assert.match(pageSource, /visibleAlbums\.map/);
+  assert.match(pageSource, /activeAlbum = progress\.albumProgress\.find/);
+  assert.match(pageSource, /openOnlySection\('albums'\)/);
+});
+
+test('Google Photos restoration never starts or resumes an export automatically', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+  const componentStart = pageSource.indexOf('export const GooglePhotosExportPage');
+  const startHandler = pageSource.indexOf('const handleStart', componentStart);
+  const restorationSource = pageSource.slice(componentStart, startHandler);
+
+  assert.ok(componentStart >= 0);
+  assert.ok(startHandler > componentStart);
+  assert.doesNotMatch(restorationSource, /startExportJobRequest\(/);
 });
 
 test('Google Photos item states keep distinct visual styles', () => {

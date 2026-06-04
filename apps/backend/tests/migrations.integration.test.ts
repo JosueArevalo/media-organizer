@@ -38,7 +38,9 @@ test('initial migration creates core state tables', async () => {
     '008_execution_verification.sql',
     '009_execution_size_metrics.sql',
     '010_google_photos_export.sql',
-    '011_google_photos_oauth_config.sql'
+    '011_google_photos_oauth_config.sql',
+    '012_export_execution_history.sql',
+    '013_execution_image_quality.sql'
   ]);
 
   const db = getDb();
@@ -74,7 +76,46 @@ test('initial migration creates core state tables', async () => {
     '008_execution_verification.sql',
     '009_execution_size_metrics.sql',
     '010_google_photos_export.sql',
-    '011_google_photos_oauth_config.sql'
+    '011_google_photos_oauth_config.sql',
+    '012_export_execution_history.sql',
+    '013_execution_image_quality.sql'
+  ]);
+});
+
+test('image quality migration backfills execution history from compression checkpoints', () => {
+  const db = getDb();
+
+  db.exec(`
+    CREATE TABLE execution_history (
+      session_id TEXT PRIMARY KEY,
+      image_profile_label TEXT
+    );
+
+    CREATE TABLE session_checkpoints (
+      session_id TEXT NOT NULL,
+      stage TEXT NOT NULL,
+      payload_json TEXT
+    );
+
+    INSERT INTO execution_history (session_id, image_profile_label)
+    VALUES ('session-with-quality', 'Custom'), ('session-without-quality', 'Balanced');
+
+    INSERT INTO session_checkpoints (session_id, stage, payload_json)
+    VALUES
+      ('session-with-quality', 'compress', '{"manifest":{"imageQuality":72}}'),
+      ('session-without-quality', 'compress', '{"manifest":{}}');
+  `);
+
+  db.exec(fs.readFileSync(path.join(migrationsDir, '013_execution_image_quality.sql'), 'utf8'));
+
+  const rows = db.prepare('SELECT session_id, image_quality FROM execution_history ORDER BY session_id').all() as Array<{
+    session_id: string;
+    image_quality: number | null;
+  }>;
+
+  assert.deepEqual(rows.map((row) => ({ ...row })), [
+    { session_id: 'session-with-quality', image_quality: 72 },
+    { session_id: 'session-without-quality', image_quality: null }
   ]);
 });
 
@@ -195,7 +236,9 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '008_execution_verification.sql',
     '009_execution_size_metrics.sql',
     '010_google_photos_export.sql',
-    '011_google_photos_oauth_config.sql'
+    '011_google_photos_oauth_config.sql',
+    '012_export_execution_history.sql',
+    '013_execution_image_quality.sql'
   ]);
 
   const tableNames = db
@@ -247,6 +290,8 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '008_execution_verification.sql',
     '009_execution_size_metrics.sql',
     '010_google_photos_export.sql',
-    '011_google_photos_oauth_config.sql'
+    '011_google_photos_oauth_config.sql',
+    '012_export_execution_history.sql',
+    '013_execution_image_quality.sql'
   ]);
 });

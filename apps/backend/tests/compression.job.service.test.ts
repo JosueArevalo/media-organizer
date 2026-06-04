@@ -270,6 +270,7 @@ test('executeCompressionSession counts copied excluded media in progress while p
   const copiedOutputSize = fs.statSync(path.join(started.outputRoot, 'exclude', 'copied.jpg')).size;
   assert.equal(execution?.originalBytes, copiedSourceSize);
   assert.equal(execution?.finalBytes, copiedOutputSize);
+  assert.equal(execution?.imageQuality, 80);
 
   const progress = getCompressionProgress(started.session.id);
   assert.ok(progress);

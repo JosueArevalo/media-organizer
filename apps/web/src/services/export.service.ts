@@ -3,6 +3,29 @@ export type ExportTargetType = 'network-folder' | 'google-photos';
 export type ExportJobStatus = 'draft' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 export type ExportItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+export type ExportCoverageStatus = 'not_started' | 'partial' | 'completed';
+
+export type ExportDestinationSummary = {
+  label: string;
+  completedJobs: number;
+  lastCompletedAt: string;
+};
+
+export type ExportProviderSummary = {
+  provider: ExportTargetType;
+  coverageStatus: ExportCoverageStatus;
+  eligibleItems: number;
+  coveredItems: number;
+  eligibleAlbums: number | null;
+  coveredAlbums: number | null;
+  completedJobs: number;
+  lastAttempt: {
+    status: ExportJobStatus;
+    updatedAt: string;
+    error: string | null;
+  } | null;
+  completedDestinations: ExportDestinationSummary[];
+};
 
 export type NetworkFolderTarget = {
   type: 'network-folder';
@@ -30,6 +53,10 @@ export type ExportJobSnapshot = {
     sourceRoot: string;
     targetType: ExportTargetType;
     targetPath: string | null;
+    executionId: string | null;
+    destinationLabel: string | null;
+    eligibleItems: number;
+    eligibleAlbums: number;
     status: ExportJobStatus;
     totalItems: number;
     completedItems: number;
@@ -206,7 +233,7 @@ export const testExportTargetRequest = (target: ExportTarget, credentials?: Netw
     body: JSON.stringify({ target, credentials })
   });
 
-export const createExportJobRequest = (payload: { name?: string; sourceRoot: string; target: ExportTarget }) =>
+export const createExportJobRequest = (payload: { name?: string; sourceRoot: string; groupingSessionId?: string; target: ExportTarget }) =>
   requestJson<ExportJobSnapshot>('/api/export/jobs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -218,6 +245,16 @@ export const getExportJobRequest = (jobId: string) =>
 
 export const getExportProgressRequest = (jobId: string) =>
   requestJson<ExportProgress>(`/api/export/jobs/${jobId}/progress`);
+
+export const getExportProviderSummariesRequest = async (input: { groupingSessionId?: string | null; sourceRoot?: string | null }) => {
+  const params = new URLSearchParams();
+  if (input.groupingSessionId) params.set('groupingSessionId', input.groupingSessionId);
+  if (input.sourceRoot) params.set('sourceRoot', input.sourceRoot);
+  const response = await requestJson<{ summaries: ExportProviderSummary[] }>(
+    `/api/export/summaries?${params.toString()}`
+  );
+  return response.summaries;
+};
 
 export const startExportJobRequest = (jobId: string) =>
   requestJson<ExportJobSnapshot>(`/api/export/jobs/${jobId}/start`, { method: 'POST' });
