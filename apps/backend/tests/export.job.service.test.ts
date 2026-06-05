@@ -115,6 +115,75 @@ test('createExportJob falls back to the latest execution matching the source roo
   assert.equal(job.job.executionId, execution.id);
 });
 
+test('network export jobs are listed per session, reject equivalent destinations, and run one at a time', async () => {
+  const secondDestinationRoot = path.join(tempRoot, 'destination-two');
+  fs.mkdirSync(secondDestinationRoot, { recursive: true });
+  const { upsertExecutionHistory, linkGroupingExecution } = await import('../src/dashboard/dashboard.service.js?network-job-history=1');
+  upsertExecutionHistory({
+    sessionId: 'compression-network-job-history',
+    name: null,
+    sourceDir: sourceRoot,
+    outputDir: destinationRoot,
+    outputRoot: sourceRoot,
+    status: 'completed',
+    startedAt: '2026-06-01T10:00:00.000Z',
+    finishedAt: '2026-06-01T10:05:00.000Z',
+    updatedAt: '2026-06-01T10:05:00.000Z',
+    totalItems: 2,
+    imageItems: 1,
+    videoItems: 1,
+    completedItems: 2,
+    failedItems: 0,
+    imageProfileLabel: null,
+    videoPresetLabel: null,
+    errorSummary: []
+  });
+  linkGroupingExecution('compression-network-job-history', 'grouping-network-job-history');
+
+  const {
+    assertExportJobCanStart,
+    createExportJob,
+    listExportJobs,
+    normalizeNetworkDestinationPathForComparison
+  } = await import('../src/pipeline/export/exportJob.service.js?network-job-history=1');
+  const first = createExportJob({
+    sourceRoot,
+    groupingSessionId: 'grouping-network-job-history',
+    target: { type: 'network-folder', destinationPath: destinationRoot }
+  });
+
+  assert.throws(
+    () => createExportJob({
+      sourceRoot,
+      groupingSessionId: 'grouping-network-job-history',
+      target: { type: 'network-folder', destinationPath: `${destinationRoot}${path.sep}` }
+    }),
+    /already exists/
+  );
+
+  const second = createExportJob({
+    sourceRoot,
+    groupingSessionId: 'grouping-network-job-history',
+    target: { type: 'network-folder', destinationPath: secondDestinationRoot }
+  });
+  getDb().prepare('UPDATE export_jobs SET created_at = ? WHERE id = ?').run('2026-06-01T10:10:00.000Z', first.job.id);
+  getDb().prepare('UPDATE export_jobs SET created_at = ? WHERE id = ?').run('2026-06-01T10:20:00.000Z', second.job.id);
+
+  const jobs = listExportJobs({
+    targetType: 'network-folder',
+    groupingSessionId: 'grouping-network-job-history',
+    sourceRoot
+  });
+  assert.deepEqual(jobs.map((job) => job.job.id), [second.job.id, first.job.id]);
+  assert.equal(
+    normalizeNetworkDestinationPathForComparison('\\\\NAS\\Share\\Export09\\'),
+    normalizeNetworkDestinationPathForComparison('//nas/share/export09')
+  );
+
+  getDb().prepare("UPDATE export_jobs SET status = 'running' WHERE id = ?").run(first.job.id);
+  assert.throws(() => assertExportJobCanStart(second.job.id), /already running/);
+});
+
 test('executeExportJob copies files and skips already matching destination files on retry', async () => {
   const { createExportJob, getExportProgress } = await import('../src/pipeline/export/exportJob.service.js');
   const { executeExportJob } = await import('../src/pipeline/export/exportJob.runner.js');

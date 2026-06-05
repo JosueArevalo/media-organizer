@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  assertExportJobCanStart,
   getExportJob,
   getExportJobStatus,
   listRunnableExportItems,
@@ -13,6 +14,14 @@ import {
 } from './exportJob.service.js';
 import type { ExportItemRecord } from './export.types.js';
 import { executeGooglePhotosExportJob } from './googlePhotosExport.runner.js';
+
+const activeNetworkExportJobs = new Set<string>();
+
+export const assertNetworkExportRunnerAvailable = (_jobId: string) => {
+  if (activeNetworkExportJobs.size > 0) {
+    throw new Error('Another network folder export is still finishing its current file.');
+  }
+};
 
 const isAlreadyCopied = (item: ExportItemRecord) => {
   if (!fs.existsSync(item.destinationPath)) {
@@ -58,11 +67,7 @@ const yieldToEventLoop = async () => {
 };
 
 export const executeExportJob = async (jobId: string) => {
-  const snapshot = getExportJob(jobId);
-
-  if (!snapshot) {
-    throw new Error('Export job not found.');
-  }
+  const snapshot = assertExportJobCanStart(jobId);
 
   if (snapshot.job.targetType === 'google-photos') {
     return executeGooglePhotosExportJob(jobId);
@@ -72,57 +77,64 @@ export const executeExportJob = async (jobId: string) => {
     throw new Error('Unsupported export job target.');
   }
 
-  markExportJobRunning(jobId);
-  await yieldToEventLoop();
+  assertNetworkExportRunnerAvailable(jobId);
+  activeNetworkExportJobs.add(jobId);
 
-  resetRunningExportItems(jobId);
-  resetInvalidCompletedExportItems(jobId, isAlreadyCopied);
-  refreshExportJobCounters(jobId, 'running');
-
-  const items = listRunnableExportItems(jobId);
-
-  if (items.length === 0) {
-    return refreshExportJobCounters(jobId, 'completed');
-  }
-
-  for (const item of items.map((row) => ({
-    id: row.id,
-    jobId: row.job_id,
-    sourcePath: row.source_path,
-    relativePath: row.relative_path,
-    destinationPath: row.destination_path,
-    sizeBytes: row.size_bytes,
-    status: row.status,
-    attemptCount: row.attempt_count,
-    lastError: row.last_error,
-    updatedAt: row.updated_at
-  } satisfies ExportItemRecord))) {
-    const currentStatus = getExportJobStatus(jobId);
-
-    if (currentStatus === 'paused' || currentStatus === 'cancelled') {
-      return refreshExportJobCounters(jobId, currentStatus);
-    }
-
-    try {
-      if (isAlreadyCopied(item)) {
-        persistExportItemResult(item.id, 'skipped', null, item.relativePath);
-      } else {
-        markExportItemRunning(item.id, item.relativePath);
-        copyExportItem(item);
-        persistExportItemResult(item.id, 'completed', null, item.relativePath);
-      }
-    } catch (error) {
-      persistExportItemResult(item.id, 'failed', error instanceof Error ? error.message : 'Could not copy file.', item.relativePath);
-    }
-
-    refreshExportJobCounters(jobId);
+  try {
+    markExportJobRunning(jobId);
     await yieldToEventLoop();
 
-    const statusAfterItem = getExportJobStatus(jobId);
-    if (statusAfterItem === 'paused' || statusAfterItem === 'cancelled') {
-      return refreshExportJobCounters(jobId, statusAfterItem);
-    }
-  }
+    resetRunningExportItems(jobId);
+    resetInvalidCompletedExportItems(jobId, isAlreadyCopied);
+    refreshExportJobCounters(jobId, 'running');
 
-  return refreshExportJobCounters(jobId);
+    const items = listRunnableExportItems(jobId);
+
+    if (items.length === 0) {
+      return refreshExportJobCounters(jobId, 'completed');
+    }
+
+    for (const item of items.map((row) => ({
+      id: row.id,
+      jobId: row.job_id,
+      sourcePath: row.source_path,
+      relativePath: row.relative_path,
+      destinationPath: row.destination_path,
+      sizeBytes: row.size_bytes,
+      status: row.status,
+      attemptCount: row.attempt_count,
+      lastError: row.last_error,
+      updatedAt: row.updated_at
+    } satisfies ExportItemRecord))) {
+      const currentStatus = getExportJobStatus(jobId);
+
+      if (currentStatus === 'paused' || currentStatus === 'cancelled') {
+        return refreshExportJobCounters(jobId, currentStatus);
+      }
+
+      try {
+        if (isAlreadyCopied(item)) {
+          persistExportItemResult(item.id, 'skipped', null, item.relativePath);
+        } else {
+          markExportItemRunning(item.id, item.relativePath);
+          copyExportItem(item);
+          persistExportItemResult(item.id, 'completed', null, item.relativePath);
+        }
+      } catch (error) {
+        persistExportItemResult(item.id, 'failed', error instanceof Error ? error.message : 'Could not copy file.', item.relativePath);
+      }
+
+      refreshExportJobCounters(jobId);
+      await yieldToEventLoop();
+
+      const statusAfterItem = getExportJobStatus(jobId);
+      if (statusAfterItem === 'paused' || statusAfterItem === 'cancelled') {
+        return refreshExportJobCounters(jobId, statusAfterItem);
+      }
+    }
+
+    return refreshExportJobCounters(jobId);
+  } finally {
+    activeNetworkExportJobs.delete(jobId);
+  }
 };

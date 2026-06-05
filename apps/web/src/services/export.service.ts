@@ -190,9 +190,9 @@ export type NetworkBrowseResult = {
 };
 
 export const isValidUncPath = (value: string) => {
-  const trimmed = value.trim();
+  const trimmed = value.trim().replace(/\//g, '\\');
 
-  if (!trimmed || trimmed.includes('/')) {
+  if (!trimmed) {
     return false;
   }
 
@@ -200,6 +200,9 @@ export const isValidUncPath = (value: string) => {
 
   return trimmed.startsWith('\\\\') && segments.length >= 1 && segments.every((segment) => segment !== '.' && segment !== '..');
 };
+
+export const normalizeNetworkPathForComparison = (value: string) =>
+  value.trim().replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase();
 
 const readErrorBody = async (response: Response) => {
   const body = await response.text();
@@ -239,6 +242,19 @@ export const createExportJobRequest = (payload: { name?: string; sourceRoot: str
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
+
+export const listExportJobsRequest = async (input: {
+  targetType?: ExportTargetType;
+  groupingSessionId?: string | null;
+  sourceRoot?: string | null;
+}) => {
+  const params = new URLSearchParams();
+  if (input.targetType) params.set('targetType', input.targetType);
+  if (input.groupingSessionId) params.set('groupingSessionId', input.groupingSessionId);
+  if (input.sourceRoot) params.set('sourceRoot', input.sourceRoot);
+  const response = await requestJson<{ jobs: ExportJobSnapshot[] }>(`/api/export/jobs?${params.toString()}`);
+  return response.jobs;
+};
 
 export const getExportJobRequest = (jobId: string) =>
   requestJson<ExportJobSnapshot>(`/api/export/jobs/${jobId}`);

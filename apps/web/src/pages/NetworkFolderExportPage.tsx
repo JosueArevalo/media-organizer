@@ -10,9 +10,10 @@ import {
   createNetworkFolderRequest,
   createExportJobRequest,
   deleteNetworkDestinationRequest,
-  getExportProgressRequest,
   isValidUncPath,
+  listExportJobsRequest,
   listNetworkDestinationsRequest,
+  normalizeNetworkPathForComparison,
   pauseExportJobRequest,
   retryFailedExportItemsRequest,
   saveNetworkDestinationRequest,
@@ -21,7 +22,7 @@ import {
   type NetworkBrowseResult,
   type NetworkCredentials,
   type NetworkDestination,
-  type ExportProgress,
+  type ExportJobSnapshot,
   type ExportTargetTestResult
 } from '../services/export.service';
 
@@ -53,7 +54,7 @@ export const NetworkFolderExportPage = () => {
   });
   const [destinationPath, setDestinationPath] = useState(exportJobState.destinationPath ?? '');
   const [targetTest, setTargetTest] = useState<ExportTargetTestResult | null>(null);
-  const [progress, setProgress] = useState<ExportProgress | null>(null);
+  const [jobs, setJobs] = useState<ExportJobSnapshot[]>([]);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
@@ -78,68 +79,100 @@ export const NetworkFolderExportPage = () => {
   const [newFolderName, setNewFolderName] = useState('');
 
   const sourceRoot = groupingSessionState.outputRootLabel ?? '';
-  const backendJobId = exportJobState.backendJobId;
-  const isPaused = progress?.status === 'paused' || exportJobState.status === 'paused';
-  const canStart = Boolean(sourceRoot && destinationPath.trim() && !isStarting && (targetTest?.ok || isPaused));
-  const isRunning = progress?.status === 'running' || exportJobState.status === 'running';
-  const completeCount = (progress?.completed ?? 0) + (progress?.skipped ?? 0);
-  const progressPercent = progress?.total ? Math.round((completeCount / progress.total) * 100) : 0;
+  const normalizedDestinationPath = normalizeNetworkPathForComparison(destinationPath);
+  const matchingJob = jobs.find((snapshot) =>
+    snapshot.job.targetPath
+    && normalizeNetworkPathForComparison(snapshot.job.targetPath) === normalizedDestinationPath
+  ) ?? null;
+  const runningJob = jobs.find((snapshot) => snapshot.job.status === 'running') ?? null;
+  const canResumeMatchingJob = matchingJob?.job.status === 'paused' || matchingJob?.job.status === 'draft';
+  const canStart = Boolean(
+    sourceRoot
+    && destinationPath.trim()
+    && !isStarting
+    && !runningJob
+    && (canResumeMatchingJob || (!matchingJob && targetTest?.ok))
+  );
 
   const syncSnapshot = useCallback(
-    (nextProgress: ExportProgress) => {
+    (snapshot: ExportJobSnapshot) => {
+      const completedAt = ['completed', 'failed', 'cancelled'].includes(snapshot.job.status)
+        ? exportJobState.backendJobId === snapshot.job.id && exportJobState.completedAt
+          ? exportJobState.completedAt
+          : Date.now()
+        : null;
+
       saveExportJobSnapshot({
-        backendJobId: nextProgress.jobId,
-        status: nextProgress.status,
+        backendJobId: snapshot.job.id,
+        status: snapshot.job.status,
         sourceRoot,
         groupingSessionId: groupingSessionState.backendSessionId,
-        destinationPath,
+        destinationPath: snapshot.job.targetPath,
         googlePhotosAccountId: null,
         targetType: 'network-folder',
-        startedAt: exportJobState.startedAt ?? Date.now(),
-        completedAt: ['completed', 'failed', 'cancelled'].includes(nextProgress.status) ? Date.now() : null,
-        errorMessage: nextProgress.failed > 0 ? t('export.completedWithErrors', { count: nextProgress.failed }) : null,
+        startedAt: exportJobState.backendJobId === snapshot.job.id ? exportJobState.startedAt ?? Date.now() : Date.now(),
+        completedAt,
+        errorMessage: snapshot.job.failedItems > 0 ? t('export.completedWithErrors', { count: snapshot.job.failedItems }) : null,
         updatedAt: Date.now()
       });
     },
-    [destinationPath, exportJobState.startedAt, groupingSessionState.backendSessionId, sourceRoot, t]
+    [exportJobState.backendJobId, exportJobState.completedAt, exportJobState.startedAt, groupingSessionState.backendSessionId, sourceRoot, t]
   );
 
-  const refreshProgress = useCallback(async () => {
-    if (!backendJobId) {
-      return null;
+  const refreshJobs = useCallback(async () => {
+    if (!sourceRoot) {
+      setJobs([]);
+      return [];
     }
 
-    const nextProgress = await getExportProgressRequest(backendJobId);
-    setProgress(nextProgress);
-    syncSnapshot(nextProgress);
-    return nextProgress;
-  }, [backendJobId, syncSnapshot]);
+    const nextJobs = await listExportJobsRequest({
+      targetType: 'network-folder',
+      groupingSessionId: groupingSessionState.backendSessionId,
+      sourceRoot
+    });
+    setJobs(nextJobs);
+    const newestJob = nextJobs[0];
+    const currentJob = nextJobs.find((snapshot) => snapshot.job.id === exportJobState.backendJobId);
+    const snapshotCandidate = nextJobs.find((snapshot) => snapshot.job.status === 'running') ?? currentJob ?? newestJob;
+    if (
+      snapshotCandidate
+      && (
+        exportJobState.backendJobId !== snapshotCandidate.job.id
+        || exportJobState.status !== snapshotCandidate.job.status
+        || exportJobState.destinationPath !== snapshotCandidate.job.targetPath
+      )
+    ) {
+      syncSnapshot(snapshotCandidate);
+    }
+    return nextJobs;
+  }, [
+    exportJobState.backendJobId,
+    exportJobState.destinationPath,
+    exportJobState.status,
+    groupingSessionState.backendSessionId,
+    sourceRoot,
+    syncSnapshot
+  ]);
 
   useEffect(() => {
-    if (!backendJobId) {
-      return;
-    }
-
-    void refreshProgress().catch((error) => {
+    void refreshJobs().catch((error) => {
       setBackendError(error instanceof Error ? error.message : t('export.progressError'));
     });
-  }, [backendJobId, refreshProgress, t]);
+  }, [refreshJobs, t]);
 
   useEffect(() => {
-    if (!isRunning || !backendJobId) {
+    if (!runningJob) {
       return;
     }
 
     const intervalId = window.setInterval(() => {
-      void refreshProgress().catch((error) => {
+      void refreshJobs().catch((error) => {
         setBackendError(error instanceof Error ? error.message : t('export.progressError'));
       });
     }, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [backendJobId, isRunning, refreshProgress, t]);
-
-  const recentItems = useMemo(() => progress?.recentItems ?? [], [progress]);
+  }, [refreshJobs, runningJob, t]);
   const selectedDestination = useMemo(
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
     [destinations, selectedDestinationId]
@@ -409,8 +442,8 @@ export const NetworkFolderExportPage = () => {
         await authenticateNetworkPathRequest({ path: destinationPath, credentials });
       }
 
-      const job = backendJobId
-        ? await startExportJobRequest(backendJobId)
+      const job = canResumeMatchingJob && matchingJob
+        ? await startExportJobRequest(matchingJob.job.id)
         : await createExportJobRequest({
             name: t('export.defaultJobName'),
             sourceRoot,
@@ -418,27 +451,13 @@ export const NetworkFolderExportPage = () => {
             target: { type: 'network-folder', destinationPath }
           });
 
-      saveExportJobSnapshot({
-        backendJobId: job.job.id,
-        status: job.job.status,
-        sourceRoot,
-        groupingSessionId: groupingSessionState.backendSessionId,
-        destinationPath,
-        googlePhotosAccountId: null,
-        targetType: 'network-folder',
-        startedAt: Date.now(),
-        completedAt: null,
-        errorMessage: null,
-        updatedAt: Date.now()
-      });
+      syncSnapshot(job);
 
-      if (!backendJobId) {
+      if (!canResumeMatchingJob) {
         await startExportJobRequest(job.job.id);
       }
 
-      const nextProgress = await getExportProgressRequest(job.job.id);
-      setProgress(nextProgress);
-      syncSnapshot(nextProgress);
+      await refreshJobs();
       setBackendError(null);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.startError'));
@@ -447,49 +466,38 @@ export const NetworkFolderExportPage = () => {
     }
   };
 
-  const handlePause = async () => {
-    if (!backendJobId) return;
+  const handlePause = async (jobId: string) => {
+    const snapshot = jobs.find((job) => job.job.id === jobId);
+    if (!snapshot) return;
 
     try {
-      const job = await pauseExportJobRequest(backendJobId);
-      saveExportJobSnapshot({
-        backendJobId,
-        status: job.job.status,
-        sourceRoot,
-        groupingSessionId: groupingSessionState.backendSessionId,
-        destinationPath,
-        googlePhotosAccountId: null,
-        targetType: 'network-folder',
-        startedAt: exportJobState.startedAt,
-        completedAt: null,
-        errorMessage: null,
-        updatedAt: Date.now()
-      });
-      await refreshProgress();
+      const job = await pauseExportJobRequest(jobId);
+      syncSnapshot(job);
+      await refreshJobs();
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.pauseError'));
     }
   };
 
-  const handleRetryFailed = async () => {
-    if (!backendJobId) return;
+  const handleResume = async (jobId: string) => {
+    try {
+      const job = await startExportJobRequest(jobId);
+      syncSnapshot(job);
+      await refreshJobs();
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : t('export.startError'));
+    }
+  };
+
+  const handleRetryFailed = async (jobId: string) => {
+    const snapshot = jobs.find((job) => job.job.id === jobId);
+    if (!snapshot) return;
 
     try {
-      const job = await retryFailedExportItemsRequest(backendJobId);
-      saveExportJobSnapshot({
-        backendJobId,
-        status: job.job.status,
-        sourceRoot,
-        groupingSessionId: groupingSessionState.backendSessionId,
-        destinationPath,
-        googlePhotosAccountId: null,
-        targetType: 'network-folder',
-        startedAt: exportJobState.startedAt ?? Date.now(),
-        completedAt: null,
-        errorMessage: null,
-        updatedAt: Date.now()
-      });
-      await refreshProgress();
+      const job = await retryFailedExportItemsRequest(jobId);
+      syncSnapshot(job);
+      await refreshJobs();
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.retryError'));
     }
@@ -682,13 +690,7 @@ export const NetworkFolderExportPage = () => {
             {isTesting ? t('export.testing') : t('export.testTarget')}
           </button>
           <button className="btn btn-primary" type="button" onClick={() => void handleStart()} disabled={!canStart}>
-            {isStarting ? t('export.starting') : isPaused ? t('export.resume') : t('export.start')}
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => void handlePause()} disabled={!backendJobId || !isRunning}>
-            {t('export.pause')}
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => void handleRetryFailed()} disabled={!backendJobId || !progress?.failed}>
-            {t('export.retryFailed')}
+            {isStarting ? t('export.starting') : canResumeMatchingJob ? t('export.resume') : t('export.start')}
           </button>
         </div>}
 
@@ -700,59 +702,107 @@ export const NetworkFolderExportPage = () => {
         )}
       </section>
 
-      <section className="settings-panel export-panel">
-        <div className="grouping-main-head">
-          <div>
+      <div className="network-progress-list">
+        {jobs.length === 0 && (
+          <section className="settings-panel export-panel">
             <p className="page-section-title">{t('export.progressTitle')}</p>
-            <p className="page-summary-note">
-              {progress ? t('export.progressSummary', {
-                completed: progress.completed,
-                skipped: progress.skipped,
-                failed: progress.failed,
-                total: progress.total
-              }) : t('export.noJob')}
-            </p>
-          </div>
-          <strong>{progressPercent}%</strong>
-        </div>
-
-        <div className="progress-track" aria-label={t('export.progressAria')}>
-          <div className="export-progress-fill" style={{ width: `${progressPercent}%` }} />
-        </div>
-
-        <div className="export-stats">
-          <div>
-            <strong>{progress?.total ?? 0}</strong>
-            <span>{t('export.total')}</span>
-          </div>
-          <div>
-            <strong>{progress?.completed ?? 0}</strong>
-            <span>{t('export.completed')}</span>
-          </div>
-          <div>
-            <strong>{progress?.skipped ?? 0}</strong>
-            <span>{t('export.skipped')}</span>
-          </div>
-          <div>
-            <strong>{progress?.failed ?? 0}</strong>
-            <span>{t('export.failed')}</span>
-          </div>
-        </div>
-
-        {recentItems.length > 0 && (
-          <div className="export-item-list">
-            {recentItems.map((item) => (
-              <div key={item.id} className="export-item-row">
-                <div>
-                  <strong title={item.relativePath}>{item.relativePath}</strong>
-                  <span>{formatBytes(item.sizeBytes)}</span>
-                </div>
-                <span className={`status-pill status-${item.status}`}>{t(itemStatusLabels[item.status])}</span>
-              </div>
-            ))}
-          </div>
+            <p className="page-summary-note">{t('export.noJob')}</p>
+          </section>
         )}
-      </section>
+
+        {jobs.map((snapshot) => {
+          const job = snapshot.job;
+          const completeCount = job.completedItems + job.skippedItems;
+          const progressPercent = job.totalItems ? Math.round((completeCount / job.totalItems) * 100) : 0;
+          const anotherJobIsRunning = Boolean(runningJob && runningJob.job.id !== job.id);
+
+          return (
+            <section className="settings-panel export-panel network-progress-card" key={job.id}>
+              <div className="grouping-main-head">
+                <div>
+                  <p className="page-section-title">
+                    {t('export.progressTitle')} ({job.targetPath})
+                  </p>
+                  <p className="page-summary-note">
+                    {t('export.progressSummary', {
+                      completed: job.completedItems,
+                      skipped: job.skippedItems,
+                      failed: job.failedItems,
+                      total: job.totalItems
+                    })}
+                  </p>
+                </div>
+                <strong>{progressPercent}%</strong>
+              </div>
+
+              <div className="progress-track" aria-label={`${t('export.progressAria')} (${job.targetPath})`}>
+                <div className="export-progress-fill" style={{ width: `${progressPercent}%` }} />
+              </div>
+
+              <div className="export-stats">
+                <div>
+                  <strong>{job.totalItems}</strong>
+                  <span>{t('export.total')}</span>
+                </div>
+                <div>
+                  <strong>{job.completedItems}</strong>
+                  <span>{t('export.completed')}</span>
+                </div>
+                <div>
+                  <strong>{job.skippedItems}</strong>
+                  <span>{t('export.skipped')}</span>
+                </div>
+                <div>
+                  <strong>{job.failedItems}</strong>
+                  <span>{t('export.failed')}</span>
+                </div>
+              </div>
+
+              <div className="export-actions">
+                {job.status === 'running' && (
+                  <button className="btn btn-secondary" type="button" onClick={() => void handlePause(job.id)}>
+                    {t('export.pause')}
+                  </button>
+                )}
+                {(job.status === 'paused' || job.status === 'draft') && (
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={() => void handleResume(job.id)}
+                    disabled={anotherJobIsRunning}
+                  >
+                    {t('export.resume')}
+                  </button>
+                )}
+                {job.status === 'failed' && (
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={() => void handleRetryFailed(job.id)}
+                    disabled={anotherJobIsRunning}
+                  >
+                    {t('export.retryFailed')}
+                  </button>
+                )}
+              </div>
+
+              {snapshot.recentItems.length > 0 && (
+                <div className="export-item-list">
+                  {snapshot.recentItems.map((item) => (
+                    <div key={item.id} className="export-item-row">
+                      <div>
+                        <strong title={item.relativePath}>{item.relativePath}</strong>
+                        <span>{formatBytes(item.sizeBytes)}</span>
+                      </div>
+                      <span className={`status-pill status-${item.status}`}>{t(itemStatusLabels[item.status])}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
 
       {isBrowserOpen && (
         <div className="modal-backdrop" role="presentation">

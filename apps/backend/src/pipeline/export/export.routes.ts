@@ -1,10 +1,12 @@
 import { readRequestJson, sendCaughtError, sendJson } from '../../http/httpResponses.js';
 import type { RouteHandler } from '../../http/routeTypes.js';
-import { executeExportJob } from './exportJob.runner.js';
+import { assertNetworkExportRunnerAvailable, executeExportJob } from './exportJob.runner.js';
 import {
+  assertExportJobCanStart,
   createExportJob,
   getExportJob,
   getExportProgress,
+  listExportJobs,
   markExportJobFailed,
   pauseExportJob,
   previewGooglePhotosExport,
@@ -205,6 +207,24 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
     return true;
   }
 
+  if (requestUrl.pathname === '/api/export/jobs' && req.method === 'GET') {
+    const targetType = requestUrl.searchParams.get('targetType');
+
+    if (targetType && targetType !== 'network-folder' && targetType !== 'google-photos') {
+      sendJson(res, 400, { status: 'invalid_request', message: 'Unsupported targetType.' });
+      return true;
+    }
+
+    sendJson(res, 200, {
+      jobs: listExportJobs({
+        targetType: targetType as 'network-folder' | 'google-photos' | null,
+        groupingSessionId: requestUrl.searchParams.get('groupingSessionId'),
+        sourceRoot: requestUrl.searchParams.get('sourceRoot')
+      })
+    });
+    return true;
+  }
+
   if (requestUrl.pathname === '/api/export/targets/test' && req.method === 'POST') {
     void (async () => {
       try {
@@ -358,19 +378,17 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
     }
 
     if (req.method === 'POST' && subPath === 'start') {
-      const job = getExportJob(jobId);
-
-      if (!job) {
-        sendJson(res, 404, { status: 'not_found' });
-        return true;
+      try {
+        assertExportJobCanStart(jobId);
+        assertNetworkExportRunnerAvailable(jobId);
+        void executeExportJob(jobId).catch((error) => {
+          console.error(`[backend] export job ${jobId} failed`, error);
+          markExportJobFailed(jobId, error instanceof Error ? error : new Error('Export job failed.'));
+        });
+        sendJson(res, 202, getExportJob(jobId));
+      } catch (error) {
+        sendExportRouteError(res, error, 'Failed to start export job.');
       }
-
-      void executeExportJob(jobId).catch((error) => {
-        console.error(`[backend] export job ${jobId} failed`, error);
-        markExportJobFailed(jobId, error instanceof Error ? error : new Error('Export job failed.'));
-      });
-
-      sendJson(res, 202, getExportJob(jobId));
       return true;
     }
 
@@ -387,19 +405,25 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
     }
 
     if (req.method === 'POST' && subPath === 'retry-failed') {
-      const job = retryFailedExportItems(jobId);
+      try {
+        assertExportJobCanStart(jobId);
+        assertNetworkExportRunnerAvailable(jobId);
+        const job = retryFailedExportItems(jobId);
 
-      if (!job) {
-        sendJson(res, 404, { status: 'not_found' });
-        return true;
+        if (!job) {
+          sendJson(res, 404, { status: 'not_found' });
+          return true;
+        }
+
+        void executeExportJob(jobId).catch((error) => {
+          console.error(`[backend] export job ${jobId} retry failed`, error);
+          markExportJobFailed(jobId, error instanceof Error ? error : new Error('Export job retry failed.'));
+        });
+
+        sendJson(res, 202, getExportJob(jobId));
+      } catch (error) {
+        sendExportRouteError(res, error, 'Failed to retry export job.');
       }
-
-      void executeExportJob(jobId).catch((error) => {
-        console.error(`[backend] export job ${jobId} retry failed`, error);
-        markExportJobFailed(jobId, error instanceof Error ? error : new Error('Export job retry failed.'));
-      });
-
-      sendJson(res, 202, getExportJob(jobId));
       return true;
     }
 

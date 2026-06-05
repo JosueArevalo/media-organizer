@@ -89,6 +89,18 @@ test('provider pages consume only their own active export snapshot', () => {
   assert.match(googleSource, /useExportJobState\('google-photos'/);
 });
 
+test('network export renders session job history with destination-specific controls', () => {
+  const source = fs.readFileSync(path.join(pagesRoot, 'NetworkFolderExportPage.tsx'), 'utf8');
+
+  assert.match(source, /listExportJobsRequest/);
+  assert.match(source, /jobs\.map\(\(snapshot\)/);
+  assert.match(source, /normalizeNetworkPathForComparison/);
+  assert.match(source, /handlePause\(job\.id\)/);
+  assert.match(source, /handleResume\(job\.id\)/);
+  assert.match(source, /handleRetryFailed\(job\.id\)/);
+  assert.match(source, /t\('export\.progressTitle'\)\} \(\{job\.targetPath\}\)/);
+});
+
 test('export completion notifications ignore paused jobs', () => {
   const source = fs.readFileSync(path.join(hooksRoot, 'useCompletionNotifications.ts'), 'utf8');
   const exportNotification = source.slice(source.indexOf('for (const exportJobState'));
