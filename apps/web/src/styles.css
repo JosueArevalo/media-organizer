@@ -3647,6 +3647,15 @@ body {
   padding: 16px 18px;
 }
 
+.network-progress-list {
+  display: grid;
+  gap: 16px;
+}
+
+.network-progress-card .page-section-title {
+  overflow-wrap: anywhere;
+}
+
 .network-export-flow > .success-message,
 .network-export-flow > .error {
   margin: 0 18px 16px;

@@ -20,7 +20,8 @@ import type {
 import {
   authenticateNetworkPath,
   getNetworkErrorMessage,
-  markNetworkDestinationUsed
+  markNetworkDestinationUsed,
+  parseUncPath
 } from './networkDestination.service.js';
 import {
   ensureGooglePhotosItemMetadata,
@@ -112,6 +113,17 @@ const toCheckpointRecord = (row: {
 });
 
 const normalizeExistingPath = (value: string) => path.resolve(value);
+
+export const normalizeNetworkDestinationPath = (value: string) => {
+  try {
+    return parseUncPath(value).normalized;
+  } catch {
+    return value.trim().replace(/[\\/]+$/, '');
+  }
+};
+
+export const normalizeNetworkDestinationPathForComparison = (value: string) =>
+  normalizeNetworkDestinationPath(value).replaceAll('/', '\\').toLocaleLowerCase();
 
 const supportedGooglePhotosExtensions = new Set([
   '.3gp',
@@ -300,10 +312,28 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
   const db = getDb();
   const timestamp = nowIso();
   const jobId = randomUUID();
-  const targetPath = request.target.type === 'network-folder' ? request.target.destinationPath : null;
+  const targetPath = request.target.type === 'network-folder' ? normalizeNetworkDestinationPath(request.target.destinationPath) : null;
   const executionId = resolveExecutionId(request.groupingSessionId, request.sourceRoot);
+
+  if (request.target.type === 'network-folder' && executionId) {
+    const existingPaths = db
+      .prepare(
+        `SELECT target_path
+         FROM export_jobs
+         WHERE execution_id = ?
+           AND target_type = 'network-folder'
+           AND target_path IS NOT NULL`
+      )
+      .all(executionId) as Array<{ target_path: string }>;
+    const normalizedTargetPath = normalizeNetworkDestinationPathForComparison(targetPath as string);
+
+    if (existingPaths.some((row) => normalizeNetworkDestinationPathForComparison(row.target_path) === normalizedTargetPath)) {
+      throw new Error('An export job already exists for this network destination in the current session.');
+    }
+  }
+
   const destinationLabel = request.target.type === 'network-folder'
-    ? request.target.destinationPath
+    ? targetPath
     : getGooglePhotosAccount(request.target.accountId)?.email ?? null;
   const fullGooglePhotosPlan = request.target.type === 'google-photos' ? collectGooglePhotosFilePlan(request.sourceRoot) : null;
   const eligibleItems = request.target.type === 'network-folder'
@@ -313,7 +343,7 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
     ? new Set(fullGooglePhotosPlan?.filter((item) => item.supported).map((item) => item.albumTitle)).size
     : 0;
   const plannedItems = request.target.type === 'network-folder'
-    ? collectExportFilePlan(request.sourceRoot, request.target.destinationPath).map((item) => ({
+    ? collectExportFilePlan(request.sourceRoot, targetPath as string).map((item) => ({
         ...item,
         albumTitle: null,
         supported: true
@@ -411,7 +441,11 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
         INSERT INTO export_checkpoints (id, job_id, cursor, payload_json, updated_at)
         VALUES (?, ?, NULL, ?, ?)
       `
-    ).run(randomUUID(), jobId, JSON.stringify({ target: request.target }), timestamp);
+    ).run(randomUUID(), jobId, JSON.stringify({
+      target: request.target.type === 'network-folder'
+        ? { ...request.target, destinationPath: targetPath }
+        : request.target
+    }), timestamp);
 
     db.exec('COMMIT');
   } catch (error) {
@@ -454,6 +488,72 @@ export const getExportJob = (jobId: string): ExportJobSnapshot | null => {
     checkpoint: checkpointRow ? toCheckpointRecord(checkpointRow) : null,
     recentItems: recentRows.map(toItemRecord)
   };
+};
+
+export const listExportJobs = (input: {
+  targetType?: ExportJobRecord['targetType'] | null;
+  groupingSessionId?: string | null;
+  sourceRoot?: string | null;
+}) => {
+  runMigrations();
+  const executionId = resolveExecutionId(input.groupingSessionId ?? undefined, input.sourceRoot ?? '');
+
+  if (!executionId) {
+    return [];
+  }
+
+  const db = getDb();
+  const rows = input.targetType
+    ? db.prepare(
+        `SELECT id
+         FROM export_jobs
+         WHERE execution_id = ? AND target_type = ?
+         ORDER BY datetime(created_at) DESC, rowid DESC`
+      ).all(executionId, input.targetType)
+    : db.prepare(
+        `SELECT id
+         FROM export_jobs
+         WHERE execution_id = ?
+         ORDER BY datetime(created_at) DESC, rowid DESC`
+      ).all(executionId);
+
+  return (rows as Array<{ id: string }>)
+    .map((row) => getExportJob(row.id))
+    .filter((snapshot): snapshot is ExportJobSnapshot => Boolean(snapshot));
+};
+
+export const assertExportJobCanStart = (jobId: string) => {
+  runMigrations();
+  const snapshot = getExportJob(jobId);
+
+  if (!snapshot) {
+    throw new Error('Export job not found.');
+  }
+
+  if (snapshot.job.targetType !== 'network-folder') {
+    return snapshot;
+  }
+
+  if (snapshot.job.status === 'completed') {
+    throw new Error('Completed network folder export jobs cannot be started again.');
+  }
+
+  const otherRunningJob = getDb()
+    .prepare(
+      `SELECT id
+       FROM export_jobs
+       WHERE target_type = 'network-folder'
+         AND status = 'running'
+         AND id <> ?
+       LIMIT 1`
+    )
+    .get(jobId) as { id: string } | undefined;
+
+  if (otherRunningJob) {
+    throw new Error('Another network folder export is already running.');
+  }
+
+  return snapshot;
 };
 
 export const getExportProgress = (jobId: string): ExportProgressData | null => {
