@@ -107,5 +107,12 @@ test('export completion notifications ignore paused jobs', () => {
 
   assert.match(exportNotification, /previousStatus !== 'completed'/);
   assert.match(exportNotification, /exportJobState\.status === 'completed'/);
+  assert.match(exportNotification, /\(exportJobState\.totalItems \?\? 0\) > 0/);
+  assert.match(source, /const getExportCompletionKey/);
+  assert.match(source, /previousExportCompletionKeyRef/);
+  assert.match(source, /'google-photos': getExportCompletionKey\(googlePhotosExportJobState\)/);
+  assert.match(exportNotification, /const previousCompletionKey = previousExportCompletionKeyRef\.current\[exportJobState\.targetType\]/);
+  assert.match(exportNotification, /previousExportCompletionKeyRef\.current\[exportJobState\.targetType\] = completionKey/);
+  assert.match(exportNotification, /previousCompletionKey !== completionKey/);
   assert.doesNotMatch(exportNotification, /exportJobState\.status === 'paused'[\s\S]*notifyCompletion\('exportCompleted'/);
 });

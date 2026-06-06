@@ -666,6 +666,7 @@ export const en = {
   'export.googlePhotos.preview': 'Preview albums',
   'export.googlePhotos.previewing': 'Previewing...',
   'export.googlePhotos.previewError': 'Could not preview Google Photos albums.',
+  'export.googlePhotos.noPendingItems': 'No pending Google Photos items were found. The album list was refreshed.',
   'export.googlePhotos.uploadAllAlbums': 'Upload all albums',
   'export.googlePhotos.uploadAlbum': 'Upload album',
   'export.googlePhotos.supported': 'Supported',

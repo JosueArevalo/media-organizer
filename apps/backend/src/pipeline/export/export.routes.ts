@@ -1,6 +1,12 @@
 import { readRequestJson, sendCaughtError, sendJson } from '../../http/httpResponses.js';
 import type { RouteHandler } from '../../http/routeTypes.js';
-import { assertNetworkExportRunnerAvailable, executeExportJob } from './exportJob.runner.js';
+import {
+  assertGooglePhotosExportRunnerAvailable,
+  assertNetworkExportRunnerAvailable,
+  executeExportJob,
+  ExportRunnerBusyError,
+  isGooglePhotosExportRunnerActive
+} from './exportJob.runner.js';
 import {
   assertExportJobCanStart,
   createExportJob,
@@ -45,6 +51,11 @@ import type {
 import { listExportProviderSummaries } from './exportSummary.service.js';
 
 const sendExportRouteError = (res: Parameters<RouteHandler>[0]['res'], error: unknown, fallbackMessage: string) => {
+  if (error instanceof ExportRunnerBusyError) {
+    sendJson(res, 409, { status: 'export_runner_busy', message: error.message });
+    return;
+  }
+
   if (error instanceof NetworkPathError) {
     sendJson(res, 400, { status: 'invalid_network_path', message: error.message });
     return;
@@ -149,14 +160,14 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
   if (requestUrl.pathname === '/api/export/google-photos/preview' && req.method === 'POST') {
     void (async () => {
       try {
-        const body = (await readRequestJson(req)) as { accountId?: string; sourceRoot?: string } | null;
+        const body = (await readRequestJson(req)) as { accountId?: string; sourceRoot?: string; groupingSessionId?: string } | null;
 
         if (!body?.accountId || !body.sourceRoot) {
           sendJson(res, 400, { status: 'invalid_request', message: 'accountId and sourceRoot are required.' });
           return;
         }
 
-        sendJson(res, 200, await previewGooglePhotosExport(body.accountId, body.sourceRoot));
+        sendJson(res, 200, await previewGooglePhotosExport(body.accountId, body.sourceRoot, body.groupingSessionId));
       } catch (error) {
         sendCaughtError(res, error, 'Failed to preview Google Photos export.');
       }
@@ -379,12 +390,19 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
 
     if (req.method === 'POST' && subPath === 'start') {
       try {
-        assertExportJobCanStart(jobId);
-        assertNetworkExportRunnerAvailable(jobId);
-        void executeExportJob(jobId).catch((error) => {
-          console.error(`[backend] export job ${jobId} failed`, error);
-          markExportJobFailed(jobId, error instanceof Error ? error : new Error('Export job failed.'));
-        });
+        const snapshot = assertExportJobCanStart(jobId);
+        if (snapshot.job.targetType === 'google-photos') {
+          assertGooglePhotosExportRunnerAvailable(jobId);
+        } else {
+          assertNetworkExportRunnerAvailable(jobId);
+        }
+
+        if (!(snapshot.job.targetType === 'google-photos' && isGooglePhotosExportRunnerActive(jobId))) {
+          void executeExportJob(jobId).catch((error) => {
+            console.error(`[backend] export job ${jobId} failed`, error);
+            markExportJobFailed(jobId, error instanceof Error ? error : new Error('Export job failed.'));
+          });
+        }
         sendJson(res, 202, getExportJob(jobId));
       } catch (error) {
         sendExportRouteError(res, error, 'Failed to start export job.');
@@ -406,8 +424,18 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
 
     if (req.method === 'POST' && subPath === 'retry-failed') {
       try {
-        assertExportJobCanStart(jobId);
-        assertNetworkExportRunnerAvailable(jobId);
+        const snapshot = assertExportJobCanStart(jobId);
+        if (snapshot.job.targetType === 'google-photos') {
+          assertGooglePhotosExportRunnerAvailable(jobId);
+        } else {
+          assertNetworkExportRunnerAvailable(jobId);
+        }
+
+        if (snapshot.job.targetType === 'google-photos' && isGooglePhotosExportRunnerActive(jobId)) {
+          sendJson(res, 202, getExportJob(jobId));
+          return true;
+        }
+
         const job = retryFailedExportItems(jobId);
 
         if (!job) {

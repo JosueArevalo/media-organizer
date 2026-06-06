@@ -33,6 +33,7 @@ type BrowserNotificationConstructor = {
 };
 
 const DEDUPE_STORAGE_KEY = 'media-organizer-completion-notification-dedupe';
+const pendingDedupeKeys = new Set<string>();
 let sharedAudioContext: AudioContext | null = null;
 let sharedAudioContextConstructor: typeof AudioContext | null = null;
 
@@ -256,7 +257,7 @@ export const notifyCompletion = async (
   eventKey: CompletionNotificationEventKey,
   payload: CompletionNotificationPayload
 ) => {
-  if (payload.dedupeKey && hasDedupeKey(payload.dedupeKey)) {
+  if (payload.dedupeKey && (hasDedupeKey(payload.dedupeKey) || pendingDedupeKeys.has(payload.dedupeKey))) {
     return createResult(false, false, 'duplicate');
   }
 
@@ -266,41 +267,51 @@ export const notifyCompletion = async (
     return createResult(false, false, 'event-disabled');
   }
 
+  if (payload.dedupeKey) {
+    pendingDedupeKeys.add(payload.dedupeKey);
+  }
+
   const shouldPlaySound = settings.soundEnabled;
   const shouldShowBrowserNotification = settings.browserNotificationsEnabled;
   const blockedReasons: CompletionNotificationBlockedReason[] = [];
   let soundPlayed = false;
   let browserNotificationShown = false;
 
-  if (shouldPlaySound) {
-    const soundResult = await playCompletionSound();
+  try {
+    if (shouldPlaySound) {
+      const soundResult = await playCompletionSound();
 
-    if (soundResult === 'played') {
-      soundPlayed = true;
-    } else {
-      blockedReasons.push(soundResult);
+      if (soundResult === 'played') {
+        soundPlayed = true;
+      } else {
+        blockedReasons.push(soundResult);
+      }
+    }
+
+    if (shouldShowBrowserNotification) {
+      const notificationResult = showBrowserNotification(payload);
+
+      if (notificationResult === 'shown') {
+        browserNotificationShown = true;
+      } else {
+        blockedReasons.push(notificationResult);
+      }
+    }
+
+    if (!shouldPlaySound && !shouldShowBrowserNotification) {
+      blockedReasons.push('no-channels-enabled');
+    }
+
+    if (payload.dedupeKey && (soundPlayed || browserNotificationShown)) {
+      markDedupeKey(payload.dedupeKey);
+    }
+
+    return createResult(soundPlayed, browserNotificationShown, getFirstBlockedReason(blockedReasons));
+  } finally {
+    if (payload.dedupeKey) {
+      pendingDedupeKeys.delete(payload.dedupeKey);
     }
   }
-
-  if (shouldShowBrowserNotification) {
-    const notificationResult = showBrowserNotification(payload);
-
-    if (notificationResult === 'shown') {
-      browserNotificationShown = true;
-    } else {
-      blockedReasons.push(notificationResult);
-    }
-  }
-
-  if (!shouldPlaySound && !shouldShowBrowserNotification) {
-    blockedReasons.push('no-channels-enabled');
-  }
-
-  if (payload.dedupeKey && (soundPlayed || browserNotificationShown)) {
-    markDedupeKey(payload.dedupeKey);
-  }
-
-  return createResult(soundPlayed, browserNotificationShown, getFirstBlockedReason(blockedReasons));
 };
 
 export const testCompletionNotification = (payload: CompletionNotificationPayload) =>

@@ -211,6 +211,36 @@ test('notifyCompletion marks dedupe when browser notification is shown', async (
   assert.equal(notifications.length, 1);
 });
 
+test('notifyCompletion deduplicates concurrent calls with the same key before sound finishes', async () => {
+  installWindow({ audio: 'running' });
+  saveNotificationSettings({
+    soundEnabled: true,
+    browserNotificationsEnabled: false
+  });
+
+  const results = await Promise.all([
+    notifyCompletion('compressionCompleted', {
+      title: 'Done',
+      body: 'Finished',
+      dedupeKey: 'compression:concurrent'
+    }),
+    notifyCompletion('compressionCompleted', {
+      title: 'Done',
+      body: 'Finished',
+      dedupeKey: 'compression:concurrent'
+    }),
+    notifyCompletion('compressionCompleted', {
+      title: 'Done',
+      body: 'Finished',
+      dedupeKey: 'compression:concurrent'
+    })
+  ]);
+
+  assert.equal(results.filter((result) => result.soundPlayed).length, 1);
+  assert.equal(results.filter((result) => result.blockedReason === 'duplicate').length, 2);
+  assert.equal(audioEvents.oscillators, 2);
+});
+
 test('notifyCompletion respects notification permission when browser channel is enabled', async () => {
   installWindow({ permission: 'default', audio: 'unsupported' });
   saveNotificationSettings({

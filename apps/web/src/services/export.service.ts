@@ -139,6 +139,7 @@ export type GooglePhotosAlbumPreview = {
   folderName: string;
   albumTitle: string;
   status: 'existing' | 'new';
+  uploadStatus: 'pending' | 'completed';
   itemCount: number;
   items: GooglePhotosAlbumPreviewItem[];
 };
@@ -311,7 +312,7 @@ export const deleteGooglePhotosAccountRequest = async (accountId: string) => {
   }
 };
 
-export const previewGooglePhotosExportRequest = (payload: { accountId: string; sourceRoot: string }) =>
+export const previewGooglePhotosExportRequest = (payload: { accountId: string; sourceRoot: string; groupingSessionId?: string | null }) =>
   requestJson<GooglePhotosExportPreview>('/api/export/google-photos/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

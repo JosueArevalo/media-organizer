@@ -110,6 +110,7 @@ export const NetworkFolderExportPage = () => {
         destinationPath: snapshot.job.targetPath,
         googlePhotosAccountId: null,
         targetType: 'network-folder',
+        totalItems: snapshot.job.totalItems,
         startedAt: exportJobState.backendJobId === snapshot.job.id ? exportJobState.startedAt ?? Date.now() : Date.now(),
         completedAt,
         errorMessage: snapshot.job.failedItems > 0 ? t('export.completedWithErrors', { count: snapshot.job.failedItems }) : null,
