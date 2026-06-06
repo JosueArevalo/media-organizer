@@ -44,6 +44,7 @@ const createSnapshot = (targetType: ExportTargetType, updatedAt: number): Export
   destinationPath: targetType === 'network-folder' ? '\\\\server\\share' : 'user@example.com',
   googlePhotosAccountId: targetType === 'google-photos' ? 'account-1' : null,
   targetType,
+  totalItems: 3,
   startedAt: 1,
   completedAt: null,
   errorMessage: null,
@@ -62,6 +63,7 @@ test('keeps independent active snapshots for each export provider', () => {
   saveExportJobSnapshot(createSnapshot('network-folder', 2));
 
   assert.equal(loadExportJobSnapshot('google-photos').backendJobId, 'google-photos-job');
+  assert.equal(loadExportJobSnapshot('google-photos').totalItems, 3);
   assert.equal(loadExportJobSnapshot('network-folder').backendJobId, 'network-folder-job');
   assert.equal(loadExportJobSnapshot().targetType, 'network-folder');
 });

@@ -668,6 +668,7 @@ export const es: TranslationDictionary = {
   'export.googlePhotos.preview': 'Previsualizar albumes',
   'export.googlePhotos.previewing': 'Previsualizando...',
   'export.googlePhotos.previewError': 'No se pudieron previsualizar los albumes de Google Fotos.',
+  'export.googlePhotos.noPendingItems': 'No se encontraron elementos pendientes para Google Fotos. Se actualizo la lista de albumes.',
   'export.googlePhotos.uploadAllAlbums': 'Subir todos los albumes',
   'export.googlePhotos.uploadAlbum': 'Subir album',
   'export.googlePhotos.supported': 'Soportados',

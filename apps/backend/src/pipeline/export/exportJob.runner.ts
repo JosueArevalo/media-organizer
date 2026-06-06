@@ -16,10 +16,30 @@ import type { ExportItemRecord } from './export.types.js';
 import { executeGooglePhotosExportJob } from './googlePhotosExport.runner.js';
 
 const activeNetworkExportJobs = new Set<string>();
+const activeGooglePhotosExportJobs = new Set<string>();
+
+export class ExportRunnerBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ExportRunnerBusyError';
+  }
+}
 
 export const assertNetworkExportRunnerAvailable = (_jobId: string) => {
   if (activeNetworkExportJobs.size > 0) {
-    throw new Error('Another network folder export is still finishing its current file.');
+    throw new ExportRunnerBusyError('Another network folder export is still finishing its current file.');
+  }
+};
+
+export const isGooglePhotosExportRunnerActive = (jobId: string) => activeGooglePhotosExportJobs.has(jobId);
+
+export const assertGooglePhotosExportRunnerAvailable = (jobId: string) => {
+  if (activeGooglePhotosExportJobs.has(jobId)) {
+    return;
+  }
+
+  if (activeGooglePhotosExportJobs.size > 0) {
+    throw new ExportRunnerBusyError('Another Google Photos export is already running.');
   }
 };
 
@@ -70,7 +90,17 @@ export const executeExportJob = async (jobId: string) => {
   const snapshot = assertExportJobCanStart(jobId);
 
   if (snapshot.job.targetType === 'google-photos') {
-    return executeGooglePhotosExportJob(jobId);
+    assertGooglePhotosExportRunnerAvailable(jobId);
+    if (activeGooglePhotosExportJobs.has(jobId)) {
+      return getExportJob(jobId);
+    }
+
+    activeGooglePhotosExportJobs.add(jobId);
+    try {
+      return await executeGooglePhotosExportJob(jobId);
+    } finally {
+      activeGooglePhotosExportJobs.delete(jobId);
+    }
   }
 
   if (snapshot.job.targetType !== 'network-folder') {

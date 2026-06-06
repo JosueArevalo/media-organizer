@@ -8,6 +8,7 @@ export type ExportJobSnapshot = {
   destinationPath: string | null;
   googlePhotosAccountId: string | null;
   targetType: ExportTargetType | null;
+  totalItems: number | null;
   startedAt: number | null;
   completedAt: number | null;
   errorMessage: string | null;
@@ -33,6 +34,7 @@ const createEmptySnapshot = (targetType: ExportTargetType | null = null): Export
   destinationPath: null,
   googlePhotosAccountId: null,
   targetType,
+  totalItems: null,
   startedAt: null,
   completedAt: null,
   errorMessage: null,

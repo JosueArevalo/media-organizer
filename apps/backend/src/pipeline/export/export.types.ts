@@ -160,6 +160,7 @@ export type GooglePhotosAlbumPreview = {
   folderName: string;
   albumTitle: string;
   status: 'existing' | 'new';
+  uploadStatus: 'pending' | 'completed';
   itemCount: number;
   items: GooglePhotosAlbumPreviewItem[];
 };

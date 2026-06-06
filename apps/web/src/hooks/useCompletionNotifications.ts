@@ -3,6 +3,14 @@ import { useCompressionSessionState } from './useCompressionJobState';
 import { useExportJobState } from './useExportJobState';
 import { useTranslation } from '../i18n';
 import { notifyCompletion } from '../services/completion-notification.service';
+import type { ExportJobSnapshot } from '../services/export-job.store';
+
+const getExportCompletionKey = (exportJobState: ExportJobSnapshot) =>
+  exportJobState.backendJobId &&
+  exportJobState.completedAt &&
+  (exportJobState.totalItems ?? 0) > 0
+    ? `${exportJobState.backendJobId}:${exportJobState.completedAt}`
+    : null;
 
 export const useCompletionNotifications = () => {
   const { t } = useTranslation();
@@ -13,6 +21,10 @@ export const useCompletionNotifications = () => {
   const previousExportStatusRef = useRef({
     'network-folder': networkExportJobState.status,
     'google-photos': googlePhotosExportJobState.status
+  });
+  const previousExportCompletionKeyRef = useRef({
+    'network-folder': getExportCompletionKey(networkExportJobState),
+    'google-photos': getExportCompletionKey(googlePhotosExportJobState)
   });
 
   useEffect(() => {
@@ -43,13 +55,18 @@ export const useCompletionNotifications = () => {
       if (!exportJobState.targetType) continue;
 
       const previousStatus = previousExportStatusRef.current[exportJobState.targetType];
+      const previousCompletionKey = previousExportCompletionKeyRef.current[exportJobState.targetType];
+      const completionKey = getExportCompletionKey(exportJobState);
       previousExportStatusRef.current[exportJobState.targetType] = exportJobState.status;
+      previousExportCompletionKeyRef.current[exportJobState.targetType] = completionKey;
 
       if (
         previousStatus !== 'completed' &&
         exportJobState.status === 'completed' &&
         exportJobState.backendJobId &&
-        exportJobState.completedAt
+        exportJobState.completedAt &&
+        previousCompletionKey !== completionKey &&
+        (exportJobState.totalItems ?? 0) > 0
       ) {
         void notifyCompletion('exportCompleted', {
           title: t('notifications.exportCompleted.title'),
