@@ -69,8 +69,12 @@ test('Google Photos albums section owns upload progress', () => {
   const previewDisabledEnd = pageSource.indexOf('const getItemRenderStatus', previewDisabledStart);
   const previewDisabledSource = pageSource.slice(previewDisabledStart, previewDisabledEnd);
 
-  assert.match(pageSource, /uploadAllAlbums/);
+  assert.match(pageSource, /uploadSelectedAlbums/);
   assert.match(pageSource, /uploadAlbum/);
+  assert.match(pageSource, /selectedAlbumTitles/);
+  assert.match(pageSource, /getPendingAlbumTitleSet/);
+  assert.match(pageSource, /selectedPendingAlbumTitles\.length > 0/);
+  assert.match(pageSource, /albumSelectionSummary/);
   assert.match(pageSource, /hasPreview/);
   assert.match(pageSource, /activeBackendJobIdOverride/);
   assert.match(pageSource, /const backendJobId = activeBackendJobIdOverride \?\? exportJobState\.backendJobId/);
@@ -84,8 +88,11 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /isAlbumCompletedSuccessfully/);
   assert.match(pageSource, /previewUploadStatusByAlbum/);
   assert.match(pageSource, /album\.uploadStatus/);
-  assert.match(pageSource, /albumTitles: \[albumTitle\]/);
+  assert.match(pageSource, /const albumTitles = albumTitle \? \[albumTitle\] : selectedPendingAlbumTitles/);
+  assert.match(pageSource, /\.\.\.\(albumTitles\.length > 0 \? \{ albumTitles \} : \{\}\)/);
   assert.match(pageSource, /const isAlbumComplete = isAlbumCompletedSuccessfully\(album\.albumTitle\)/);
+  assert.match(pageSource, /checked=\{isAlbumChecked\}/);
+  assert.match(pageSource, /disabled=\{!isAlbumSelectable\}/);
   assert.match(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items, isAlbumComplete\)/);
   assert.match(pageSource, /progressItem\?\.status \?\? \(isAlbumComplete \? 'completed' : 'pending'\)/);
   assert.doesNotMatch(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items, album\.uploadStatus\)/);
@@ -105,11 +112,18 @@ test('Google Photos restores full album preview after resumable or terminal jobs
 
   assert.match(pageSource, /useExportJobState\('google-photos'/);
   assert.match(pageSource, /exportJobState\.googlePhotosAccountId/);
+  assert.match(pageSource, /getExportJobRequest/);
+  assert.match(pageSource, /getCheckpointAlbumTitleSet/);
+  assert.match(pageSource, /job\.checkpoint\.payloadJson/);
+  assert.match(pageSource, /payload\.target\?\.type === 'google-photos'/);
+  assert.match(pageSource, /getCheckpointAlbumTitleSet\(job\) \?\? getPendingAlbumTitleSet\(nextPreview\)/);
   assert.match(pageSource, /const currentProgress = progress\?\.jobId === backendJobId \? progress : null/);
   assert.match(pageSource, /const isTerminal = \['completed', 'failed', 'cancelled'\]\.includes\(currentProgress\?\.status \?\? exportStatus\)/);
   assert.match(pageSource, /!isPaused && !isRunning && !isTerminal/);
   assert.match(pageSource, /\|\| preview\)/);
   assert.match(pageSource, /previewGooglePhotosExportRequest\(\{\s*accountId: selectedAccountId,\s*sourceRoot,\s*groupingSessionId: groupingSessionState\.backendSessionId\s*\}\)/);
+  assert.match(pageSource, /getExportJobRequest\(backendJobId\)/);
+  assert.match(pageSource, /setSelectedAlbumTitles\(getAlbumTitleSetForJob\(nextPreview, job\)\)/);
   assert.match(pageSource, /currentProgress\?\.albumProgress \?\? \[\]/);
   assert.match(pageSource, /visibleAlbums\.map/);
   assert.match(pageSource, /activeAlbum = currentProgress\.albumProgress\.find/);
@@ -149,6 +163,8 @@ test('Google Photos treats empty pending upload jobs as a preview refresh', () =
 
   assert.ok(noWorkIndex >= 0);
   assert.match(noWorkSource, /previewGooglePhotosExportRequest/);
+  assert.match(noWorkSource, /const noPendingJob = job/);
+  assert.match(noWorkSource, /setSelectedAlbumTitles\(getAlbumTitleSetForJob\(nextPreview, noPendingJob\)\)/);
   assert.match(noWorkSource, /setProgress\(null\)/);
   assert.match(noWorkSource, /setStatusMessage\(t\('export\.googlePhotos\.noPendingItems'\)\)/);
   assert.match(noWorkSource, /return;/);

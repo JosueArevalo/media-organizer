@@ -245,9 +245,32 @@ test('Google Photos export job can be filtered to one album', async () => {
   });
 
   const progress = getExportProgress(job.job.id);
+  assert.equal(job.job.eligibleItems, 1);
+  assert.equal(job.job.eligibleAlbums, 1);
   assert.equal(progress?.total, 1);
   assert.equal(progress?.albumProgress?.length, 1);
   assert.equal(progress?.albumProgress?.[0]?.albumTitle, 'Family Photos');
+});
+
+test('Google Photos export job eligibility follows the selected album set', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+  fs.mkdirSync(path.join(sourceRoot, 'Family Photos'), { recursive: true });
+  fs.writeFileSync(path.join(sourceRoot, 'Family Photos', 'photo-b.jpg'), 'image-b');
+  fs.mkdirSync(path.join(sourceRoot, 'Private Album'), { recursive: true });
+  fs.writeFileSync(path.join(sourceRoot, 'Private Album', 'photo-c.jpg'), 'image-c');
+
+  const { createExportJob, getExportProgress } = await import('../src/pipeline/export/exportJob.service.js?google-album-set-filter=1');
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1', albumTitles: ['2026.04 - Trip', 'Family Photos'] }
+  });
+
+  const progress = getExportProgress(job.job.id);
+  assert.equal(job.job.eligibleItems, 2);
+  assert.equal(job.job.eligibleAlbums, 2);
+  assert.equal(progress?.total, 2);
+  assert.deepEqual(progress?.albumProgress?.map((album) => album.albumTitle), ['2026.04 - Trip', 'Family Photos']);
 });
 
 test('Google Photos full export plans only albums still pending after a completed album job', async () => {

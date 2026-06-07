@@ -251,8 +251,10 @@ export const collectGooglePhotosFilePlan = (sourceRoot: string) => {
   return items;
 };
 
-const collectFilteredGooglePhotosFilePlan = (sourceRoot: string, target: GooglePhotosTarget) => {
-  const plannedItems = collectGooglePhotosFilePlan(sourceRoot);
+const filterGooglePhotosFilePlan = (
+  plannedItems: ReturnType<typeof collectGooglePhotosFilePlan>,
+  target: GooglePhotosTarget
+) => {
   const albumTitles = target.albumTitles?.map((title) => title.trim()).filter(Boolean);
 
   if (!albumTitles?.length) {
@@ -380,11 +382,14 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
     ? targetPath
     : getGooglePhotosAccount(request.target.accountId)?.email ?? null;
   const fullGooglePhotosPlan = request.target.type === 'google-photos' ? collectGooglePhotosFilePlan(request.sourceRoot) : null;
+  const selectedGooglePhotosPlan = request.target.type === 'google-photos'
+    ? filterGooglePhotosFilePlan(fullGooglePhotosPlan ?? [], request.target)
+    : null;
   const eligibleItems = request.target.type === 'network-folder'
     ? collectExportFilePlan(request.sourceRoot, request.target.destinationPath).length
-    : fullGooglePhotosPlan?.filter((item) => item.supported).length ?? 0;
+    : selectedGooglePhotosPlan?.filter((item) => item.supported).length ?? 0;
   const eligibleAlbums = request.target.type === 'google-photos'
-    ? new Set(fullGooglePhotosPlan?.filter((item) => item.supported).map((item) => item.albumTitle)).size
+    ? new Set(selectedGooglePhotosPlan?.filter((item) => item.supported).map((item) => item.albumTitle)).size
     : 0;
   const completedGooglePhotosSourcePaths = request.target.type === 'google-photos'
     ? getCompletedGooglePhotosSourcePaths({
@@ -399,7 +404,7 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
         albumTitle: null,
         supported: true
       }))
-    : collectFilteredGooglePhotosFilePlan(request.sourceRoot, request.target).filter((item) => {
+    : (selectedGooglePhotosPlan ?? fullGooglePhotosPlan ?? []).filter((item) => {
         if (!item.supported) {
           return true;
         }
