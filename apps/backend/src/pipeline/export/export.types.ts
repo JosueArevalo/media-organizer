@@ -118,6 +118,10 @@ export type ExportTargetTestRequest = {
   credentials?: NetworkCredentials;
 };
 
+export type GooglePhotosScopeUpdateRequest = {
+  albumTitles: string[];
+};
+
 export type ExportTargetTestResult = {
   ok: boolean;
   message: string;

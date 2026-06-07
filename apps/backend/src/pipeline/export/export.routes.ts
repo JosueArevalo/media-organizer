@@ -18,7 +18,8 @@ import {
   previewGooglePhotosExport,
   retryExportItem,
   retryFailedExportItems,
-  testExportTarget
+  testExportTarget,
+  updateGooglePhotosExportJobScope
 } from './exportJob.service.js';
 import {
   completeGooglePhotosOAuth,
@@ -41,6 +42,7 @@ import {
 } from './networkDestination.service.js';
 import type {
   ExportJobRequest,
+  GooglePhotosScopeUpdateRequest,
   GooglePhotosOAuthConfigRequest,
   ExportTargetTestRequest,
   NetworkAuthRequest,
@@ -419,6 +421,32 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
       }
 
       sendJson(res, 200, job);
+      return true;
+    }
+
+    if (req.method === 'PATCH' && subPath === 'google-photos-scope') {
+      void (async () => {
+        try {
+          const body = (await readRequestJson(req)) as GooglePhotosScopeUpdateRequest | null;
+
+          if (!Array.isArray(body?.albumTitles)) {
+            sendJson(res, 400, { status: 'invalid_request', message: 'albumTitles is required.' });
+            return;
+          }
+
+          const job = updateGooglePhotosExportJobScope(jobId, body.albumTitles);
+
+          if (!job) {
+            sendJson(res, 404, { status: 'not_found' });
+            return;
+          }
+
+          sendJson(res, 200, job);
+        } catch (error) {
+          sendExportRouteError(res, error, 'Failed to update Google Photos album scope.');
+        }
+      })();
+
       return true;
     }
 

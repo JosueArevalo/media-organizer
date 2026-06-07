@@ -279,6 +279,13 @@ export const startExportJobRequest = (jobId: string) =>
 export const pauseExportJobRequest = (jobId: string) =>
   requestJson<ExportJobSnapshot>(`/api/export/jobs/${jobId}/pause`, { method: 'POST' });
 
+export const updateGooglePhotosExportJobScopeRequest = (jobId: string, albumTitles: string[]) =>
+  requestJson<ExportJobSnapshot>(`/api/export/jobs/${jobId}/google-photos-scope`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ albumTitles })
+  });
+
 export const retryFailedExportItemsRequest = (jobId: string) =>
   requestJson<ExportJobSnapshot>(`/api/export/jobs/${jobId}/retry-failed`, { method: 'POST' });
 

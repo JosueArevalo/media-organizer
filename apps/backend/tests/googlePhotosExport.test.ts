@@ -273,6 +273,179 @@ test('Google Photos export job eligibility follows the selected album set', asyn
   assert.deepEqual(progress?.albumProgress?.map((album) => album.albumTitle), ['2026.04 - Trip', 'Family Photos']);
 });
 
+test('Google Photos paused export scope can change only unprocessed albums', async () => {
+  await insertGooglePhotosAccount();
+  fs.mkdirSync(path.join(sourceRoot, 'Album A'), { recursive: true });
+  fs.mkdirSync(path.join(sourceRoot, 'Album B'), { recursive: true });
+  fs.mkdirSync(path.join(sourceRoot, 'Album C'), { recursive: true });
+  fs.mkdirSync(path.join(sourceRoot, 'Album D'), { recursive: true });
+  fs.writeFileSync(path.join(sourceRoot, 'Album A', 'done.jpg'), 'done');
+  fs.writeFileSync(path.join(sourceRoot, 'Album A', 'pending.jpg'), 'pending');
+  fs.writeFileSync(path.join(sourceRoot, 'Album B', 'b.jpg'), 'b');
+  fs.writeFileSync(path.join(sourceRoot, 'Album C', 'c.jpg'), 'c');
+  fs.writeFileSync(path.join(sourceRoot, 'Album D', 'd.jpg'), 'd');
+
+  const uploadedFileNames: string[] = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+
+    if (url.includes('/albums') && init?.method !== 'POST') {
+      return new Response(JSON.stringify({ albums: [] }), { status: 200 });
+    }
+
+    if (url.endsWith('/albums') && init?.method === 'POST') {
+      const body = JSON.parse(String(init?.body)) as { album: { title: string } };
+      return new Response(JSON.stringify({ id: `album-${body.album.title}`, title: body.album.title }), { status: 200 });
+    }
+
+    if (url.endsWith('/uploads')) {
+      uploadedFileNames.push(String((init?.headers as Record<string, string>)['X-Goog-Upload-File-Name'] ?? ''));
+      return new Response(`upload-token-${uploadedFileNames.length}`, { status: 200 });
+    }
+
+    if (url.endsWith('/mediaItems:batchCreate')) {
+      const body = JSON.parse(String(init?.body)) as {
+        newMediaItems: Array<{ simpleMediaItem: { uploadToken: string } }>;
+      };
+      return new Response(JSON.stringify({
+        newMediaItemResults: body.newMediaItems.map((item, index) => ({
+          uploadToken: item.simpleMediaItem.uploadToken,
+          mediaItem: { id: `media-${index}-${item.simpleMediaItem.uploadToken}` }
+        }))
+      }), { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  const {
+    createExportJob,
+    getExportProgress,
+    pauseExportJob,
+    updateGooglePhotosExportJobScope
+  } = await import('../src/pipeline/export/exportJob.service.js?google-paused-scope=1');
+  const { executeExportJob } = await import('../src/pipeline/export/exportJob.runner.js?google-paused-scope=1');
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1', albumTitles: ['Album A', 'Album B', 'Album C'] }
+  });
+
+  const completedRow = getDb()
+    .prepare("SELECT id FROM export_items WHERE job_id = ? AND destination_path = 'Album A' AND relative_path LIKE '%done.jpg'")
+    .get(job.job.id) as { id: string };
+  getDb().prepare("UPDATE export_items SET status = 'completed' WHERE id = ?").run(completedRow.id);
+  pauseExportJob(job.job.id);
+
+  const withoutAlbumBJob = updateGooglePhotosExportJobScope(job.job.id, ['Album A', 'Album C']);
+  assert.ok(withoutAlbumBJob);
+  assert.equal(withoutAlbumBJob.job.eligibleItems, 3);
+  assert.equal(withoutAlbumBJob.job.eligibleAlbums, 2);
+
+  const withoutAlbumBCheckpoint = JSON.parse(withoutAlbumBJob.checkpoint?.payloadJson ?? '{}') as {
+    target?: { albumTitles?: string[] };
+  };
+  assert.deepEqual(withoutAlbumBCheckpoint.target?.albumTitles, ['Album A', 'Album C']);
+
+  const withoutAlbumBProgress = getExportProgress(job.job.id);
+  assert.equal(withoutAlbumBProgress?.total, 3);
+  assert.deepEqual(
+    withoutAlbumBProgress?.albumProgress?.map((album) => ({
+      title: album.albumTitle,
+      total: album.total,
+      completed: album.completed,
+      pending: album.pending
+    })),
+    [
+      { title: 'Album A', total: 2, completed: 1, pending: 1 },
+      { title: 'Album C', total: 1, completed: 0, pending: 1 }
+    ]
+  );
+
+  const scopedJob = updateGooglePhotosExportJobScope(job.job.id, ['Album A', 'Album C', 'Album D']);
+  assert.ok(scopedJob);
+  assert.equal(scopedJob.job.eligibleItems, 4);
+  assert.equal(scopedJob.job.eligibleAlbums, 3);
+
+  const checkpoint = JSON.parse(scopedJob.checkpoint?.payloadJson ?? '{}') as {
+    target?: { albumTitles?: string[] };
+  };
+  assert.deepEqual(checkpoint.target?.albumTitles, ['Album A', 'Album C', 'Album D']);
+
+  const scopedProgress = getExportProgress(job.job.id);
+  assert.equal(scopedProgress?.total, 4);
+  assert.deepEqual(
+    scopedProgress?.albumProgress?.map((album) => ({
+      title: album.albumTitle,
+      total: album.total,
+      completed: album.completed,
+      pending: album.pending
+    })),
+    [
+      { title: 'Album A', total: 2, completed: 1, pending: 1 },
+      { title: 'Album C', total: 1, completed: 0, pending: 1 },
+      { title: 'Album D', total: 1, completed: 0, pending: 1 }
+    ]
+  );
+
+  await executeExportJob(job.job.id);
+
+  assert.deepEqual(uploadedFileNames.sort(), ['c.jpg', 'd.jpg', 'pending.jpg']);
+  assert.equal(getExportProgress(job.job.id)?.status, 'completed');
+});
+
+test('Google Photos album scope cannot change while running or completed', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+
+  const {
+    createExportJob,
+    updateExportJobStatus,
+    updateGooglePhotosExportJobScope
+  } = await import('../src/pipeline/export/exportJob.service.js?google-scope-status=1');
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1', albumTitles: ['2026.04 - Trip'] }
+  });
+
+  updateExportJobStatus(job.job.id, 'running');
+  assert.throws(
+    () => updateGooglePhotosExportJobScope(job.job.id, ['2026.04 - Trip']),
+    /can only be changed while the export is paused/
+  );
+
+  updateExportJobStatus(job.job.id, 'completed');
+  assert.throws(
+    () => updateGooglePhotosExportJobScope(job.job.id, ['2026.04 - Trip']),
+    /can only be changed while the export is paused/
+  );
+});
+
+test('Google Photos paused export can keep an empty editable album scope', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+
+  const {
+    createExportJob,
+    getExportProgress,
+    pauseExportJob,
+    updateGooglePhotosExportJobScope
+  } = await import('../src/pipeline/export/exportJob.service.js?google-empty-scope=1');
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1', albumTitles: ['2026.04 - Trip'] }
+  });
+
+  pauseExportJob(job.job.id);
+  const emptyScopeJob = updateGooglePhotosExportJobScope(job.job.id, []);
+  assert.equal(emptyScopeJob?.job.status, 'paused');
+  assert.equal(emptyScopeJob?.job.totalItems, 0);
+  assert.equal(getExportProgress(job.job.id)?.status, 'paused');
+  assert.deepEqual(
+    JSON.parse(emptyScopeJob?.checkpoint?.payloadJson ?? '{}').target.albumTitles,
+    []
+  );
+});
+
 test('Google Photos full export plans only albums still pending after a completed album job', async () => {
   await insertGooglePhotosAccount();
   fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');

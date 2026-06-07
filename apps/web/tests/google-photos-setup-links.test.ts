@@ -102,6 +102,18 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /handleRetryItem/);
   assert.match(pageSource, /retryExportItemRequest/);
   assert.match(pageSource, /export\.retryItem/);
+  assert.match(pageSource, /updateGooglePhotosExportJobScopeRequest/);
+  assert.match(pageSource, /isUpdatingAlbumScope/);
+  assert.match(pageSource, /const hasAlbumProcessingStarted = Boolean/);
+  assert.match(pageSource, /const isAlbumSelectable = isAlbumPending && !isRunning && !isUpdatingAlbumScope && \(!isPaused \|\| !hasAlbumProcessingStarted\)/);
+  assert.match(pageSource, /const getNextAlbumTitleSelection = \(current: Set<string>, albumTitle: string\)/);
+  assert.match(pageSource, /const nextSelection = getNextAlbumTitleSelection\(selectedAlbumTitlesRef\.current, albumTitle\)/);
+  assert.match(pageSource, /const nextAlbumTitles = \[\.\.\.nextSelection\]/);
+  assert.match(pageSource, /selectedAlbumTitlesRef\.current = nextSelection/);
+  assert.match(pageSource, /await updateGooglePhotosExportJobScopeRequest\(backendJobId, nextAlbumTitles\)/);
+  assert.doesNotMatch(pageSource, /let nextAlbumTitles/);
+  assert.doesNotMatch(pageSource, /nextAlbumTitles = \[\.\.\.next\]/);
+  assert.match(pageSource, /requestId !== albumScopeUpdateRequestIdRef\.current/);
   assert.doesNotMatch(pageSource, /google-photos-progress-panel/);
   assert.doesNotMatch(pageSource, /albumNoProgress/);
   assert.doesNotMatch(pageSource, /renderAccordionHeader\('progress'/);
@@ -116,6 +128,7 @@ test('Google Photos restores full album preview after resumable or terminal jobs
   assert.match(pageSource, /getCheckpointAlbumTitleSet/);
   assert.match(pageSource, /job\.checkpoint\.payloadJson/);
   assert.match(pageSource, /payload\.target\?\.type === 'google-photos'/);
+  assert.match(pageSource, /return albumTitles \? new Set\(albumTitles\) : null/);
   assert.match(pageSource, /getCheckpointAlbumTitleSet\(job\) \?\? getPendingAlbumTitleSet\(nextPreview\)/);
   assert.match(pageSource, /const currentProgress = progress\?\.jobId === backendJobId \? progress : null/);
   assert.match(pageSource, /const isTerminal = \['completed', 'failed', 'cancelled'\]\.includes\(currentProgress\?\.status \?\? exportStatus\)/);
