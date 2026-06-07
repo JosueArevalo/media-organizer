@@ -708,12 +708,8 @@ test('Google Photos export persists partial failures and does not retry complete
   let batchAttempt = 0;
   let uploadCount = 0;
   const logs: string[] = [];
-  const originalInfo = console.info;
   const originalWarn = console.warn;
 
-  console.info = (...values: unknown[]) => {
-    logs.push(values.join(' '));
-  };
   console.warn = (...values: unknown[]) => {
     logs.push(values.join(' '));
   };
@@ -801,7 +797,6 @@ test('Google Photos export persists partial failures and does not retry complete
       .all() as Array<{ media_item_id: string | null }>;
     assert.equal(createdRows.length, 2);
   } finally {
-    console.info = originalInfo;
     console.warn = originalWarn;
   }
 });

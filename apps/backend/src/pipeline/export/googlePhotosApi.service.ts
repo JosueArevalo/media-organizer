@@ -225,7 +225,6 @@ export const getOrCreateGooglePhotosAlbum = async (accountId: string, title: str
   const cached = getCachedGooglePhotosAlbumByTitle(accountId, title);
 
   if (cached) {
-    console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Reusing cached album albumId=${cached.googleAlbumId} title="${cached.title}"`);
     return cached;
   }
 
@@ -233,11 +232,9 @@ export const getOrCreateGooglePhotosAlbum = async (accountId: string, title: str
   const fromRemoteList = getCachedGooglePhotosAlbumByTitle(accountId, title);
 
   if (fromRemoteList) {
-    console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Reusing app-created album albumId=${fromRemoteList.googleAlbumId} title="${fromRemoteList.title}"`);
     return fromRemoteList;
   }
 
-  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Creating album title="${title}"`);
   const body = await requestJson<{ id: string; title: string; productUrl?: string }>(
     accountId,
     `${GOOGLE_PHOTOS_API_URL}/albums`,
@@ -250,7 +247,6 @@ export const getOrCreateGooglePhotosAlbum = async (accountId: string, title: str
   );
 
   const album = cacheGooglePhotosAlbum(accountId, body);
-  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Created album albumId=${album.googleAlbumId} title="${album.title}"`);
   return album;
 };
 
@@ -338,7 +334,6 @@ export const uploadGooglePhotosMedia = async (
   const accessToken = await getValidGooglePhotosAccessToken(accountId);
   const file = fs.readFileSync(filePath);
   const contentType = inferGooglePhotosContentType(filePath);
-  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Uploading media bytes file="${fileName}" sizeBytes=${file.byteLength} contentType=${contentType}`);
   const response = await fetch(`${GOOGLE_PHOTOS_API_URL}/uploads`, {
     method: 'POST',
     headers: {
@@ -358,8 +353,6 @@ export const uploadGooglePhotosMedia = async (
     throw new Error(message);
   }
 
-  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Uploaded media bytes file="${fileName}" sizeBytes=${file.byteLength} uploadToken=${redactGooglePhotosUploadToken(body)}`);
-
   return {
     uploadToken: body,
     createdAt: nowIso()
@@ -371,7 +364,6 @@ export const createGooglePhotosMediaItems = async (
   albumId: string,
   items: Array<{ uploadToken: string; fileName: string }>
 ): Promise<GooglePhotosBatchCreateResult[]> => {
-  console.info(`${GOOGLE_PHOTOS_LOG_PREFIX} Creating media items albumId=${albumId} count=${items.length}`);
   const body = await requestJson<{ newMediaItemResults?: GooglePhotosBatchCreateResult[] }>(
     accountId,
     `${GOOGLE_PHOTOS_API_URL}/mediaItems:batchCreate`,
