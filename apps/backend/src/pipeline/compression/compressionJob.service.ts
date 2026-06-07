@@ -378,6 +378,7 @@ export interface CompressionProgressData {
     sourcePath: string;
     displayPath?: string;
     status: 'completed' | 'failed';
+    error?: string;
     operation: 'compress' | 'copy';
     startedAt?: number;
     finishedAt?: number;
@@ -481,6 +482,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
               source: string;
               status: 'completed' | 'failed';
               displayPath?: unknown;
+              error?: unknown;
               operation: 'compress' | 'copy';
               startedAt?: unknown;
               finishedAt?: unknown;
@@ -494,6 +496,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
               sourcePath: item.source,
               displayPath: typeof item.displayPath === 'string' ? item.displayPath : getSourceDisplayPath(manifestSourceDir, item.source),
               status: item.status,
+              ...(typeof item.error === 'string' ? { error: item.error } : {}),
               operation: item.operation,
               ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {}),
               ...(typeof item.finishedAt === 'number' ? { finishedAt: item.finishedAt } : {}),
@@ -514,7 +517,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   const allProcessedItems = db
     .prepare(
       `
-      SELECT mi.id, mi.source_path, iss.status
+      SELECT mi.id, mi.source_path, iss.status, iss.last_error
       , COALESCE(idc.selected_for_compression, 0) AS selected_for_compression
       FROM item_stage_status iss
       JOIN media_items mi ON iss.item_id = mi.id
@@ -523,7 +526,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
       ORDER BY iss.updated_at ASC
     `
     )
-    .all(sessionId) as Array<{ id: string; source_path: string; status: string; selected_for_compression: number }>;
+    .all(sessionId) as Array<{ id: string; source_path: string; status: string; last_error: string | null; selected_for_compression: number }>;
 
   // Get completed and failed counts
   let completedCount = 0;
@@ -575,6 +578,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
     sourcePath: item.source_path,
     displayPath: getSourceDisplayPath(manifestSourceDir, item.source_path),
     status: item.status as 'completed' | 'failed',
+    ...(item.last_error ? { error: item.last_error } : {}),
     operation: item.selected_for_compression ? 'compress' as const : 'copy' as const
   }));
 

@@ -53,6 +53,7 @@ export type CompressionProgressApiResponse = {
     sourcePath: string;
     displayPath?: string;
     status: 'completed' | 'failed';
+    error?: string;
     operation: 'compress' | 'copy';
     startedAt?: number;
     finishedAt?: number;

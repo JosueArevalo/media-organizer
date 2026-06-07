@@ -75,6 +75,7 @@ type CompressionProgressItem = {
   sourcePath: string;
   displayPath?: string;
   status: 'completed' | 'failed';
+  error?: string;
   operation: 'compress' | 'copy';
   startedAt?: number;
   finishedAt?: number;
@@ -92,6 +93,9 @@ type CompressionActiveItem = {
   operation: 'compress' | 'copy';
   startedAt?: number;
 };
+
+type CompressionLogStatusFilter = 'all' | 'completed' | 'failed';
+type CompressionLogOperationFilter = 'all' | 'compress' | 'copy' | 'original-retained-size';
 
 const IMAGE_PRESETS: Array<{ id: Exclude<ImagePresetId, 'custom'>; labelKey: TranslationKey; quality: number; noteKey: TranslationKey }> = [
   { id: 'balanced', labelKey: 'compression.preset.balanced', quality: 80, noteKey: 'compression.preset.balancedNote' },
@@ -145,6 +149,25 @@ const formatDuration = (milliseconds?: number) => {
 };
 
 const getCompressionItemLabel = (item: { sourcePath: string; displayPath?: string }) => item.displayPath ?? item.sourcePath;
+
+const normalizeLogSearchText = (value: string) => value.toLowerCase().replace(/[\\/]+/g, '\\');
+
+const getCompressionLogOperationLabel = (item: CompressionProgressItem) => {
+  if (item.outcome === 'original-retained-size') {
+    return 'original retained';
+  }
+
+  return item.operation === 'compress' ? 'compressed' : 'copied';
+};
+
+const getCompressionLogSearchText = (item: CompressionProgressItem) =>
+  normalizeLogSearchText([
+    item.status,
+    getCompressionLogOperationLabel(item),
+    getCompressionItemLabel(item),
+    item.sourcePath,
+    item.error ?? ''
+  ].join(' '));
 
 const getMediaKind = (fileName: string, mimeType = '', fileType = ''): 'image' | 'video' | 'other' => {
   const normalizedType = fileType.toLowerCase();
@@ -500,6 +523,9 @@ export const CompressionPage = () => {
     retainedOriginalBecauseLarger: number;
   } | null>(null);
   const [logsExpanded, setLogsExpanded] = useState(false);
+  const [logStatusFilter, setLogStatusFilter] = useState<CompressionLogStatusFilter>('all');
+  const [logOperationFilter, setLogOperationFilter] = useState<CompressionLogOperationFilter>('all');
+  const [logSearchQuery, setLogSearchQuery] = useState('');
   const completionTimerRef = useRef<number | null>(null);
   const pollSessionIdRef = useRef<string | null>(null);
 
@@ -529,6 +555,37 @@ export const CompressionPage = () => {
       ? t(activePreset.labelKey)
       : t('compression.preset.balanced');
   const selectedVideoProfileLabel = videoPreset;
+  const normalizedLogSearchQuery = useMemo(() => normalizeLogSearchText(logSearchQuery.trim()), [logSearchQuery]);
+  const visibleProcessedItems = useMemo(() => {
+    if (!progressData) {
+      return [];
+    }
+
+    return progressData.processedItems.filter((item) => {
+      if (logStatusFilter !== 'all' && item.status !== logStatusFilter) {
+        return false;
+      }
+
+      if (logOperationFilter === 'original-retained-size') {
+        if (item.outcome !== 'original-retained-size') {
+          return false;
+        }
+      } else if (logOperationFilter === 'compress') {
+        if (item.operation !== 'compress' || item.outcome === 'original-retained-size') {
+          return false;
+        }
+      } else if (logOperationFilter !== 'all' && item.operation !== logOperationFilter) {
+        return false;
+      }
+
+      if (normalizedLogSearchQuery && !getCompressionLogSearchText(item).includes(normalizedLogSearchQuery)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [logOperationFilter, logStatusFilter, normalizedLogSearchQuery, progressData]);
+  const hasActiveLogFilters = logStatusFilter !== 'all' || logOperationFilter !== 'all' || normalizedLogSearchQuery.length > 0;
 
   useEffect(() => {
     saveCompressionSettings({
@@ -1345,31 +1402,84 @@ export const CompressionPage = () => {
             </button>
             
             {logsExpanded && (
-              <div className="compression-logs-list">
-                {progressData.processedItems.length > 0 ? (
-                  progressData.processedItems.map((item) => (
-                    <div key={item.id} className={`compression-log-item compression-log-${item.status}`}>
-                      <span className="compression-log-status">
-                        {item.status === 'completed' ? '✓' : '✗'}
-                      </span>
-                      <span className="compression-log-name">
-                        {t(item.outcome === 'original-retained-size'
-                          ? 'compression.logOriginalRetainedSize'
-                          : item.skipped && item.operation === 'copy'
-                          ? 'compression.logCopySkipped'
-                          : item.operation === 'compress'
-                            ? 'compression.logCompressed'
-                            : 'compression.logCopied', {
-                          name: getCompressionItemLabel(item)
-                        })}
-                        {typeof item.durationMs === 'number' ? ` - ${formatDuration(item.durationMs)}` : ''}
-                      </span>
+              <>
+                <div className="compression-logs-toolbar">
+                  <div className="compression-log-control">
+                    <span className="compression-log-control-label">{t('compression.logsStatusTitle')}</span>
+                    <div className="compression-log-filter-group" aria-label={t('compression.logsStatusFilter')}>
+                      {(['all', 'completed', 'failed'] as CompressionLogStatusFilter[]).map((filter) => (
+                        <button
+                          key={filter}
+                          type="button"
+                          className={`compression-log-filter ${logStatusFilter === filter ? 'is-active' : ''}`}
+                          onClick={() => setLogStatusFilter(filter)}
+                        >
+                          {t(`compression.logsStatus.${filter}` as TranslationKey)}
+                        </button>
+                      ))}
                     </div>
-                  ))
-                ) : (
-                  <p className="page-summary-note">{t('compression.noItemsProcessed')}</p>
-                )}
-              </div>
+                  </div>
+                  <div className="compression-log-control">
+                    <span className="compression-log-control-label">{t('compression.logsOperationTitle')}</span>
+                    <div className="compression-log-filter-group" aria-label={t('compression.logsOperationFilter')}>
+                      {(['all', 'compress', 'copy', 'original-retained-size'] as CompressionLogOperationFilter[]).map((filter) => (
+                        <button
+                          key={filter}
+                          type="button"
+                          className={`compression-log-filter ${logOperationFilter === filter ? 'is-active' : ''}`}
+                          onClick={() => setLogOperationFilter(filter)}
+                        >
+                          {t(`compression.logsOperation.${filter}` as TranslationKey)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <input
+                    className="compression-log-search"
+                    type="search"
+                    value={logSearchQuery}
+                    onChange={(event) => setLogSearchQuery(event.target.value)}
+                    placeholder={t('compression.logsSearchPlaceholder')}
+                    aria-label={t('compression.logsSearchLabel')}
+                  />
+                </div>
+                <p className="compression-logs-count">
+                  {t('compression.logsShowing', {
+                    shown: visibleProcessedItems.length,
+                    total: progressData.processedItems.length
+                  })}
+                </p>
+                <div className="compression-logs-list">
+                  {progressData.processedItems.length > 0 && visibleProcessedItems.length > 0 ? (
+                    visibleProcessedItems.map((item) => (
+                      <div key={item.id} className={`compression-log-item compression-log-${item.status}`}>
+                        <span className="compression-log-status">
+                          {item.status === 'completed' ? '✓' : '✗'}
+                        </span>
+                        <span className="compression-log-name">
+                          {t(item.outcome === 'original-retained-size'
+                            ? 'compression.logOriginalRetainedSize'
+                            : item.skipped && item.operation === 'copy'
+                            ? 'compression.logCopySkipped'
+                            : item.operation === 'compress'
+                              ? 'compression.logCompressed'
+                              : 'compression.logCopied', {
+                            name: getCompressionItemLabel(item)
+                          })}
+                          {typeof item.durationMs === 'number' ? ` - ${formatDuration(item.durationMs)}` : ''}
+                          {item.status === 'failed' && item.error ? (
+                            <span className="compression-log-error">{item.error}</span>
+                          ) : null}
+                        </span>
+                      </div>
+                    ))
+                  ) : progressData.processedItems.length > 0 && hasActiveLogFilters ? (
+                    <p className="page-summary-note">{t('compression.logsNoMatches')}</p>
+                  ) : (
+                    <p className="page-summary-note">{t('compression.noItemsProcessed')}</p>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>

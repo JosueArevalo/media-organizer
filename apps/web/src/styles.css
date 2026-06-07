@@ -2377,6 +2377,80 @@ body {
   color: var(--accent);
 }
 
+.compression-logs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  column-gap: 14px;
+  row-gap: 10px;
+  margin-top: 10px;
+}
+
+.compression-log-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.compression-log-control-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.compression-log-filter-group {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+.compression-log-filter {
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 10px;
+}
+
+.compression-log-filter:last-child {
+  border-right: 0;
+}
+
+.compression-log-filter:hover,
+.compression-log-filter.is-active {
+  background: rgba(59, 130, 246, 0.14);
+  color: var(--text);
+}
+
+.compression-log-search {
+  min-width: 220px;
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.compression-log-search:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.45);
+  outline-offset: 1px;
+}
+
+.compression-logs-count {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .compression-logs-list {
   max-height: 200px;
   overflow-y: auto;
@@ -2418,7 +2492,23 @@ body {
 
 .compression-log-name {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compression-log-name > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compression-log-error {
+  color: #fca5a5;
+  font-size: 12px;
+  margin-top: 3px;
   overflow: hidden;
   text-overflow: ellipsis;
 }

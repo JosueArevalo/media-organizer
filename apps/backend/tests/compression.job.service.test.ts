@@ -530,6 +530,7 @@ test('compression progress falls back to absolute display paths outside the sour
         output: path.join(scopedOutputDir, 'outside-source.jpg'),
         command: [],
         status: 'failed',
+        error: 'Fake encoder could not read the image.',
         operation: 'compress'
       }]
     }),
@@ -539,6 +540,7 @@ test('compression progress falls back to absolute display paths outside the sour
   const progress = getCompressionProgress(started.session.id);
   assert.equal(progress?.currentlyProcessing[0].displayPath, outsideSourcePath);
   assert.equal(progress?.processedItems[0].displayPath, outsideSourcePath);
+  assert.equal(progress?.processedItems[0].error, 'Fake encoder could not read the image.');
 });
 
 test('interrupted compression sessions pause on startup and resume only unconfirmed image outputs', async () => {
