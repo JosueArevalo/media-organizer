@@ -369,12 +369,14 @@ export interface CompressionProgressData {
   currentlyProcessing: Array<{
     id: string;
     sourcePath: string;
+    displayPath?: string;
     operation: 'compress' | 'copy';
     startedAt?: number;
   }>;
   processedItems: Array<{
     id: string;
     sourcePath: string;
+    displayPath?: string;
     status: 'completed' | 'failed';
     operation: 'compress' | 'copy';
     startedAt?: number;
@@ -393,6 +395,21 @@ export interface CompressionProgressData {
   failedCopy: number;
   retainedOriginalBecauseLarger: number;
 }
+
+const getSourceDisplayPath = (sourceDir: string | null, sourcePath: string) => {
+  if (!sourceDir) {
+    return sourcePath;
+  }
+
+  const relativePath = path.relative(sourceDir, sourcePath);
+  const escapesSource = relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || relativePath.startsWith('../') || relativePath.startsWith('..\\');
+
+  if (!relativePath || path.isAbsolute(relativePath) || escapesSource) {
+    return sourcePath;
+  }
+
+  return relativePath.replace(/[\\/]+/g, '\\');
+};
 
 export const getCompressionProgress = (sessionId: string): CompressionProgressData | null => {
   runMigrations();
@@ -421,11 +438,13 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   let checkpointFailedCompressCount: number | null = null;
   let checkpointFailedCopyCount: number | null = null;
   let retainedOriginalBecauseLargerCount = 0;
-  let activeItems: Array<{ id: string; sourcePath: string; operation: 'compress' | 'copy'; startedAt?: number }> = [];
+  let manifestSourceDir: string | null = null;
+  let activeItems: Array<{ id: string; sourcePath: string; displayPath?: string; operation: 'compress' | 'copy'; startedAt?: number }> = [];
   let checkpointProcessedItems: CompressionProgressData['processedItems'] = [];
   if (checkpoint?.payload_json) {
     try {
       const parsed = JSON.parse(checkpoint.payload_json);
+      manifestSourceDir = typeof parsed.manifest?.sourceDir === 'string' ? parsed.manifest.sourceDir : null;
       totalCount = parsed.totalCount ?? 0;
       checkpointCompletedCount = parsed.summary?.completedItems ?? null;
       checkpointFailedCount = parsed.summary?.failedItems ?? null;
@@ -443,9 +462,10 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
               typeof item.sourcePath === 'string' &&
               (item.operation === 'compress' || item.operation === 'copy')
             )
-            .map((item: { id: string; sourcePath: string; operation: 'compress' | 'copy'; startedAt?: unknown }) => ({
+            .map((item: { id: string; sourcePath: string; displayPath?: unknown; operation: 'compress' | 'copy'; startedAt?: unknown }) => ({
               id: item.id,
               sourcePath: item.sourcePath,
+              displayPath: typeof item.displayPath === 'string' ? item.displayPath : getSourceDisplayPath(manifestSourceDir, item.sourcePath),
               operation: item.operation,
               ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {})
             }))
@@ -460,6 +480,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
             .map((item: {
               source: string;
               status: 'completed' | 'failed';
+              displayPath?: unknown;
               operation: 'compress' | 'copy';
               startedAt?: unknown;
               finishedAt?: unknown;
@@ -471,6 +492,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
             }) => ({
               id: item.source,
               sourcePath: item.source,
+              displayPath: typeof item.displayPath === 'string' ? item.displayPath : getSourceDisplayPath(manifestSourceDir, item.source),
               status: item.status,
               operation: item.operation,
               ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {}),
@@ -551,6 +573,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   const databaseProcessedItems = allProcessedItems.map((item) => ({
     id: item.id,
     sourcePath: item.source_path,
+    displayPath: getSourceDisplayPath(manifestSourceDir, item.source_path),
     status: item.status as 'completed' | 'failed',
     operation: item.selected_for_compression ? 'compress' as const : 'copy' as const
   }));

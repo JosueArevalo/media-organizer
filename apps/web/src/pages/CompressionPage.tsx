@@ -73,6 +73,7 @@ type MediaStatsState =
 type CompressionProgressItem = {
   id: string;
   sourcePath: string;
+  displayPath?: string;
   status: 'completed' | 'failed';
   operation: 'compress' | 'copy';
   startedAt?: number;
@@ -87,6 +88,7 @@ type CompressionProgressItem = {
 type CompressionActiveItem = {
   id: string;
   sourcePath: string;
+  displayPath?: string;
   operation: 'compress' | 'copy';
   startedAt?: number;
 };
@@ -142,7 +144,7 @@ const formatDuration = (milliseconds?: number) => {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 };
 
-const getFileLabel = (filePath: string) => filePath.split(/[\\/]/).pop() || filePath;
+const getCompressionItemLabel = (item: { sourcePath: string; displayPath?: string }) => item.displayPath ?? item.sourcePath;
 
 const getMediaKind = (fileName: string, mimeType = '', fileType = ''): 'image' | 'video' | 'other' => {
   const normalizedType = fileType.toLowerCase();
@@ -1317,7 +1319,7 @@ export const CompressionPage = () => {
                   progressData.currentlyProcessing.slice(0, 2).map((item) => (
                     <div key={item.id} className="compression-processing-item">
                       {t(item.operation === 'compress' ? 'compression.compressingItem' : 'compression.copyingItem', {
-                        name: getFileLabel(item.sourcePath)
+                        name: getCompressionItemLabel(item)
                       })}
                       {item.startedAt ? ` - ${formatDuration(Date.now() - item.startedAt)}` : ''}
                     </div>
@@ -1358,7 +1360,7 @@ export const CompressionPage = () => {
                           : item.operation === 'compress'
                             ? 'compression.logCompressed'
                             : 'compression.logCopied', {
-                          name: getFileLabel(item.sourcePath)
+                          name: getCompressionItemLabel(item)
                         })}
                         {typeof item.durationMs === 'number' ? ` - ${formatDuration(item.durationMs)}` : ''}
                       </span>

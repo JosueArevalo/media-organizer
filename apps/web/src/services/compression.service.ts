@@ -44,12 +44,14 @@ export type CompressionProgressApiResponse = {
   currentlyProcessing: Array<{
     id: string;
     sourcePath: string;
+    displayPath?: string;
     operation: 'compress' | 'copy';
     startedAt?: number;
   }>;
   processedItems: Array<{
     id: string;
     sourcePath: string;
+    displayPath?: string;
     status: 'completed' | 'failed';
     operation: 'compress' | 'copy';
     startedAt?: number;

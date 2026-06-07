@@ -425,10 +425,12 @@ test('compression progress reports the actively processing video and clears it a
   const scopedSourceDir = path.join(tempRoot, 'active-video-source');
   const scopedOutputDir = path.join(tempRoot, 'active-video-output');
   const toolsDir = path.join(tempRoot, 'active-video-tools');
-  fs.mkdirSync(scopedSourceDir, { recursive: true });
+  const sourceSubdir = path.join(scopedSourceDir, 'album', 'clips');
+  const expectedDisplayPath = ['album', 'clips', 'slow.mp4'].join('\\');
+  fs.mkdirSync(sourceSubdir, { recursive: true });
   fs.mkdirSync(scopedOutputDir, { recursive: true });
   fs.mkdirSync(toolsDir, { recursive: true });
-  fs.writeFileSync(path.join(scopedSourceDir, 'slow.mp4'), 'fake-video-content', 'utf8');
+  fs.writeFileSync(path.join(sourceSubdir, 'slow.mp4'), 'fake-video-content', 'utf8');
 
   const started = startCompressionSession({
     name: 'Active video progress test',
@@ -452,6 +454,7 @@ test('compression progress reports the actively processing video and clears it a
   assert.equal(activeProgress?.currentlyProcessing.length, 1);
   assert.equal(activeProgress?.currentlyProcessing[0].operation, 'compress');
   assert.ok(activeProgress?.currentlyProcessing[0].sourcePath.endsWith('slow.mp4'));
+  assert.equal(activeProgress?.currentlyProcessing[0].displayPath, expectedDisplayPath);
   assert.equal(typeof activeProgress?.currentlyProcessing[0].startedAt, 'number');
 
   await execution;
@@ -462,6 +465,7 @@ test('compression progress reports the actively processing video and clears it a
   assert.equal(finalProgress?.currentlyProcessing.length, 0);
   assert.equal(finalProgress?.processedItems.length, 1);
   assert.equal(finalProgress?.processedItems[0].operation, 'compress');
+  assert.equal(finalProgress?.processedItems[0].displayPath, expectedDisplayPath);
   assert.equal(finalProgress?.processedItems[0].outcome, 'original-retained-size');
   assert.equal(finalProgress?.completedCompress, 0);
   assert.equal(finalProgress?.completedCopy, 0);
@@ -472,6 +476,69 @@ test('compression progress reports the actively processing video and clears it a
   const resumedProgress = getCompressionProgress(started.session.id);
   assert.equal(resumedProgress?.retainedOriginalBecauseLarger, 1);
   assert.equal(resumedProgress?.processedItems[0].outcome, 'original-retained-size');
+});
+
+test('compression progress falls back to absolute display paths outside the source directory', async () => {
+  const { startCompressionSession, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js?display-path-fallback=1');
+  const scopedSourceDir = path.join(tempRoot, 'display-path-source');
+  const scopedOutputDir = path.join(tempRoot, 'display-path-output');
+  const outsideSourcePath = path.join(tempRoot, 'outside-source.jpg');
+  fs.mkdirSync(scopedSourceDir, { recursive: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+  fs.writeFileSync(outsideSourcePath, 'outside-source-content', 'utf8');
+
+  const started = startCompressionSession({
+    name: 'Display path fallback test',
+    sourceDir: scopedSourceDir,
+    outputDir: scopedOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Fast 1080p30',
+    imageToolCommand: '__missing_image_encoder__',
+    videoToolCommand: '__missing_video_encoder__'
+  });
+
+  getDb().prepare(
+    `
+      UPDATE session_checkpoints
+      SET payload_json = ?
+      WHERE session_id = ? AND stage = 'compress'
+    `
+  ).run(
+    JSON.stringify({
+      outputRoot: started.outputRoot,
+      manifest: started.manifest,
+      totalCount: 1,
+      summary: {
+        completedItems: 0,
+        failedItems: 1,
+        totalCompressCount: 1,
+        totalCopyCount: 0,
+        completedCompressCount: 0,
+        completedCopyCount: 0,
+        failedCompressCount: 1,
+        failedCopyCount: 0
+      },
+      activeItems: [{
+        id: outsideSourcePath,
+        sourcePath: outsideSourcePath,
+        operation: 'compress',
+        startedAt: Date.now()
+      }],
+      processedItems: [{
+        source: outsideSourcePath,
+        output: path.join(scopedOutputDir, 'outside-source.jpg'),
+        command: [],
+        status: 'failed',
+        operation: 'compress'
+      }]
+    }),
+    started.session.id
+  );
+
+  const progress = getCompressionProgress(started.session.id);
+  assert.equal(progress?.currentlyProcessing[0].displayPath, outsideSourcePath);
+  assert.equal(progress?.processedItems[0].displayPath, outsideSourcePath);
 });
 
 test('interrupted compression sessions pause on startup and resume only unconfirmed image outputs', async () => {
