@@ -11,6 +11,7 @@ import {
   formatUnavailablePorts,
   terminateProcessTree
 } from "./dev-runtime.mjs";
+import { shouldShutdownAfterChildFailure } from "./dev-process-policy.mjs";
 
 const childProcesses = [];
 const npmCommand = platform === "win32" ? "npm.cmd" : "npm";
@@ -77,7 +78,9 @@ const run = (name, args) => {
         console.error(line);
       }
 
-      shutdown(code ?? 1);
+      if (shouldShutdownAfterChildFailure(name)) {
+        shutdown(code ?? 1);
+      }
     }
   });
 
