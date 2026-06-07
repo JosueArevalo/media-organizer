@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
@@ -8,6 +8,7 @@ import {
   createExportJobRequest,
   deleteGooglePhotosOAuthConfigRequest,
   deleteGooglePhotosAccountRequest,
+  getExportJobRequest,
   getExportProgressRequest,
   getGooglePhotosOAuthConfigRequest,
   listGooglePhotosAccountsRequest,
@@ -19,7 +20,9 @@ import {
   startExportJobRequest,
   startGooglePhotosOAuthRequest,
   testExportTargetRequest,
+  updateGooglePhotosExportJobScopeRequest,
   type ExportItemStatus,
+  type ExportJobSnapshot,
   type ExportProgress,
   type GooglePhotosAlbumProgress,
   type GooglePhotosAccount,
@@ -62,6 +65,46 @@ type GooglePhotosAlbumSessionStatus = 'completed' | 'failed' | 'skipped';
 
 const createOpenSectionSet = (section: GooglePhotosAccordionSection) => new Set<GooglePhotosAccordionSection>([section]);
 
+const getPendingAlbumTitleSet = (nextPreview: GooglePhotosExportPreview) =>
+  new Set(nextPreview.albums.filter((album) => album.uploadStatus === 'pending').map((album) => album.albumTitle));
+
+const getCheckpointAlbumTitleSet = (job: ExportJobSnapshot | null) => {
+  if (!job?.checkpoint?.payloadJson) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(job.checkpoint.payloadJson) as {
+      target?: {
+        type?: string;
+        albumTitles?: unknown;
+      };
+    };
+    const albumTitles = payload.target?.type === 'google-photos' && Array.isArray(payload.target.albumTitles)
+      ? payload.target.albumTitles.filter((title): title is string => typeof title === 'string' && title.trim().length > 0)
+      : null;
+
+    return albumTitles ? new Set(albumTitles) : null;
+  } catch {
+    return null;
+  }
+};
+
+const getAlbumTitleSetForJob = (nextPreview: GooglePhotosExportPreview, job: ExportJobSnapshot | null) =>
+  getCheckpointAlbumTitleSet(job) ?? getPendingAlbumTitleSet(nextPreview);
+
+const getNextAlbumTitleSelection = (current: Set<string>, albumTitle: string) => {
+  const next = new Set(current);
+
+  if (next.has(albumTitle)) {
+    next.delete(albumTitle);
+  } else {
+    next.add(albumTitle);
+  }
+
+  return next;
+};
+
 export const GooglePhotosExportPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -89,13 +132,17 @@ export const GooglePhotosExportPage = () => {
   const [isStarting, setIsStarting] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [retryingItemId, setRetryingItemId] = useState<string | null>(null);
+  const [isUpdatingAlbumScope, setIsUpdatingAlbumScope] = useState(false);
   const [isSetupGuideExpanded, setIsSetupGuideExpanded] = useState(false);
   const [isGoogleSignInPendingRefresh, setIsGoogleSignInPendingRefresh] = useState(false);
   const [openSections, setOpenSections] = useState<Set<GooglePhotosAccordionSection>>(() => createOpenSectionSet('config'));
   const [isAccordionManual, setIsAccordionManual] = useState(false);
   const [expandedAlbumTitles, setExpandedAlbumTitles] = useState<Set<string>>(() => new Set());
+  const [selectedAlbumTitles, setSelectedAlbumTitles] = useState<Set<string>>(() => new Set());
   const [albumSessionStatuses, setAlbumSessionStatuses] = useState<Record<string, GooglePhotosAlbumSessionStatus>>({});
   const [activeBackendJobIdOverride, setActiveBackendJobIdOverride] = useState<string | null>(null);
+  const selectedAlbumTitlesRef = useRef<Set<string>>(new Set());
+  const albumScopeUpdateRequestIdRef = useRef(0);
 
   const sourceRoot = groupingSessionState.outputRootLabel ?? '';
   const backendJobId = activeBackendJobIdOverride ?? exportJobState.backendJobId;
@@ -111,10 +158,14 @@ export const GooglePhotosExportPage = () => {
   const isTerminal = ['completed', 'failed', 'cancelled'].includes(currentProgress?.status ?? exportStatus);
   const hasPreview = Boolean(preview);
   const hasActiveUpload = isRunning || isPaused;
-  const canStart = Boolean(sourceRoot && selectedAccountId && !isStarting && (preview || isPaused) && (!hasActiveUpload || isPaused));
   const canConnect = Boolean(oauthConfig?.configured && !isConnecting);
   const shouldShowConnectAccount = Boolean(oauthConfig?.configured && (!isGoogleSignInPendingRefresh || accounts.length > 0));
   const recentItems = useMemo(() => currentProgress?.recentItems ?? [], [currentProgress]);
+
+  useEffect(() => {
+    selectedAlbumTitlesRef.current = selectedAlbumTitles;
+  }, [selectedAlbumTitles]);
+
   const progressByAlbum = useMemo(() => {
     const entries = new Map<string, GooglePhotosAlbumProgress>();
 
@@ -264,6 +315,7 @@ export const GooglePhotosExportPage = () => {
     setProgress(null);
     setAlbumSessionStatuses({});
     setExpandedAlbumTitles(new Set());
+    setSelectedAlbumTitles(new Set());
     setRestorePreviewAttemptKey('');
     setActiveBackendJobIdOverride(null);
     setBackendError(null);
@@ -312,6 +364,73 @@ export const GooglePhotosExportPage = () => {
       return next;
     });
   }, []);
+
+  const toggleAlbumSelection = useCallback(async (albumTitle: string) => {
+    const nextSelection = getNextAlbumTitleSelection(selectedAlbumTitlesRef.current, albumTitle);
+    const nextAlbumTitles = [...nextSelection];
+
+    selectedAlbumTitlesRef.current = nextSelection;
+    setSelectedAlbumTitles(nextSelection);
+
+    if (!isPaused || !backendJobId) {
+      return;
+    }
+
+    const requestId = albumScopeUpdateRequestIdRef.current + 1;
+    albumScopeUpdateRequestIdRef.current = requestId;
+    setIsUpdatingAlbumScope(true);
+
+    try {
+      const job = await updateGooglePhotosExportJobScopeRequest(backendJobId, nextAlbumTitles);
+      const [nextPreview, nextProgress] = await Promise.all([
+        previewGooglePhotosExportRequest({
+          accountId: selectedAccountId,
+          sourceRoot,
+          groupingSessionId: groupingSessionState.backendSessionId
+        }),
+        getExportProgressRequest(job.job.id)
+      ]);
+
+      if (requestId !== albumScopeUpdateRequestIdRef.current) {
+        return;
+      }
+
+      setPreview(nextPreview);
+      setProgress(nextProgress);
+      setSelectedAlbumTitles(getAlbumTitleSetForJob(nextPreview, job));
+      syncSnapshot(nextProgress);
+      setBackendError(null);
+    } catch (error) {
+      const [nextPreview, job] = await Promise.all([
+        previewGooglePhotosExportRequest({
+          accountId: selectedAccountId,
+          sourceRoot,
+          groupingSessionId: groupingSessionState.backendSessionId
+        }),
+        getExportJobRequest(backendJobId)
+      ]);
+
+      if (requestId !== albumScopeUpdateRequestIdRef.current) {
+        return;
+      }
+
+      setPreview(nextPreview);
+      setSelectedAlbumTitles(getAlbumTitleSetForJob(nextPreview, job));
+      setBackendError(error instanceof Error ? error.message : t('export.googlePhotos.previewError'));
+    } finally {
+      if (requestId === albumScopeUpdateRequestIdRef.current) {
+        setIsUpdatingAlbumScope(false);
+      }
+    }
+  }, [
+    backendJobId,
+    groupingSessionState.backendSessionId,
+    isPaused,
+    selectedAccountId,
+    sourceRoot,
+    syncSnapshot,
+    t
+  ]);
 
   useEffect(() => {
     if (!isAccordionManual) {
@@ -425,13 +544,17 @@ export const GooglePhotosExportPage = () => {
     setIsPreviewing(true);
     openOnlySection('albums');
 
-    void previewGooglePhotosExportRequest({
-      accountId: selectedAccountId,
-      sourceRoot,
-      groupingSessionId: groupingSessionState.backendSessionId
-    })
-      .then((nextPreview) => {
+    void Promise.all([
+      previewGooglePhotosExportRequest({
+        accountId: selectedAccountId,
+        sourceRoot,
+        groupingSessionId: groupingSessionState.backendSessionId
+      }),
+      getExportJobRequest(backendJobId)
+    ])
+      .then(([nextPreview, job]) => {
         setPreview(nextPreview);
+        setSelectedAlbumTitles(getAlbumTitleSetForJob(nextPreview, job));
         setBackendError(null);
       })
       .catch((error) => {
@@ -472,6 +595,7 @@ export const GooglePhotosExportPage = () => {
     setActiveBackendJobIdOverride(null);
     setAlbumSessionStatuses({});
     setExpandedAlbumTitles(new Set());
+    setSelectedAlbumTitles(new Set());
   }, [selectedAccountId, sourceRoot]);
 
   const handleConnect = async () => {
@@ -632,12 +756,14 @@ export const GooglePhotosExportPage = () => {
         groupingSessionId: groupingSessionState.backendSessionId
       });
       setPreview(nextPreview);
+      setSelectedAlbumTitles(getPendingAlbumTitleSet(nextPreview));
       setAlbumSessionStatuses({});
       setExpandedAlbumTitles(new Set());
       setBackendError(null);
       openOnlySection('albums');
     } catch (error) {
       setPreview(null);
+      setSelectedAlbumTitles(new Set());
       setBackendError(error instanceof Error ? error.message : t('export.googlePhotos.previewError'));
     } finally {
       setIsPreviewing(false);
@@ -671,6 +797,7 @@ export const GooglePhotosExportPage = () => {
     try {
       const shouldResume = Boolean(isPaused && backendJobId);
       const resumeJobId = shouldResume ? backendJobId : null;
+      const albumTitles = albumTitle ? [albumTitle] : selectedPendingAlbumTitles;
       let job = resumeJobId
         ? await startExportJobRequest(resumeJobId)
         : await createExportJobRequest({
@@ -682,17 +809,19 @@ export const GooglePhotosExportPage = () => {
             target: {
               type: 'google-photos',
               accountId: selectedAccountId,
-              ...(albumTitle ? { albumTitles: [albumTitle] } : {})
+              ...(albumTitles.length > 0 ? { albumTitles } : {})
             }
           });
 
       if (!shouldResume && job.job.totalItems === 0) {
+        const noPendingJob = job;
         const nextPreview = await previewGooglePhotosExportRequest({
           accountId: selectedAccountId,
           sourceRoot,
           groupingSessionId: groupingSessionState.backendSessionId
         });
         setPreview(nextPreview);
+        setSelectedAlbumTitles(getAlbumTitleSetForJob(nextPreview, noPendingJob));
         setProgress(null);
         setActiveBackendJobIdOverride(null);
         setAlbumSessionStatuses({});
@@ -910,10 +1039,32 @@ export const GooglePhotosExportPage = () => {
     itemCount: album.total,
     items: []
   }));
+  const pendingVisibleAlbums = visibleAlbums.filter((album) =>
+    album.uploadStatus === 'pending' && !isAlbumCompletedSuccessfully(album.albumTitle)
+  );
+  const selectedPendingAlbumTitles = pendingVisibleAlbums
+    .filter((album) => selectedAlbumTitles.has(album.albumTitle))
+    .map((album) => album.albumTitle);
+  const excludedPendingAlbumCount = Math.max(0, pendingVisibleAlbums.length - selectedPendingAlbumTitles.length);
+  const selectionSummary = preview
+    ? t('export.googlePhotos.albumSelectionSummary', {
+        selected: selectedPendingAlbumTitles.length,
+        excluded: excludedPendingAlbumCount
+      })
+    : null;
 
   const isAllVisibleExportCompletedSuccessfully = Boolean(
     preview?.albums.length
       && visibleAlbums.every((album) => isAlbumCompletedSuccessfully(album.albumTitle))
+  );
+  const canStart = Boolean(
+    sourceRoot
+      && selectedAccountId
+      && !isStarting
+      && !isUpdatingAlbumScope
+      && (preview || isPaused)
+      && (!hasActiveUpload || isPaused)
+      && selectedPendingAlbumTitles.length > 0
   );
   const isPreviewDisabled = Boolean(
     !sourceRoot || !selectedAccountId || isPreviewing || hasPreview || hasActiveUpload
@@ -1170,7 +1321,7 @@ export const GooglePhotosExportPage = () => {
                   onClick={() => void handleStart()}
                   disabled={!canStart || isAllVisibleExportCompletedSuccessfully}
                 >
-                  {isStarting ? t('export.starting') : isPaused ? t('export.resume') : t('export.googlePhotos.uploadAllAlbums')}
+                  {isStarting ? t('export.starting') : isPaused ? t('export.resume') : t('export.googlePhotos.uploadSelectedAlbums')}
                 </button>
                 <button className="btn btn-secondary" type="button" onClick={() => void handlePause()} disabled={!backendJobId || !isRunning || isAllVisibleExportCompletedSuccessfully}>
                   {t('export.pause')}
@@ -1180,6 +1331,12 @@ export const GooglePhotosExportPage = () => {
                 </button>
               </div>
 
+              {selectionSummary && (
+                <p className={`google-photos-selection-summary${selectedPendingAlbumTitles.length === 0 ? ' is-empty' : ''}`}>
+                  {selectionSummary}
+                </p>
+              )}
+
               {visibleAlbums.length > 0 && (
                 <>
                   {visibleAlbums.length > 0 && (
@@ -1188,6 +1345,19 @@ export const GooglePhotosExportPage = () => {
                         const isAlbumOpen = expandedAlbumTitles.has(album.albumTitle);
                         const albumProgress = progressByAlbum.get(album.albumTitle);
                         const isAlbumComplete = isAlbumCompletedSuccessfully(album.albumTitle);
+                        const hasAlbumProcessingStarted = Boolean(
+                          albumProgress
+                            && (
+                              albumProgress.completed > 0
+                              || albumProgress.failed > 0
+                              || albumProgress.skipped > 0
+                              || albumProgress.status === 'running'
+                            )
+                        );
+                        const isAlbumPending = album.uploadStatus === 'pending' && !isAlbumComplete;
+                        const isAlbumSelected = selectedAlbumTitles.has(album.albumTitle);
+                        const isAlbumChecked = isAlbumComplete || isAlbumSelected;
+                        const isAlbumSelectable = isAlbumPending && !isRunning && !isUpdatingAlbumScope && (!isPaused || !hasAlbumProcessingStarted);
                         const albumItems = getAlbumDisplayItems(album.albumTitle, album.items, isAlbumComplete);
                         const albumFailureSummary = getAlbumFailureSummary(albumItems);
                         const albumPercent = getAlbumProgressPercent(albumProgress);
@@ -1197,6 +1367,21 @@ export const GooglePhotosExportPage = () => {
                         return (
                           <article className="google-photos-album-panel" key={album.albumTitle}>
                             <div className="google-photos-album-header">
+                              <label className={`google-photos-album-select${!isAlbumChecked ? ' is-excluded' : ''}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={isAlbumChecked}
+                                  onChange={() => void toggleAlbumSelection(album.albumTitle)}
+                                  disabled={!isAlbumSelectable}
+                                />
+                                <span>
+                                  {isAlbumComplete
+                                    ? t('export.googlePhotos.albumUploaded')
+                                    : isAlbumSelected
+                                    ? t('export.googlePhotos.albumSelected')
+                                    : t('export.googlePhotos.albumExcluded')}
+                                </span>
+                              </label>
                               <button
                                 className="google-photos-album-toggle"
                                 type="button"
@@ -1220,7 +1405,7 @@ export const GooglePhotosExportPage = () => {
                                   className="btn btn-primary btn-compact google-photos-upload-action"
                                   type="button"
                                   onClick={() => void handleStart(album.albumTitle)}
-                                  disabled={!canStart || hasActiveUpload || isAlbumComplete || isAllVisibleExportCompletedSuccessfully}
+                                  disabled={!canStart || hasActiveUpload || isAlbumComplete || !isAlbumSelected || isAllVisibleExportCompletedSuccessfully}
                                 >
                                   {isAlbumComplete ? t('export.googlePhotos.albumUploaded') : t('export.googlePhotos.uploadAlbum')}
                                 </button>

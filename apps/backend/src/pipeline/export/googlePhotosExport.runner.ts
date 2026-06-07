@@ -134,9 +134,6 @@ const createUploadedBatch = async (
     const result = results.find((candidate) => candidate.uploadToken === queued.uploadToken);
 
     if (result?.mediaItem?.id) {
-      console.info(
-        `${GOOGLE_PHOTOS_LOG_PREFIX} Created media item albumId=${albumId} file="${queued.item.relativePath}" mediaItemId=${result.mediaItem.id} uploadToken=${redactGooglePhotosUploadToken(queued.uploadToken)}`
-      );
       updateGooglePhotosItemCreated(queued.item.id, result.mediaItem.id, result.mediaItem.productUrl ?? null);
       persistExportItemResult(queued.item.id, 'completed', null, queued.item.relativePath);
       continue;

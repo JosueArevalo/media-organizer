@@ -175,12 +175,16 @@ export const listExportProviderSummaries = (input: {
     if (providerJobs.length === 0) return emptySummary(provider);
 
     const jobIds = providerJobs.map((job) => job.id);
-    const eligibleItems = Math.max(...providerJobs.map((job) => job.eligible_items), 0);
-    const eligibleAlbums = provider === 'google-photos'
-      ? Math.max(...providerJobs.map((job) => job.eligible_albums), 0)
-      : null;
+    const coverageReferenceJobs = provider === 'google-photos'
+      ? providerJobs.filter((job) => job.status === 'completed')
+      : [];
+    const eligibleReferenceJobs = coverageReferenceJobs.length > 0 ? coverageReferenceJobs : providerJobs;
     const coveredItems = getCoveredItems(jobIds, provider);
     const coveredAlbums = provider === 'google-photos' ? getCoveredAlbums(jobIds) : null;
+    const eligibleItems = Math.max(...eligibleReferenceJobs.map((job) => job.eligible_items), coveredItems, 0);
+    const eligibleAlbums = provider === 'google-photos'
+      ? Math.max(...eligibleReferenceJobs.map((job) => job.eligible_albums), coveredAlbums ?? 0, 0)
+      : null;
     const lastJob = providerJobs[0];
 
     return {

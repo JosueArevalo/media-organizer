@@ -160,6 +160,82 @@ test('separate Google Photos album jobs combine into complete provider coverage'
   assert.equal(google?.completedDestinations[0].completedJobs, 2);
 });
 
+test('Google Photos completed selected album job is complete even when other albums were excluded', async () => {
+  const execution = await createExecution();
+  const { listExportProviderSummaries } = await import('../src/pipeline/export/exportSummary.service.js?google-selected-summary=1');
+
+  insertJob({
+    id: 'google-full-attempt',
+    executionId: execution.id,
+    provider: 'google-photos',
+    status: 'failed',
+    eligibleItems: 3,
+    eligibleAlbums: 3,
+    destination: 'user@example.com',
+    updatedAt: '2026-06-01T10:10:00.000Z',
+    error: 'User stopped before private album'
+  });
+  insertItem('google-full-attempt', 'a.jpg', 'Album A', 'failed');
+
+  insertJob({
+    id: 'google-selected',
+    executionId: execution.id,
+    provider: 'google-photos',
+    status: 'completed',
+    eligibleItems: 2,
+    eligibleAlbums: 2,
+    destination: 'user@example.com',
+    updatedAt: '2026-06-01T10:20:00.000Z'
+  });
+  insertItem('google-selected', 'a.jpg', 'Album A', 'completed');
+  insertItem('google-selected', 'b.jpg', 'Album B', 'completed');
+
+  const google = listExportProviderSummaries({ executionId: execution.id }).find((summary) => summary.provider === 'google-photos');
+  assert.equal(google?.coverageStatus, 'completed');
+  assert.equal(google?.eligibleItems, 2);
+  assert.equal(google?.coveredItems, 2);
+  assert.equal(google?.eligibleAlbums, 2);
+  assert.equal(google?.coveredAlbums, 2);
+  assert.equal(google?.lastAttempt?.status, 'completed');
+});
+
+test('Google Photos selected album summaries expand when another selected album is uploaded later', async () => {
+  const execution = await createExecution();
+  const { listExportProviderSummaries } = await import('../src/pipeline/export/exportSummary.service.js?google-incremental-selected-summary=1');
+
+  insertJob({
+    id: 'google-selected-first',
+    executionId: execution.id,
+    provider: 'google-photos',
+    status: 'completed',
+    eligibleItems: 2,
+    eligibleAlbums: 2,
+    destination: 'user@example.com',
+    updatedAt: '2026-06-01T10:10:00.000Z'
+  });
+  insertItem('google-selected-first', 'a.jpg', 'Album A', 'completed');
+  insertItem('google-selected-first', 'b.jpg', 'Album B', 'completed');
+
+  insertJob({
+    id: 'google-selected-second',
+    executionId: execution.id,
+    provider: 'google-photos',
+    status: 'completed',
+    eligibleItems: 1,
+    eligibleAlbums: 1,
+    destination: 'user@example.com',
+    updatedAt: '2026-06-01T10:20:00.000Z'
+  });
+  insertItem('google-selected-second', 'c.jpg', 'Album C', 'completed');
+
+  const google = listExportProviderSummaries({ executionId: execution.id }).find((summary) => summary.provider === 'google-photos');
+  assert.equal(google?.coverageStatus, 'completed');
+  assert.equal(google?.eligibleItems, 3);
+  assert.equal(google?.coveredItems, 3);
+  assert.equal(google?.eligibleAlbums, 3);
+  assert.equal(google?.coveredAlbums, 3);
+});
+
 test('a paused Google Photos job counts only fully completed albums', async () => {
   const execution = await createExecution();
   const { listExportProviderSummaries } = await import('../src/pipeline/export/exportSummary.service.js?google-paused-summary=1');

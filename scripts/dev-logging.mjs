@@ -151,9 +151,19 @@ export const buildFailureSummary = ({
     lines.push(`[dev-all] No recent ${name} logs were captured before the exit.`);
   }
 
-  lines.push(
-    "[dev-all] Next steps: check the first error line above, restart with npm run dev, and isolate repeated failures with npm run dev:web or npm run dev:backend."
-  );
+  if (name === "web") {
+    lines.push(
+      "[dev-all] Backend is still running. If an export is in progress, keep this terminal open and restart only the frontend with npm run dev:web."
+    );
+  } else if (name === "backend") {
+    lines.push(
+      "[dev-all] The backend stopped, so any active export was interrupted. Check the backend logs, restart with npm run dev, then resume or retry the job."
+    );
+  } else {
+    lines.push(
+      "[dev-all] Next steps: check the first error line above, restart with npm run dev, and isolate repeated failures with npm run dev:web or npm run dev:backend."
+    );
+  }
 
   return lines;
 };

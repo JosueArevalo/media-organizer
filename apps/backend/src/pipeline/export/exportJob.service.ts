@@ -251,8 +251,10 @@ export const collectGooglePhotosFilePlan = (sourceRoot: string) => {
   return items;
 };
 
-const collectFilteredGooglePhotosFilePlan = (sourceRoot: string, target: GooglePhotosTarget) => {
-  const plannedItems = collectGooglePhotosFilePlan(sourceRoot);
+const filterGooglePhotosFilePlan = (
+  plannedItems: ReturnType<typeof collectGooglePhotosFilePlan>,
+  target: GooglePhotosTarget
+) => {
   const albumTitles = target.albumTitles?.map((title) => title.trim()).filter(Boolean);
 
   if (!albumTitles?.length) {
@@ -261,6 +263,19 @@ const collectFilteredGooglePhotosFilePlan = (sourceRoot: string, target: GoogleP
 
   const selectedAlbums = new Set(albumTitles);
   return plannedItems.filter((item) => selectedAlbums.has(item.albumTitle));
+};
+
+const parseGooglePhotosCheckpointTarget = (payloadJson: string | null): GooglePhotosTarget | null => {
+  if (!payloadJson) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(payloadJson) as { target?: ExportTarget };
+    return payload.target?.type === 'google-photos' ? payload.target : null;
+  } catch {
+    return null;
+  }
 };
 
 const getCompletedGooglePhotosSourcePaths = (input: {
@@ -380,11 +395,14 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
     ? targetPath
     : getGooglePhotosAccount(request.target.accountId)?.email ?? null;
   const fullGooglePhotosPlan = request.target.type === 'google-photos' ? collectGooglePhotosFilePlan(request.sourceRoot) : null;
+  const selectedGooglePhotosPlan = request.target.type === 'google-photos'
+    ? filterGooglePhotosFilePlan(fullGooglePhotosPlan ?? [], request.target)
+    : null;
   const eligibleItems = request.target.type === 'network-folder'
     ? collectExportFilePlan(request.sourceRoot, request.target.destinationPath).length
-    : fullGooglePhotosPlan?.filter((item) => item.supported).length ?? 0;
+    : selectedGooglePhotosPlan?.filter((item) => item.supported).length ?? 0;
   const eligibleAlbums = request.target.type === 'google-photos'
-    ? new Set(fullGooglePhotosPlan?.filter((item) => item.supported).map((item) => item.albumTitle)).size
+    ? new Set(selectedGooglePhotosPlan?.filter((item) => item.supported).map((item) => item.albumTitle)).size
     : 0;
   const completedGooglePhotosSourcePaths = request.target.type === 'google-photos'
     ? getCompletedGooglePhotosSourcePaths({
@@ -399,7 +417,7 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
         albumTitle: null,
         supported: true
       }))
-    : collectFilteredGooglePhotosFilePlan(request.sourceRoot, request.target).filter((item) => {
+    : (selectedGooglePhotosPlan ?? fullGooglePhotosPlan ?? []).filter((item) => {
         if (!item.supported) {
           return true;
         }
@@ -511,6 +529,178 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
   }
 
   return getExportJob(jobId) as ExportJobSnapshot;
+};
+
+export const updateGooglePhotosExportJobScope = (
+  jobId: string,
+  albumTitles: string[]
+): ExportJobSnapshot | null => {
+  runMigrations();
+  const snapshot = getExportJob(jobId);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  if (snapshot.job.targetType !== 'google-photos') {
+    throw new Error('Only Google Photos export jobs support album scope updates.');
+  }
+
+  if (snapshot.job.status !== 'paused' && snapshot.job.status !== 'draft') {
+    throw new Error('Google Photos album scope can only be changed while the export is paused.');
+  }
+
+  const target = parseGooglePhotosCheckpointTarget(snapshot.checkpoint?.payloadJson ?? null);
+  if (!target?.accountId) {
+    throw new Error('Google Photos export target metadata is missing.');
+  }
+
+  assertExistingSourceRoot(snapshot.job.sourceRoot);
+
+  const db = getDb();
+  const timestamp = nowIso();
+  const requestedAlbums = new Set(albumTitles.map((title) => title.trim()).filter(Boolean));
+  const protectedRows = db
+    .prepare(
+      `
+        SELECT DISTINCT export_items.destination_path AS album_title
+        FROM export_items
+        LEFT JOIN export_google_photos_items ON export_google_photos_items.item_id = export_items.id
+        WHERE export_items.job_id = ?
+          AND (
+            export_items.status IN ('completed', 'failed', 'skipped', 'running')
+            OR export_google_photos_items.phase IN ('uploaded', 'created')
+            OR export_google_photos_items.upload_token IS NOT NULL
+            OR export_google_photos_items.media_item_id IS NOT NULL
+          )
+      `
+    )
+    .all(jobId) as Array<{ album_title: string }>;
+  const protectedAlbums = new Set(protectedRows.map((row) => row.album_title));
+  const effectiveAlbums = new Set([...requestedAlbums, ...protectedAlbums]);
+  const plannedItems = effectiveAlbums.size > 0
+    ? filterGooglePhotosFilePlan(collectGooglePhotosFilePlan(snapshot.job.sourceRoot), {
+        type: 'google-photos',
+        accountId: target.accountId,
+        albumTitles: [...effectiveAlbums]
+      })
+    : [];
+  const supportedPlannedItems = plannedItems.filter((item) => item.supported);
+  const completedSourcePaths = getCompletedGooglePhotosSourcePaths({
+    accountId: target.accountId,
+    executionId: snapshot.job.executionId,
+    sourceRoot: snapshot.job.sourceRoot
+  });
+  const insertableItems = plannedItems.filter((item) => !item.supported || !completedSourcePaths.has(item.sourcePath));
+
+  try {
+    db.exec('BEGIN TRANSACTION');
+
+    db.prepare(
+      `
+        DELETE FROM export_items
+        WHERE job_id = ?
+          AND status = 'pending'
+          AND destination_path NOT IN (${effectiveAlbums.size > 0 ? [...effectiveAlbums].map(() => '?').join(', ') : "''"})
+      `
+    ).run(jobId, ...effectiveAlbums);
+
+    const existingRows = db
+      .prepare('SELECT source_path FROM export_items WHERE job_id = ?')
+      .all(jobId) as Array<{ source_path: string }>;
+    const existingSourcePaths = new Set(existingRows.map((row) => row.source_path));
+    const insertItem = db.prepare(
+      `
+        INSERT INTO export_items (
+          id,
+          job_id,
+          source_path,
+          relative_path,
+          destination_path,
+          size_bytes,
+          status,
+          attempt_count,
+          last_error,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, NULL, ?)
+      `
+    );
+
+    for (const item of insertableItems) {
+      if (existingSourcePaths.has(item.sourcePath)) {
+        continue;
+      }
+
+      const itemId = randomUUID();
+      insertItem.run(itemId, jobId, item.sourcePath, item.relativePath, item.destinationPath, item.sizeBytes, timestamp);
+      ensureGooglePhotosItemMetadata(itemId, target.accountId, item.albumTitle);
+      existingSourcePaths.add(item.sourcePath);
+
+      if (!item.supported) {
+        db.prepare(
+          `
+            UPDATE export_items
+            SET status = 'skipped',
+                last_error = 'File type is not supported by Google Photos.',
+                updated_at = ?
+            WHERE id = ?
+          `
+        ).run(timestamp, itemId);
+      }
+    }
+
+    const nextTarget: GooglePhotosTarget = {
+      ...target,
+      albumTitles: [...effectiveAlbums].sort((left, right) => left.localeCompare(right))
+    };
+
+    db.prepare(
+      `
+        UPDATE export_jobs
+        SET eligible_items = ?,
+            eligible_albums = ?,
+            last_error = NULL,
+            updated_at = ?,
+            last_opened_at = ?
+        WHERE id = ?
+      `
+    ).run(
+      supportedPlannedItems.length,
+      new Set(supportedPlannedItems.map((item) => item.albumTitle)).size,
+      timestamp,
+      timestamp,
+      jobId
+    );
+
+    db.prepare(
+      `
+        UPDATE export_checkpoints
+        SET payload_json = ?, updated_at = ?
+        WHERE job_id = ?
+      `
+    ).run(JSON.stringify({ target: nextTarget }), timestamp, jobId);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  const refreshed = refreshExportJobCounters(jobId, snapshot.job.status);
+
+  if (effectiveAlbums.size === 0 && refreshed) {
+    db.prepare(
+      `
+        UPDATE export_jobs
+        SET status = ?, updated_at = ?, last_opened_at = ?
+        WHERE id = ?
+      `
+    ).run(snapshot.job.status, nowIso(), nowIso(), jobId);
+
+    return getExportJob(jobId);
+  }
+
+  return refreshed;
 };
 
 export const getExportJob = (jobId: string): ExportJobSnapshot | null => {

@@ -68,7 +68,7 @@ test("line collector preserves partial chunks until flush", () => {
   assert.deepEqual(lines, ["one", "two"]);
 });
 
-test("failure summaries include sanitized recent logs and next steps", () => {
+test("web failure summaries keep backend alive and suggest restarting only frontend", () => {
   const summary = buildFailureSummary({
     name: "web",
     command: "npm.cmd run dev --workspace apps/web",
@@ -81,5 +81,21 @@ test("failure summaries include sanitized recent logs and next steps", () => {
   assert(summary.some((line) => line.includes("3221226505 (0xC0000409)")));
   assert(summary.some((line) => line.includes("native process crash / fast fail")));
   assert(summary.some((line) => line.includes("crashed at <path> token=<redacted>")));
+  assert(summary.some((line) => line.includes("Backend is still running")));
   assert(summary.some((line) => line.includes("npm run dev:web")));
+});
+
+test("backend failure summaries warn that active exports were interrupted", () => {
+  const summary = buildFailureSummary({
+    name: "backend",
+    command: "npm.cmd run dev --workspace apps/backend",
+    code: 1,
+    signal: null,
+    recentLines: ["export failed"],
+    repoRoot: "D:\\Software Development\\media-organizer"
+  });
+
+  assert(summary.some((line) => line.includes("The backend stopped")));
+  assert(summary.some((line) => line.includes("active export was interrupted")));
+  assert(summary.some((line) => line.includes("resume or retry the job")));
 });
