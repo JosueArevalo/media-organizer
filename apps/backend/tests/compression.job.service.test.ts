@@ -174,6 +174,49 @@ test('startCompressionSession creates a resumable session and output scaffold', 
   assert.ok(checkpointRows[0].payload_json?.includes('outputRoot'));
 });
 
+test('compression resume commands use skip files instead of inline JSON arguments', async () => {
+  const { buildImageCompressionCommand } = await import('../src/pipeline/compression/compressionCommandBuilder.js?resume-skip-file=1');
+  const scopedOutputDir = path.join(tempRoot, 'resume-skip-file-output');
+  fs.rmSync(scopedOutputDir, { recursive: true, force: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+
+  const resumeItems = Array.from({ length: 50 }, (_, index) => ({
+    source: path.join(tempRoot, 'source', 'very', 'long', 'nested', 'folder', `${index}`, 'photo-with-a-long-name.jpg'),
+    output: path.join(scopedOutputDir, 'very', 'long', 'nested', 'folder', `${index}`, 'photo-with-a-long-name.jpg')
+  }));
+
+  const command = buildImageCompressionCommand({
+    sessionId: 'resume-skip-file-session',
+    sourceDir,
+    outputDir: scopedOutputDir,
+    outputRoot: scopedOutputDir,
+    imageOutputDir: scopedOutputDir,
+    videoOutputDir: scopedOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Fast 1080p30',
+    videoOutputFormatMode: 'preserve',
+    imageToolCommand: 'cjpeg',
+    videoToolCommand: 'HandBrakeCLI',
+    imageMagickCommand: 'magick',
+    exifToolCommand: '',
+    selectionScope: {
+      excludedDirectories: [],
+      excludedFiles: [],
+      includedDirectories: [],
+      includedFiles: [],
+      updatedAt: 0
+    }
+  }, resumeItems);
+
+  assert.equal(command.args.includes('--resume-skip-json'), false);
+  const skipFileFlagIndex = command.args.indexOf('--resume-skip-file');
+  assert.notEqual(skipFileFlagIndex, -1);
+  const skipFilePath = command.args[skipFileFlagIndex + 1];
+  assert.equal(skipFilePath, path.join(scopedOutputDir, '.media-organizer', 'resume-skip-images.json'));
+  assert.deepEqual(JSON.parse(fs.readFileSync(skipFilePath, 'utf8')), resumeItems);
+});
+
 test('compression services ignore active grouping sessions', async () => {
   const {
     getActiveCompressionSession,
@@ -541,6 +584,220 @@ test('compression progress falls back to absolute display paths outside the sour
   assert.equal(progress?.currentlyProcessing[0].displayPath, outsideSourcePath);
   assert.equal(progress?.processedItems[0].displayPath, outsideSourcePath);
   assert.equal(progress?.processedItems[0].error, 'Fake encoder could not read the image.');
+});
+
+test('failed compression sessions resume only failed image items', async () => {
+  const { startCompressionSession, startCompressionSessionResume, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js?resume-failed-only=1');
+  const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js?resume-failed-only=1');
+  const scopedSourceDir = path.join(tempRoot, 'resume-failed-source');
+  const scopedOutputDir = path.join(tempRoot, 'resume-failed-output');
+  const toolsDir = path.join(tempRoot, 'resume-failed-tools');
+  const callLogPath = path.join(tempRoot, 'resume-failed-calls.log');
+  fs.rmSync(scopedSourceDir, { recursive: true, force: true });
+  fs.rmSync(scopedOutputDir, { recursive: true, force: true });
+  fs.rmSync(toolsDir, { recursive: true, force: true });
+  fs.rmSync(callLogPath, { force: true });
+  fs.mkdirSync(scopedSourceDir, { recursive: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+
+  for (const name of ['done-a.jpg', 'done-b.jpg', 'failed.jpg']) {
+    fs.writeFileSync(path.join(scopedSourceDir, name), `source-${name}`, 'utf8');
+  }
+
+  const started = startCompressionSession({
+    name: 'Failed image resume test',
+    sourceDir: scopedSourceDir,
+    outputDir: scopedOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Balanced',
+    imageToolCommand: writeFakeImageTool(toolsDir, callLogPath),
+    videoToolCommand: '__missing_video_encoder__'
+  });
+
+  const db = getDb();
+  const timestamp = new Date().toISOString();
+
+  for (const name of ['done-a.jpg', 'done-b.jpg', 'failed.jpg']) {
+    const sourcePath = path.join(scopedSourceDir, name);
+    const outputPath = path.join(started.outputRoot, name);
+    const itemId = `resume-${name}`;
+    const status = name === 'failed.jpg' ? 'failed' : 'completed';
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, status === 'completed' ? `compressed-${name}` : `fallback-${name}`, 'utf8');
+
+    db.prepare(
+      `
+        INSERT INTO media_items (
+          id,
+          session_id,
+          source_path,
+          relative_path,
+          media_type,
+          source_kind_detected,
+          source_kind_override,
+          size_bytes,
+          capture_time,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, 'image', 'unknown', NULL, ?, NULL, ?, ?)
+      `
+    ).run(itemId, started.session.id, sourcePath, name, fs.statSync(outputPath).size, timestamp, timestamp);
+
+    db.prepare(
+      `
+        INSERT INTO item_decisions (
+          id,
+          session_id,
+          item_id,
+          selected_for_compression,
+          selected_for_output,
+          target_group_label,
+          user_overridden,
+          updated_at
+        ) VALUES (?, ?, ?, 1, 1, NULL, 0, ?)
+      `
+    ).run(`decision-${name}`, started.session.id, itemId, timestamp);
+
+    db.prepare(
+      `
+        INSERT INTO item_stage_status (
+          id,
+          session_id,
+          item_id,
+          stage,
+          status,
+          attempt_count,
+          last_error,
+          updated_at
+        ) VALUES (?, ?, ?, 'compress', ?, 1, ?, ?)
+      `
+    ).run(`status-${name}`, started.session.id, itemId, status, status === 'failed' ? 'Could not read image.' : null, timestamp);
+  }
+
+  db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run('failed', started.session.id);
+  db.prepare(
+    `
+      UPDATE session_checkpoints
+      SET payload_json = ?
+      WHERE session_id = ? AND stage = 'compress'
+    `
+  ).run(
+    JSON.stringify({
+      outputRoot: started.outputRoot,
+      manifest: started.manifest,
+      totalCount: 3,
+      summary: {
+        completedItems: 2,
+        failedItems: 1,
+        totalCompressCount: 3,
+        totalCopyCount: 0,
+        completedCompressCount: 2,
+        completedCopyCount: 0,
+        failedCompressCount: 1,
+        failedCopyCount: 0
+      },
+      processedItems: ['done-a.jpg', 'done-b.jpg', 'failed.jpg'].map((name) => ({
+        source: path.join(scopedSourceDir, name),
+        output: path.join(started.outputRoot, name),
+        command: [],
+        status: name === 'failed.jpg' ? 'failed' : 'completed',
+        operation: 'compress',
+        ...(name === 'failed.jpg' ? { error: 'Could not read image.' } : {})
+      }))
+    }),
+    started.session.id
+  );
+
+  const resumed = startCompressionSessionResume(started.session.id);
+  assert.equal(resumed?.accepted, true);
+  assert.equal(resumed?.progress?.completed, 2);
+  assert.equal(resumed?.progress?.failed, 1);
+
+  await executeCompressionSession(started.session.id);
+
+  const resumeSkipFile = path.join(started.outputRoot, '.media-organizer', 'resume-skip-images.json');
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(resumeSkipFile, 'utf8')).map((item: { source: string }) => path.basename(item.source)).sort(),
+    ['done-a.jpg', 'done-b.jpg']
+  );
+
+  const calls = fs.readFileSync(callLogPath, 'utf8').trim().split(/\r?\n/);
+  assert.deepEqual(calls.map((value) => path.basename(value)), ['failed.jpg']);
+
+  const progress = getCompressionProgress(started.session.id);
+  assert.equal(progress?.status, 'completed');
+  assert.equal(progress?.completed, 3);
+  assert.equal(progress?.failed, 0);
+});
+
+test('fatal compression resume errors preserve existing failed item counts', async () => {
+  const { startCompressionSession, markCompressionSessionFailed, getCompressionProgress, getCompressionSession } = await import('../src/pipeline/compression/compressionJob.service.js?fatal-resume-counts=1');
+  const scopedSourceDir = path.join(tempRoot, 'fatal-resume-source');
+  const scopedOutputDir = path.join(tempRoot, 'fatal-resume-output');
+  fs.rmSync(scopedSourceDir, { recursive: true, force: true });
+  fs.rmSync(scopedOutputDir, { recursive: true, force: true });
+  fs.mkdirSync(scopedSourceDir, { recursive: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+
+  const started = startCompressionSession({
+    name: 'Fatal resume count test',
+    sourceDir: scopedSourceDir,
+    outputDir: scopedOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Balanced'
+  });
+
+  const processedItems = ['failed-a.jpg', 'failed-b.jpg'].map((name) => {
+    const sourcePath = path.join(scopedSourceDir, name);
+    fs.writeFileSync(sourcePath, `source-${name}`, 'utf8');
+
+    return {
+      source: sourcePath,
+      output: path.join(started.outputRoot, name),
+      command: [],
+      status: 'failed',
+      operation: 'compress',
+      error: 'Could not read image.'
+    };
+  });
+
+  getDb().prepare(
+    `
+      UPDATE session_checkpoints
+      SET payload_json = ?
+      WHERE session_id = ? AND stage = 'compress'
+    `
+  ).run(
+    JSON.stringify({
+      outputRoot: started.outputRoot,
+      manifest: started.manifest,
+      totalCount: 2,
+      summary: {
+        completedItems: 0,
+        failedItems: 0,
+        totalCompressCount: 2,
+        totalCopyCount: 0,
+        completedCompressCount: 0,
+        completedCopyCount: 0,
+        failedCompressCount: 0,
+        failedCopyCount: 0
+      },
+      processedItems
+    }),
+    started.session.id
+  );
+
+  markCompressionSessionFailed(started.session.id, new Error('spawn ENAMETOOLONG'));
+
+  const progress = getCompressionProgress(started.session.id);
+  assert.equal(progress?.failed, 2);
+
+  const checkpointPayload = JSON.parse(getCompressionSession(started.session.id)?.checkpoint?.payloadJson ?? '{}');
+  assert.equal(checkpointPayload.summary.failedItems, 2);
+  assert.equal(checkpointPayload.fatalError, 'spawn ENAMETOOLONG');
 });
 
 test('interrupted compression sessions pause on startup and resume only unconfirmed image outputs', async () => {

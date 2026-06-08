@@ -61,6 +61,18 @@ def load_resume_items(value: str):
     return items
 
 
+def load_resume_items_from_file(file_path: str):
+    if not file_path:
+        return []
+
+    resume_file = Path(file_path)
+
+    if not resume_file.is_file():
+        return []
+
+    return load_resume_items(resume_file.read_text(encoding='utf-8'))
+
+
 def resolve_scope_path(source_dir: Path, scope_path: str) -> str:
     trimmed = scope_path.strip().replace('\\', '/')
 
@@ -337,6 +349,7 @@ def main() -> int:
     parser.add_argument('--imagemagick-command', default='magick')
     parser.add_argument('--exiftool-command', default='')
     parser.add_argument('--selection-scope-json', default='')
+    parser.add_argument('--resume-skip-file', default='')
     parser.add_argument('--resume-skip-json', default='')
     args = parser.parse_args()
 
@@ -347,7 +360,7 @@ def main() -> int:
 
     manifest = []
     used_outputs = set()
-    resume_items = load_resume_items(args.resume_skip_json)
+    resume_items = load_resume_items_from_file(args.resume_skip_file) or load_resume_items(args.resume_skip_json)
     skipped_sources = {normalize_path(item['source']) for item in resume_items}
     heic_support_checked = False
 

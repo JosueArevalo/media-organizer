@@ -89,6 +89,21 @@ const seedCompressionSession = (relativePaths: string[]) => {
       `
     ).run(randomUUID(), compressionSessionId, itemId, now);
 
+    db.prepare(
+      `
+        INSERT INTO item_stage_status (
+          id,
+          session_id,
+          item_id,
+          stage,
+          status,
+          attempt_count,
+          last_error,
+          updated_at
+        ) VALUES (?, ?, ?, 'compress', 'completed', 1, NULL, ?)
+      `
+    ).run(randomUUID(), compressionSessionId, itemId, now);
+
     return { itemId, relativePath, outputPath };
   });
 
@@ -175,6 +190,30 @@ test('createGroupingWorkspace opens without automatic proposals', async () => {
     []
   );
   assert.equal(workspace.items.every((item) => item.targetGroupLabel === null), true);
+});
+
+test('createGroupingWorkspace excludes media that failed compression', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['ready.jpg', 'failed.jpg']);
+  const failedItem = items.find((item) => item.relativePath === 'failed.jpg');
+  assert.ok(failedItem);
+
+  getDb()
+    .prepare(
+      `
+        UPDATE item_stage_status
+        SET status = 'failed',
+            last_error = 'Unusable input image.'
+        WHERE session_id = ?
+          AND item_id = ?
+          AND stage = 'compress'
+      `
+    )
+    .run(compressionSessionId, failedItem.itemId);
+
+  const { createGroupingWorkspace } = await import('../src/pipeline/grouping/groupingWorkspace.service.js?exclude-failed-compression=1');
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+
+  assert.deepEqual(workspace.items.map((item) => item.relativePath), ['ready.jpg']);
 });
 
 test('getGroupingPreviewPath serves web-safe images without conversion', async () => {

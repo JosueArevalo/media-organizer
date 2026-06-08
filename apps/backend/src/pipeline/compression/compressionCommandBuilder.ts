@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CompressionSessionManifest } from './compressionJob.service.js';
@@ -15,15 +16,27 @@ type ResumeItem = {
   output: string;
 };
 
-const appendResumeArgs = (args: string[], resumeItems?: ResumeItem[]) => {
+type ResumePhase = 'images' | 'videos';
+
+const writeResumeSkipFile = (manifest: CompressionSessionManifest, phase: ResumePhase, resumeItems: ResumeItem[]) => {
+  const metadataDir = path.join(manifest.outputRoot, '.media-organizer');
+  fs.mkdirSync(metadataDir, { recursive: true });
+
+  const filePath = path.join(metadataDir, `resume-skip-${phase}.json`);
+  fs.writeFileSync(filePath, `${JSON.stringify(resumeItems)}\n`, 'utf8');
+
+  return filePath;
+};
+
+const appendResumeArgs = (args: string[], manifest: CompressionSessionManifest, phase: ResumePhase, resumeItems?: ResumeItem[]) => {
   if (!resumeItems?.length) {
     return args;
   }
 
   return [
     ...args,
-    '--resume-skip-json',
-    JSON.stringify(resumeItems)
+    '--resume-skip-file',
+    writeResumeSkipFile(manifest, phase, resumeItems)
   ];
 };
 
@@ -45,7 +58,7 @@ export const buildImageCompressionCommand = (manifest: CompressionSessionManifes
     manifest.exifToolCommand,
     '--selection-scope-json',
     JSON.stringify(manifest.selectionScope)
-  ], resumeItems)
+  ], manifest, 'images', resumeItems)
 });
 
 export const buildVideoCompressionCommand = (manifest: CompressionSessionManifest, resumeItems?: ResumeItem[]) => ({
@@ -64,5 +77,5 @@ export const buildVideoCompressionCommand = (manifest: CompressionSessionManifes
     manifest.videoToolCommand,
     '--selection-scope-json',
     JSON.stringify(manifest.selectionScope)
-  ], resumeItems)
+  ], manifest, 'videos', resumeItems)
 });

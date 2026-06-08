@@ -707,6 +707,16 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
   db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run('failed', timestamp, timestamp, sessionId);
 
   const checkpointPayload = parseCheckpointPayload(snapshot.checkpoint?.payloadJson ?? null);
+  const processedFailedItems = Array.isArray(checkpointPayload.processedItems)
+    ? checkpointPayload.processedItems.filter((item: unknown) =>
+        typeof item === 'object' &&
+        item !== null &&
+        'status' in item &&
+        item.status === 'failed'
+      ).length
+    : 0;
+  const fallbackFailedItems = checkpointPayload.summary?.failedItems ?? 0;
+  const failedItems = processedFailedItems || fallbackFailedItems || 1;
 
   if (snapshot.checkpoint) {
     db.prepare(
@@ -721,7 +731,7 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
         summary: {
           ...checkpointPayload.summary,
           completedItems: checkpointPayload.summary?.completedItems ?? 0,
-          failedItems: Math.max(1, checkpointPayload.summary?.failedItems ?? 0)
+          failedItems
         },
         activeItems: [],
         fatalError: error.message
@@ -745,7 +755,7 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
     imageItems: 0,
     videoItems: 0,
     completedItems: checkpointPayload.summary?.completedItems ?? 0,
-    failedItems: Math.max(1, checkpointPayload.summary?.failedItems ?? 0),
+    failedItems,
     imageProfileLabel: checkpointPayload.manifest?.imageProfileLabel ?? null,
     imageQuality: checkpointPayload.manifest?.imageQuality ?? null,
     videoPresetLabel: checkpointPayload.manifest?.videoPresetLabel ?? null,

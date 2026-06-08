@@ -24,7 +24,6 @@ import {
   pauseCompressionSession,
   saveCompressionSessionSnapshot,
   startCompressionSession,
-  resetCompressionSession
 } from '../services/compression-job.store';
 import {
   getActiveCompressionSessionRequest,
@@ -988,6 +987,9 @@ export const CompressionPage = () => {
 
     return null;
   })();
+  const hasCompletedCompressionItems = (progressData?.completed ?? 0) > 0;
+  const isCompressionFailed = compressionSessionState.status === 'failed';
+  const isCompressionCompleteWithWarnings = isCompressionFailed && hasCompletedCompressionItems;
   const compressionSessionMessage = (() => {
     if (compressionSessionState.status === 'running') {
       return t('compression.running');
@@ -999,6 +1001,13 @@ export const CompressionPage = () => {
 
     if (compressionSessionState.status === 'paused') {
       return t('compression.interrupted');
+    }
+
+    if (isCompressionCompleteWithWarnings) {
+      return t('compression.completedWithWarnings', {
+        completed: progressData?.completed ?? 0,
+        failed: progressData?.failed ?? 0
+      });
     }
 
     if (compressionSessionState.status === 'failed') {
@@ -1247,7 +1256,23 @@ export const CompressionPage = () => {
   const isCompressionPaused = compressionSessionState.status === 'paused';
   const isCompressionRunning = compressionSessionState.status === 'running' || isStartingCompression;
   const isCompressionComplete = compressionSessionState.status === 'completed';
+  const canRetryFailedCompression = isCompressionFailed && Boolean(compressionSessionState.backendSessionId);
+  const canContinueToGrouping = isCompressionComplete || isCompressionCompleteWithWarnings;
   const estimatedProgressMediaCount = estimatedProcessableMediaCount;
+  const handleContinueToGrouping = () => {
+    if (isCompressionCompleteWithWarnings) {
+      const confirmed = window.confirm(t('compression.continueWithFailedConfirm', {
+        completed: progressData?.completed ?? 0,
+        failed: progressData?.failed ?? 0
+      }));
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    navigate('/grouping', { state: { from: '/compression' } });
+  };
 
   return (
     <div className="page-stack">
@@ -1269,20 +1294,31 @@ export const CompressionPage = () => {
             {compressionSessionWarningMessage}
           </p>
         </div>
-        {backendError && (
+        {backendError && !isCompressionCompleteWithWarnings && (
           <pre className="error compression-error-details">
             {backendError}
           </pre>
         )}
         {compressionSessionState.status === 'failed' && (
           <div className="compression-error-section">
-            <p className="error">
-              {t('compression.failed', { message: compressionSessionState.errorMessage ?? t('compression.failedFallback') })}
-            </p>
+            {isCompressionCompleteWithWarnings && (
+              <p className="page-summary-note compression-warning">
+                {t('compression.completedWithWarnings', {
+                  completed: progressData?.completed ?? 0,
+                  failed: progressData?.failed ?? 0
+                })}
+              </p>
+            )}
+            {!isCompressionCompleteWithWarnings && (
+              <p className="error">
+                {t('compression.failed', { message: compressionSessionState.errorMessage ?? t('compression.failedFallback') })}
+              </p>
+            )}
             <button
               className="btn btn-secondary"
               type="button"
-              onClick={() => resetCompressionSession()}
+              onClick={() => void handleResumeCompression()}
+              disabled={isStartingCompression || !compressionSessionState.backendSessionId}
             >
               ↻ {t('compression.tryAgain')}
             </button>
@@ -1667,13 +1703,15 @@ export const CompressionPage = () => {
         <button
           className="btn btn-primary"
           type="button"
-          onClick={() => void (isCompressionPaused ? handleResumeCompression() : handleStartCompression())}
-          disabled={isCompressionRunning || isCompressionComplete || (!isCompressionPaused && !canStartRealCompression)}
+          onClick={() => void (isCompressionPaused || canRetryFailedCompression ? handleResumeCompression() : handleStartCompression())}
+          disabled={isCompressionRunning || isCompressionComplete || (!isCompressionPaused && !canRetryFailedCompression && !canStartRealCompression)}
         >
           {isCompressionRunning
             ? t('compression.runningButton')
             : isCompressionPaused
               ? t('compression.resumeButton')
+              : canRetryFailedCompression
+                ? t('compression.retryFailedItems')
               : isCompressionComplete
               ? t('compression.completedButton')
               : isCompressionSetupLoading
@@ -1682,7 +1720,7 @@ export const CompressionPage = () => {
                   ? t('compression.startCopyButton')
                 : t('compression.startButton')}
         </button>
-        <button className="btn btn-ghost" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })} disabled={!isCompressionComplete}>
+        <button className="btn btn-ghost" type="button" onClick={handleContinueToGrouping} disabled={!canContinueToGrouping}>
           {t('compression.continueGrouping')}
         </button>
       </div>
