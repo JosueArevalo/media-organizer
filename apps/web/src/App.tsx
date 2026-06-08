@@ -15,6 +15,9 @@ import SettingsPage from './pages/SettingsPage';
 import { useGroupingSessionState } from './hooks/useGroupingJobState';
 import { useCompletionNotifications } from './hooks/useCompletionNotifications';
 
+const isCompressionUsableForGrouping = (status: ReturnType<typeof useCompressionSessionState>['status']) =>
+  status === 'completed' || status === 'failed';
+
 const RedirectCompletedWorkflow = ({ children }: { children: JSX.Element }) => {
   const groupingSessionState = useGroupingSessionState();
 
@@ -48,7 +51,7 @@ const GuardedGroupingStep = ({ children }: { children: JSX.Element }) => {
     return <Navigate to="/import" replace />;
   }
 
-  if (compressionSessionState.status !== 'completed') {
+  if (!isCompressionUsableForGrouping(compressionSessionState.status)) {
     return <Navigate to="/compression" replace />;
   }
 
@@ -64,7 +67,7 @@ const GuardedExportStep = ({ children }: { children: JSX.Element }) => {
     return <Navigate to="/import" replace />;
   }
 
-  if (compressionSessionState.status !== 'completed') {
+  if (!isCompressionUsableForGrouping(compressionSessionState.status)) {
     return <Navigate to="/compression" replace />;
   }
 

@@ -812,6 +812,7 @@ export const es: TranslationDictionary = {
   'settings.notifications.event.organizationAppliedDescription': 'Grouping review, cuando termina Apply organization.',
   'notifications.compressionCompleted.title': 'Compresion finalizada',
   'notifications.compressionCompleted.body': 'Las fotos y videos ya estan listos para Agrupar.',
+  'notifications.compressionCompletedWithWarnings.body': 'La compresion termino con elementos fallidos. Los completados estan listos para Agrupar.',
   'notifications.exportCompleted.title': 'Exportacion finalizada',
   'notifications.exportCompleted.body': 'La media seleccionada ha terminado de exportarse.',
   'notifications.selectionLoaded.title': 'Selection cargado',

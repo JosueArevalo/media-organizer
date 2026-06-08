@@ -12,12 +12,20 @@ const getExportCompletionKey = (exportJobState: ExportJobSnapshot) =>
     ? `${exportJobState.backendJobId}:${exportJobState.completedAt}`
     : null;
 
+const getCompressionCompletionKey = (compressionSessionState: ReturnType<typeof useCompressionSessionState>) =>
+  compressionSessionState.backendSessionId &&
+  compressionSessionState.completedAt &&
+  (compressionSessionState.status === 'completed' || compressionSessionState.status === 'failed')
+    ? `${compressionSessionState.backendSessionId}:${compressionSessionState.status}:${compressionSessionState.completedAt}`
+    : null;
+
 export const useCompletionNotifications = () => {
   const { t } = useTranslation();
   const compressionSessionState = useCompressionSessionState();
   const networkExportJobState = useExportJobState('network-folder');
   const googlePhotosExportJobState = useExportJobState('google-photos');
   const previousCompressionStatusRef = useRef(compressionSessionState.status);
+  const previousCompressionCompletionKeyRef = useRef(getCompressionCompletionKey(compressionSessionState));
   const previousExportStatusRef = useRef({
     'network-folder': networkExportJobState.status,
     'google-photos': googlePhotosExportJobState.status
@@ -29,18 +37,27 @@ export const useCompletionNotifications = () => {
 
   useEffect(() => {
     const previousStatus = previousCompressionStatusRef.current;
+    const previousCompletionKey = previousCompressionCompletionKeyRef.current;
+    const completionKey = getCompressionCompletionKey(compressionSessionState);
     previousCompressionStatusRef.current = compressionSessionState.status;
+    previousCompressionCompletionKeyRef.current = completionKey;
+    const isTerminalCompressionStatus =
+      compressionSessionState.status === 'completed' ||
+      compressionSessionState.status === 'failed';
 
     if (
-      previousStatus !== 'completed' &&
-      compressionSessionState.status === 'completed' &&
+      previousStatus !== compressionSessionState.status &&
+      isTerminalCompressionStatus &&
       compressionSessionState.backendSessionId &&
-      compressionSessionState.completedAt
+      compressionSessionState.completedAt &&
+      previousCompletionKey !== completionKey
     ) {
       void notifyCompletion('compressionCompleted', {
         title: t('notifications.compressionCompleted.title'),
-        body: t('notifications.compressionCompleted.body'),
-        dedupeKey: `compression:${compressionSessionState.backendSessionId}:${compressionSessionState.completedAt}`
+        body: compressionSessionState.status === 'failed'
+          ? t('notifications.compressionCompletedWithWarnings.body')
+          : t('notifications.compressionCompleted.body'),
+        dedupeKey: `compression:${compressionSessionState.backendSessionId}:${compressionSessionState.status}:${compressionSessionState.completedAt}`
       });
     }
   }, [

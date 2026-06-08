@@ -809,6 +809,7 @@ export const en = {
   'settings.notifications.event.organizationAppliedDescription': 'Grouping review, when Apply organization finishes.',
   'notifications.compressionCompleted.title': 'Compression finished',
   'notifications.compressionCompleted.body': 'Photos and videos are ready for grouping.',
+  'notifications.compressionCompletedWithWarnings.body': 'Compression finished with failed items. Completed items are ready for grouping.',
   'notifications.exportCompleted.title': 'Export finished',
   'notifications.exportCompleted.body': 'The selected media has finished exporting.',
   'notifications.selectionLoaded.title': 'Selection loaded',

@@ -53,7 +53,9 @@ const AppShell = () => {
   const { sourceSelection, destinationSelection } = useFolderSelections();
   const isSelectionComplete = isImportStepComplete && Boolean(sourceSelection && destinationSelection);
   const compressionSessionState = useCompressionSessionState();
-  const isCompressionComplete = compressionSessionState.status === 'completed';
+  const isCompressionUsableForGrouping =
+    compressionSessionState.status === 'completed' ||
+    compressionSessionState.status === 'failed';
   const groupingSessionState = useGroupingSessionState();
   const isGroupingReadyForExport = groupingSessionState.status === 'completed';
 
@@ -72,11 +74,11 @@ const AppShell = () => {
       }
 
       if (step.id === 'compression') {
-        return isCompressionComplete ? 'completed' : isSelectionComplete ? 'pending' : 'locked';
+        return isCompressionUsableForGrouping ? 'completed' : isSelectionComplete ? 'pending' : 'locked';
       }
 
       if (step.id === 'grouping') {
-        return isGroupingReadyForExport ? 'completed' : isCompressionComplete ? 'pending' : 'locked';
+        return isGroupingReadyForExport ? 'completed' : isCompressionUsableForGrouping ? 'pending' : 'locked';
       }
 
       return isGroupingReadyForExport ? 'pending' : 'locked';
