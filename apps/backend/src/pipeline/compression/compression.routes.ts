@@ -5,6 +5,7 @@ import {
   getCompressionSession,
   getActiveCompressionSession,
   markCompressionSessionFailed,
+  pauseCompressionSession,
   startCompressionSessionResume,
   startCompressionSession
 } from './compressionJob.service.js';
@@ -110,6 +111,18 @@ export const handleCompressionRoutes: RouteHandler = ({ req, res, requestUrl }) 
         console.error(`[backend] compression session ${sessionId} resume failed`, error);
         markCompressionSessionFailed(sessionId, error instanceof Error ? error : new Error('Compression session resume failed.'));
       });
+
+      sendJson(res, 202, session);
+      return true;
+    }
+
+    if (req.method === 'POST' && subPath === 'pause') {
+      const session = pauseCompressionSession(sessionId);
+
+      if (!session) {
+        sendJson(res, 404, { status: 'not_found' });
+        return true;
+      }
 
       sendJson(res, 202, session);
       return true;

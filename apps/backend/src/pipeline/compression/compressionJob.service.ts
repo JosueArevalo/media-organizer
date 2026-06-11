@@ -12,6 +12,7 @@ import {
   buildCompressionVideosOutputDir
 } from './compressionJob.paths.js';
 import { resolveToolCommand } from './toolCommandResolver.js';
+import { clearCompressionPauseRequest, requestCompressionProcessPause } from './compressionProcessRegistry.js';
 
 export type CompressionSessionRequest = {
   name?: string;
@@ -648,6 +649,7 @@ export const reconcileInterruptedCompressionSessions = () => {
 
 export const markCompressionSessionRunning = (sessionId: string) => {
   runMigrations();
+  clearCompressionPauseRequest(sessionId);
   const db = getDb();
   const timestamp = nowIso();
   const snapshot = getCompressionSession(sessionId);
@@ -689,6 +691,66 @@ export const startCompressionSessionResume = (sessionId: string) => {
 
   return {
     ...snapshot,
+    progress: getCompressionProgress(sessionId),
+    accepted: true
+  };
+};
+
+export const pauseCompressionSession = (sessionId: string) => {
+  runMigrations();
+  const db = getDb();
+  const timestamp = nowIso();
+  const snapshot = getCompressionSession(sessionId);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  if (snapshot.session.status !== 'running') {
+    return {
+      ...snapshot,
+      progress: getCompressionProgress(sessionId),
+      accepted: true
+    };
+  }
+
+  db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(
+    'paused',
+    timestamp,
+    timestamp,
+    sessionId
+  );
+
+  if (snapshot.checkpoint) {
+    const payload = parseCheckpointPayload(snapshot.checkpoint.payloadJson);
+    db.prepare(
+      `
+        UPDATE session_checkpoints
+        SET payload_json = ?, updated_at = ?
+        WHERE session_id = ? AND stage = 'compress'
+      `
+    ).run(
+      serializeCheckpointPayload({
+        ...payload,
+        activeItems: [],
+        interrupted: true,
+        interruptedAt: timestamp
+      }),
+      timestamp,
+      sessionId
+    );
+  }
+
+  requestCompressionProcessPause(sessionId);
+
+  const pausedSnapshot = getCompressionSession(sessionId);
+
+  if (!pausedSnapshot) {
+    return null;
+  }
+
+  return {
+    ...pausedSnapshot,
     progress: getCompressionProgress(sessionId),
     accepted: true
   };

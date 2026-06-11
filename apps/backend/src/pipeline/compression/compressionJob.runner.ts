@@ -8,6 +8,12 @@ import type { MediaType } from '../../state/dto/state.types.js';
 import { upsertExecutionHistory } from '../../dashboard/dashboard.service.js';
 import { buildImageCompressionCommand, buildVideoCompressionCommand } from './compressionCommandBuilder.js';
 import { getCompressionSession } from './compressionJob.service.js';
+import {
+  clearCompressionPauseRequest,
+  isCompressionPauseRequested,
+  registerCompressionProcess,
+  unregisterCompressionProcess
+} from './compressionProcessRegistry.js';
 
 type ScriptResultItem = {
   source: string;
@@ -37,6 +43,7 @@ type ScriptActiveItem = {
 
 type ScriptResultPayload = {
   items: ScriptResultItem[];
+  paused?: boolean;
 };
 
 type ScriptProgressEvent = {
@@ -118,6 +125,7 @@ const calculateCompletedSizeMetrics = (items: ScriptResultItem[]) => {
 };
 
 const executeCommand = async (
+  sessionId: string,
   command: string,
   args: string[],
   onStart?: (item: ScriptActiveItem) => void,
@@ -128,6 +136,7 @@ const executeCommand = async (
       cwd: process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe']
     });
+    registerCompressionProcess(sessionId, child);
 
     const stderrChunks: Buffer[] = [];
     const items: ScriptResultItem[] = [];
@@ -169,13 +178,22 @@ const executeCommand = async (
       stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
 
-    child.on('error', reject);
+    child.on('error', (error) => {
+      unregisterCompressionProcess(sessionId, child);
+      reject(error);
+    });
 
     child.on('close', (code) => {
       const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
       stdoutReader.close();
+      unregisterCompressionProcess(sessionId, child);
 
       if (code !== 0) {
+        if (isCompressionPauseRequested(sessionId)) {
+          resolve({ items, paused: true });
+          return;
+        }
+
         reject(new Error(`Compression script failed with code ${code}: ${stderr || 'No output provided.'}`));
         return;
       }
@@ -865,7 +883,7 @@ export const executeCompressionSession = async (sessionId: string) => {
     processedItems
   });
 
-  const imageResult = await executeCommand(imageCommand.command, imageCommand.args, (item) => {
+  const imageResult = await executeCommand(sessionId, imageCommand.command, imageCommand.args, (item) => {
     activeItems = [toActiveCompressionItem(item, resolvedSelectionScope, checkpointData.manifest.sourceDir)];
 
     updateCompressionProgressCheckpoint(sessionId, {
@@ -897,7 +915,28 @@ export const executeCompressionSession = async (sessionId: string) => {
     });
   });
 
-  const videoResult = await executeCommand(videoCommand.command, videoCommand.args, (item) => {
+  if (imageResult.paused) {
+    clearCompressionPauseRequest(sessionId);
+    updateCompressionProgressCheckpoint(sessionId, {
+      outputRoot: checkpointData.outputRoot,
+      manifest: checkpointData.manifest,
+      totalCount,
+      completedCount: progressState.completedCount,
+      failedCount: progressState.failedCount,
+      operationCounts: progressState,
+      activeItems: [],
+      processedItems
+    });
+
+    return {
+      sessionId,
+      completedCount: progressState.completedCount,
+      failedCount: progressState.failedCount,
+      totalCount
+    };
+  }
+
+  const videoResult = await executeCommand(sessionId, videoCommand.command, videoCommand.args, (item) => {
     activeItems = [toActiveCompressionItem(item, resolvedSelectionScope, checkpointData.manifest.sourceDir)];
 
     updateCompressionProgressCheckpoint(sessionId, {
@@ -928,6 +967,29 @@ export const executeCompressionSession = async (sessionId: string) => {
       processedItems
     });
   });
+
+  if (videoResult.paused) {
+    clearCompressionPauseRequest(sessionId);
+    updateCompressionProgressCheckpoint(sessionId, {
+      outputRoot: checkpointData.outputRoot,
+      manifest: checkpointData.manifest,
+      totalCount,
+      completedCount: progressState.completedCount,
+      failedCount: progressState.failedCount,
+      operationCounts: progressState,
+      activeItems: [],
+      processedItems
+    });
+
+    return {
+      sessionId,
+      completedCount: progressState.completedCount,
+      failedCount: progressState.failedCount,
+      totalCount
+    };
+  }
+
+  clearCompressionPauseRequest(sessionId);
 
   // Log results for debugging
   console.log(`[compression] Session ${sessionId}: images=${imageResult.items.length}, videos=${videoResult.items.length}, total=${imageResult.items.length + videoResult.items.length}`);

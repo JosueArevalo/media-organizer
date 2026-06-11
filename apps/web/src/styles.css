@@ -1408,6 +1408,13 @@ body {
   text-overflow: ellipsis;
 }
 
+.compression-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .compression-warning {
   color: #b45309;
   font-weight: 500;

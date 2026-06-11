@@ -30,6 +30,7 @@ import {
   getCompressionSessionRequest,
   getCompressionProgressRequest,
   loadHandBrakePresetsRequest,
+  pauseCompressionSessionRequest,
   resumeCompressionSessionRequest,
   startCompressionSessionRequest,
   type HandBrakePresetOption
@@ -498,6 +499,7 @@ export const CompressionPage = () => {
   const [mediaStatsState, setMediaStatsState] = useState<MediaStatsState>({ status: 'idle', data: null, error: null });
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isStartingCompression, setIsStartingCompression] = useState(false);
+  const [isPausingCompression, setIsPausingCompression] = useState(false);
   const [isEncoderSettingsLoading, setIsEncoderSettingsLoading] = useState(true);
   const [encoderSettings, setEncoderSettings] = useState<EncoderSettingsSnapshot>({
     imageToolCommand: '',
@@ -1253,10 +1255,39 @@ export const CompressionPage = () => {
     }
   };
 
+  const handlePauseCompression = async () => {
+    const sessionId = compressionSessionState.backendSessionId;
+
+    if (!sessionId || isPausingCompression) {
+      return;
+    }
+
+    setIsPausingCompression(true);
+
+    try {
+      const paused = await pauseCompressionSessionRequest(sessionId);
+      pauseCompressionSession(t('compression.interrupted'));
+
+      if (paused.progress) {
+        syncProgressData(paused.progress);
+      } else {
+        const progress = await getCompressionProgressRequest(sessionId);
+        syncProgressData(progress);
+      }
+
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : t('compression.pauseError'));
+    } finally {
+      setIsPausingCompression(false);
+    }
+  };
+
   const isCompressionPaused = compressionSessionState.status === 'paused';
-  const isCompressionRunning = compressionSessionState.status === 'running' || isStartingCompression;
+  const isCompressionRunning = compressionSessionState.status === 'running' || isStartingCompression || isPausingCompression;
   const isCompressionComplete = compressionSessionState.status === 'completed';
   const canRetryFailedCompression = isCompressionFailed && Boolean(compressionSessionState.backendSessionId);
+  const canPauseCompression = compressionSessionState.status === 'running' && Boolean(compressionSessionState.backendSessionId);
   const canContinueToGrouping = isCompressionComplete || isCompressionCompleteWithWarnings;
   const estimatedProgressMediaCount = estimatedProcessableMediaCount;
   const handleContinueToGrouping = () => {
@@ -1294,6 +1325,30 @@ export const CompressionPage = () => {
             {compressionSessionWarningMessage}
           </p>
         </div>
+        {(canPauseCompression || isCompressionPaused) && (
+          <div className="compression-session-actions">
+            {canPauseCompression && (
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={() => void handlePauseCompression()}
+                disabled={isPausingCompression}
+              >
+                {isPausingCompression ? t('compression.pausingButton') : t('compression.pauseButton')}
+              </button>
+            )}
+            {isCompressionPaused && (
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={() => void handleResumeCompression()}
+                disabled={isStartingCompression || isPausingCompression}
+              >
+                {isStartingCompression ? t('compression.resumingButton') : t('compression.resumeButton')}
+              </button>
+            )}
+          </div>
+        )}
         {backendError && !isCompressionCompleteWithWarnings && (
           <pre className="error compression-error-details">
             {backendError}
@@ -1321,21 +1376,6 @@ export const CompressionPage = () => {
               disabled={isStartingCompression || !compressionSessionState.backendSessionId}
             >
               ↻ {t('compression.tryAgain')}
-            </button>
-          </div>
-        )}
-        {compressionSessionState.status === 'paused' && (
-          <div className="compression-error-section">
-            <p className="page-summary-note">
-              {compressionSessionState.errorMessage ?? t('compression.interrupted')}
-            </p>
-            <button
-              className="btn btn-primary"
-              type="button"
-              onClick={() => void handleResumeCompression()}
-              disabled={isStartingCompression}
-            >
-              {isStartingCompression ? t('compression.resumingButton') : t('compression.resumeButton')}
             </button>
           </div>
         )}

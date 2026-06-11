@@ -103,6 +103,63 @@ cp "$input" "$out"
   return filePath;
 };
 
+const writeSlowFakeImageTool = (toolsDir: string, callLogPath: string, delayMilliseconds: number) => {
+  const extension = process.platform === 'win32' ? '.cmd' : '.sh';
+  const filePath = path.join(toolsDir, `cjpeg-slow${extension}`);
+  const delaySeconds = Math.max(1, Math.ceil(delayMilliseconds / 1000));
+  const script = process.platform === 'win32'
+    ? `@echo off
+set OUT=
+set IN=
+set NEXT_OUT=
+:loop
+if "%~1"=="" goto done
+if "%~1"=="-outfile" goto markout
+if "%NEXT_OUT%"=="1" goto setout
+set IN=%~1
+shift
+goto loop
+:markout
+set NEXT_OUT=1
+shift
+goto loop
+:setout
+set OUT=%~1
+set NEXT_OUT=
+shift
+goto loop
+:done
+echo %IN%>>"${callLogPath}"
+powershell.exe -NoProfile -Command "Start-Sleep -Milliseconds ${delayMilliseconds}"
+copy /Y "%IN%" "%OUT%" >nul
+exit /b 0
+`
+    : `#!/usr/bin/env sh
+out=""
+input=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-outfile" ]; then
+    shift
+    out="$1"
+  else
+    input="$1"
+  fi
+  shift
+done
+printf '%s\\n' "$input" >> "${callLogPath}"
+sleep ${delaySeconds}
+cp "$input" "$out"
+`;
+
+  fs.writeFileSync(filePath, script, 'utf8');
+
+  if (process.platform !== 'win32') {
+    fs.chmodSync(filePath, 0o755);
+  }
+
+  return filePath;
+};
+
 beforeEach(() => {
   process.env.MEDIA_ORGANIZER_DATA_DIR = tempDataDir;
   process.env.MEDIA_ORGANIZER_DB_PATH = tempDbPath;
@@ -519,6 +576,71 @@ test('compression progress reports the actively processing video and clears it a
   const resumedProgress = getCompressionProgress(started.session.id);
   assert.equal(resumedProgress?.retainedOriginalBecauseLarger, 1);
   assert.equal(resumedProgress?.processedItems[0].outcome, 'original-retained-size');
+});
+
+test('pauseCompressionSession stops active compression and resume processes pending items', async () => {
+  const {
+    getCompressionProgress,
+    getCompressionSession,
+    markCompressionSessionRunning,
+    pauseCompressionSession,
+    startCompressionSession
+  } = await import('../src/pipeline/compression/compressionJob.service.js?pause-runner=1');
+  const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js?pause-runner=1');
+  const scopedSourceDir = path.join(tempRoot, 'pause-runner-source');
+  const scopedOutputDir = path.join(tempRoot, 'pause-runner-output');
+  const toolsDir = path.join(tempRoot, 'pause-runner-tools');
+  const callLogPath = path.join(tempRoot, 'pause-runner-calls.log');
+  fs.rmSync(scopedSourceDir, { recursive: true, force: true });
+  fs.rmSync(scopedOutputDir, { recursive: true, force: true });
+  fs.rmSync(toolsDir, { recursive: true, force: true });
+  fs.rmSync(callLogPath, { force: true });
+  fs.mkdirSync(scopedSourceDir, { recursive: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+
+  for (const name of ['one.jpg', 'two.jpg']) {
+    fs.writeFileSync(path.join(scopedSourceDir, name), `source-${name}`, 'utf8');
+  }
+
+  const started = startCompressionSession({
+    name: 'Pause compression test',
+    sourceDir: scopedSourceDir,
+    outputDir: scopedOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Fast 1080p30',
+    imageToolCommand: writeSlowFakeImageTool(toolsDir, callLogPath, 4000),
+    videoToolCommand: '__missing_video_encoder__'
+  });
+
+  const firstRun = executeCompressionSession(started.session.id);
+  let activeProgress = getCompressionProgress(started.session.id);
+
+  for (let attempt = 0; attempt < 100 && !activeProgress?.currentlyProcessing.length; attempt += 1) {
+    await sleep(50);
+    activeProgress = getCompressionProgress(started.session.id);
+  }
+
+  assert.equal(activeProgress?.currentlyProcessing.length, 1);
+  const paused = pauseCompressionSession(started.session.id);
+  assert.equal(paused?.session.status, 'paused');
+  assert.equal(paused?.progress?.currentlyProcessing.length, 0);
+
+  await firstRun;
+
+  const pausedProgress = getCompressionProgress(started.session.id);
+  assert.equal(getCompressionSession(started.session.id)?.session.status, 'paused');
+  assert.equal(pausedProgress?.currentlyProcessing.length, 0);
+  assert.equal(pausedProgress?.failed, 0);
+
+  markCompressionSessionRunning(started.session.id);
+  await executeCompressionSession(started.session.id);
+
+  const finalProgress = getCompressionProgress(started.session.id);
+  assert.equal(finalProgress?.status, 'completed');
+  assert.equal(finalProgress?.completed, 2);
+  assert.equal(finalProgress?.failed, 0);
 });
 
 test('compression progress falls back to absolute display paths outside the source directory', async () => {
