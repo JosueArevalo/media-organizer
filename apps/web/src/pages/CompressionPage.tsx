@@ -24,13 +24,13 @@ import {
   pauseCompressionSession,
   saveCompressionSessionSnapshot,
   startCompressionSession,
-  resetCompressionSession
 } from '../services/compression-job.store';
 import {
   getActiveCompressionSessionRequest,
   getCompressionSessionRequest,
   getCompressionProgressRequest,
   loadHandBrakePresetsRequest,
+  pauseCompressionSessionRequest,
   resumeCompressionSessionRequest,
   startCompressionSessionRequest,
   type HandBrakePresetOption
@@ -73,7 +73,9 @@ type MediaStatsState =
 type CompressionProgressItem = {
   id: string;
   sourcePath: string;
+  displayPath?: string;
   status: 'completed' | 'failed';
+  error?: string;
   operation: 'compress' | 'copy';
   startedAt?: number;
   finishedAt?: number;
@@ -87,9 +89,13 @@ type CompressionProgressItem = {
 type CompressionActiveItem = {
   id: string;
   sourcePath: string;
+  displayPath?: string;
   operation: 'compress' | 'copy';
   startedAt?: number;
 };
+
+type CompressionLogStatusFilter = 'all' | 'completed' | 'failed';
+type CompressionLogOperationFilter = 'all' | 'compress' | 'copy' | 'original-retained-size';
 
 const IMAGE_PRESETS: Array<{ id: Exclude<ImagePresetId, 'custom'>; labelKey: TranslationKey; quality: number; noteKey: TranslationKey }> = [
   { id: 'balanced', labelKey: 'compression.preset.balanced', quality: 80, noteKey: 'compression.preset.balancedNote' },
@@ -142,7 +148,26 @@ const formatDuration = (milliseconds?: number) => {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 };
 
-const getFileLabel = (filePath: string) => filePath.split(/[\\/]/).pop() || filePath;
+const getCompressionItemLabel = (item: { sourcePath: string; displayPath?: string }) => item.displayPath ?? item.sourcePath;
+
+const normalizeLogSearchText = (value: string) => value.toLowerCase().replace(/[\\/]+/g, '\\');
+
+const getCompressionLogOperationLabel = (item: CompressionProgressItem) => {
+  if (item.outcome === 'original-retained-size') {
+    return 'original retained';
+  }
+
+  return item.operation === 'compress' ? 'compressed' : 'copied';
+};
+
+const getCompressionLogSearchText = (item: CompressionProgressItem) =>
+  normalizeLogSearchText([
+    item.status,
+    getCompressionLogOperationLabel(item),
+    getCompressionItemLabel(item),
+    item.sourcePath,
+    item.error ?? ''
+  ].join(' '));
 
 const getMediaKind = (fileName: string, mimeType = '', fileType = ''): 'image' | 'video' | 'other' => {
   const normalizedType = fileType.toLowerCase();
@@ -474,6 +499,7 @@ export const CompressionPage = () => {
   const [mediaStatsState, setMediaStatsState] = useState<MediaStatsState>({ status: 'idle', data: null, error: null });
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isStartingCompression, setIsStartingCompression] = useState(false);
+  const [isPausingCompression, setIsPausingCompression] = useState(false);
   const [isEncoderSettingsLoading, setIsEncoderSettingsLoading] = useState(true);
   const [encoderSettings, setEncoderSettings] = useState<EncoderSettingsSnapshot>({
     imageToolCommand: '',
@@ -498,6 +524,9 @@ export const CompressionPage = () => {
     retainedOriginalBecauseLarger: number;
   } | null>(null);
   const [logsExpanded, setLogsExpanded] = useState(false);
+  const [logStatusFilter, setLogStatusFilter] = useState<CompressionLogStatusFilter>('all');
+  const [logOperationFilter, setLogOperationFilter] = useState<CompressionLogOperationFilter>('all');
+  const [logSearchQuery, setLogSearchQuery] = useState('');
   const completionTimerRef = useRef<number | null>(null);
   const pollSessionIdRef = useRef<string | null>(null);
 
@@ -527,6 +556,37 @@ export const CompressionPage = () => {
       ? t(activePreset.labelKey)
       : t('compression.preset.balanced');
   const selectedVideoProfileLabel = videoPreset;
+  const normalizedLogSearchQuery = useMemo(() => normalizeLogSearchText(logSearchQuery.trim()), [logSearchQuery]);
+  const visibleProcessedItems = useMemo(() => {
+    if (!progressData) {
+      return [];
+    }
+
+    return progressData.processedItems.filter((item) => {
+      if (logStatusFilter !== 'all' && item.status !== logStatusFilter) {
+        return false;
+      }
+
+      if (logOperationFilter === 'original-retained-size') {
+        if (item.outcome !== 'original-retained-size') {
+          return false;
+        }
+      } else if (logOperationFilter === 'compress') {
+        if (item.operation !== 'compress' || item.outcome === 'original-retained-size') {
+          return false;
+        }
+      } else if (logOperationFilter !== 'all' && item.operation !== logOperationFilter) {
+        return false;
+      }
+
+      if (normalizedLogSearchQuery && !getCompressionLogSearchText(item).includes(normalizedLogSearchQuery)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [logOperationFilter, logStatusFilter, normalizedLogSearchQuery, progressData]);
+  const hasActiveLogFilters = logStatusFilter !== 'all' || logOperationFilter !== 'all' || normalizedLogSearchQuery.length > 0;
 
   useEffect(() => {
     saveCompressionSettings({
@@ -929,6 +989,9 @@ export const CompressionPage = () => {
 
     return null;
   })();
+  const hasCompletedCompressionItems = (progressData?.completed ?? 0) > 0;
+  const isCompressionFailed = compressionSessionState.status === 'failed';
+  const isCompressionCompleteWithWarnings = isCompressionFailed && hasCompletedCompressionItems;
   const compressionSessionMessage = (() => {
     if (compressionSessionState.status === 'running') {
       return t('compression.running');
@@ -940,6 +1003,13 @@ export const CompressionPage = () => {
 
     if (compressionSessionState.status === 'paused') {
       return t('compression.interrupted');
+    }
+
+    if (isCompressionCompleteWithWarnings) {
+      return t('compression.completedWithWarnings', {
+        completed: progressData?.completed ?? 0,
+        failed: progressData?.failed ?? 0
+      });
     }
 
     if (compressionSessionState.status === 'failed') {
@@ -1185,10 +1255,55 @@ export const CompressionPage = () => {
     }
   };
 
+  const handlePauseCompression = async () => {
+    const sessionId = compressionSessionState.backendSessionId;
+
+    if (!sessionId || isPausingCompression) {
+      return;
+    }
+
+    setIsPausingCompression(true);
+
+    try {
+      const paused = await pauseCompressionSessionRequest(sessionId);
+      pauseCompressionSession(t('compression.interrupted'));
+
+      if (paused.progress) {
+        syncProgressData(paused.progress);
+      } else {
+        const progress = await getCompressionProgressRequest(sessionId);
+        syncProgressData(progress);
+      }
+
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : t('compression.pauseError'));
+    } finally {
+      setIsPausingCompression(false);
+    }
+  };
+
   const isCompressionPaused = compressionSessionState.status === 'paused';
-  const isCompressionRunning = compressionSessionState.status === 'running' || isStartingCompression;
+  const isCompressionRunning = compressionSessionState.status === 'running' || isStartingCompression || isPausingCompression;
   const isCompressionComplete = compressionSessionState.status === 'completed';
+  const canRetryFailedCompression = isCompressionFailed && Boolean(compressionSessionState.backendSessionId);
+  const canPauseCompression = compressionSessionState.status === 'running' && Boolean(compressionSessionState.backendSessionId);
+  const canContinueToGrouping = isCompressionComplete || isCompressionCompleteWithWarnings;
   const estimatedProgressMediaCount = estimatedProcessableMediaCount;
+  const handleContinueToGrouping = () => {
+    if (isCompressionCompleteWithWarnings) {
+      const confirmed = window.confirm(t('compression.continueWithFailedConfirm', {
+        completed: progressData?.completed ?? 0,
+        failed: progressData?.failed ?? 0
+      }));
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    navigate('/grouping', { state: { from: '/compression' } });
+  };
 
   return (
     <div className="page-stack">
@@ -1210,37 +1325,57 @@ export const CompressionPage = () => {
             {compressionSessionWarningMessage}
           </p>
         </div>
-        {backendError && (
+        {(canPauseCompression || isCompressionPaused) && (
+          <div className="compression-session-actions">
+            {canPauseCompression && (
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={() => void handlePauseCompression()}
+                disabled={isPausingCompression}
+              >
+                {isPausingCompression ? t('compression.pausingButton') : t('compression.pauseButton')}
+              </button>
+            )}
+            {isCompressionPaused && (
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={() => void handleResumeCompression()}
+                disabled={isStartingCompression || isPausingCompression}
+              >
+                {isStartingCompression ? t('compression.resumingButton') : t('compression.resumeButton')}
+              </button>
+            )}
+          </div>
+        )}
+        {backendError && !isCompressionCompleteWithWarnings && (
           <pre className="error compression-error-details">
             {backendError}
           </pre>
         )}
         {compressionSessionState.status === 'failed' && (
           <div className="compression-error-section">
-            <p className="error">
-              {t('compression.failed', { message: compressionSessionState.errorMessage ?? t('compression.failedFallback') })}
-            </p>
+            {isCompressionCompleteWithWarnings && (
+              <p className="page-summary-note compression-warning">
+                {t('compression.completedWithWarnings', {
+                  completed: progressData?.completed ?? 0,
+                  failed: progressData?.failed ?? 0
+                })}
+              </p>
+            )}
+            {!isCompressionCompleteWithWarnings && (
+              <p className="error">
+                {t('compression.failed', { message: compressionSessionState.errorMessage ?? t('compression.failedFallback') })}
+              </p>
+            )}
             <button
               className="btn btn-secondary"
               type="button"
-              onClick={() => resetCompressionSession()}
+              onClick={() => void handleResumeCompression()}
+              disabled={isStartingCompression || !compressionSessionState.backendSessionId}
             >
               ↻ {t('compression.tryAgain')}
-            </button>
-          </div>
-        )}
-        {compressionSessionState.status === 'paused' && (
-          <div className="compression-error-section">
-            <p className="page-summary-note">
-              {compressionSessionState.errorMessage ?? t('compression.interrupted')}
-            </p>
-            <button
-              className="btn btn-primary"
-              type="button"
-              onClick={() => void handleResumeCompression()}
-              disabled={isStartingCompression}
-            >
-              {isStartingCompression ? t('compression.resumingButton') : t('compression.resumeButton')}
             </button>
           </div>
         )}
@@ -1317,7 +1452,7 @@ export const CompressionPage = () => {
                   progressData.currentlyProcessing.slice(0, 2).map((item) => (
                     <div key={item.id} className="compression-processing-item">
                       {t(item.operation === 'compress' ? 'compression.compressingItem' : 'compression.copyingItem', {
-                        name: getFileLabel(item.sourcePath)
+                        name: getCompressionItemLabel(item)
                       })}
                       {item.startedAt ? ` - ${formatDuration(Date.now() - item.startedAt)}` : ''}
                     </div>
@@ -1343,31 +1478,84 @@ export const CompressionPage = () => {
             </button>
             
             {logsExpanded && (
-              <div className="compression-logs-list">
-                {progressData.processedItems.length > 0 ? (
-                  progressData.processedItems.map((item) => (
-                    <div key={item.id} className={`compression-log-item compression-log-${item.status}`}>
-                      <span className="compression-log-status">
-                        {item.status === 'completed' ? '✓' : '✗'}
-                      </span>
-                      <span className="compression-log-name">
-                        {t(item.outcome === 'original-retained-size'
-                          ? 'compression.logOriginalRetainedSize'
-                          : item.skipped && item.operation === 'copy'
-                          ? 'compression.logCopySkipped'
-                          : item.operation === 'compress'
-                            ? 'compression.logCompressed'
-                            : 'compression.logCopied', {
-                          name: getFileLabel(item.sourcePath)
-                        })}
-                        {typeof item.durationMs === 'number' ? ` - ${formatDuration(item.durationMs)}` : ''}
-                      </span>
+              <>
+                <div className="compression-logs-toolbar">
+                  <div className="compression-log-control">
+                    <span className="compression-log-control-label">{t('compression.logsStatusTitle')}</span>
+                    <div className="compression-log-filter-group" aria-label={t('compression.logsStatusFilter')}>
+                      {(['all', 'completed', 'failed'] as CompressionLogStatusFilter[]).map((filter) => (
+                        <button
+                          key={filter}
+                          type="button"
+                          className={`compression-log-filter ${logStatusFilter === filter ? 'is-active' : ''}`}
+                          onClick={() => setLogStatusFilter(filter)}
+                        >
+                          {t(`compression.logsStatus.${filter}` as TranslationKey)}
+                        </button>
+                      ))}
                     </div>
-                  ))
-                ) : (
-                  <p className="page-summary-note">{t('compression.noItemsProcessed')}</p>
-                )}
-              </div>
+                  </div>
+                  <div className="compression-log-control">
+                    <span className="compression-log-control-label">{t('compression.logsOperationTitle')}</span>
+                    <div className="compression-log-filter-group" aria-label={t('compression.logsOperationFilter')}>
+                      {(['all', 'compress', 'copy', 'original-retained-size'] as CompressionLogOperationFilter[]).map((filter) => (
+                        <button
+                          key={filter}
+                          type="button"
+                          className={`compression-log-filter ${logOperationFilter === filter ? 'is-active' : ''}`}
+                          onClick={() => setLogOperationFilter(filter)}
+                        >
+                          {t(`compression.logsOperation.${filter}` as TranslationKey)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <input
+                    className="compression-log-search"
+                    type="search"
+                    value={logSearchQuery}
+                    onChange={(event) => setLogSearchQuery(event.target.value)}
+                    placeholder={t('compression.logsSearchPlaceholder')}
+                    aria-label={t('compression.logsSearchLabel')}
+                  />
+                </div>
+                <p className="compression-logs-count">
+                  {t('compression.logsShowing', {
+                    shown: visibleProcessedItems.length,
+                    total: progressData.processedItems.length
+                  })}
+                </p>
+                <div className="compression-logs-list">
+                  {progressData.processedItems.length > 0 && visibleProcessedItems.length > 0 ? (
+                    visibleProcessedItems.map((item) => (
+                      <div key={item.id} className={`compression-log-item compression-log-${item.status}`}>
+                        <span className="compression-log-status">
+                          {item.status === 'completed' ? '✓' : '✗'}
+                        </span>
+                        <span className="compression-log-name">
+                          {t(item.outcome === 'original-retained-size'
+                            ? 'compression.logOriginalRetainedSize'
+                            : item.skipped && item.operation === 'copy'
+                            ? 'compression.logCopySkipped'
+                            : item.operation === 'compress'
+                              ? 'compression.logCompressed'
+                              : 'compression.logCopied', {
+                            name: getCompressionItemLabel(item)
+                          })}
+                          {typeof item.durationMs === 'number' ? ` - ${formatDuration(item.durationMs)}` : ''}
+                          {item.status === 'failed' && item.error ? (
+                            <span className="compression-log-error">{item.error}</span>
+                          ) : null}
+                        </span>
+                      </div>
+                    ))
+                  ) : progressData.processedItems.length > 0 && hasActiveLogFilters ? (
+                    <p className="page-summary-note">{t('compression.logsNoMatches')}</p>
+                  ) : (
+                    <p className="page-summary-note">{t('compression.noItemsProcessed')}</p>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -1555,13 +1743,15 @@ export const CompressionPage = () => {
         <button
           className="btn btn-primary"
           type="button"
-          onClick={() => void (isCompressionPaused ? handleResumeCompression() : handleStartCompression())}
-          disabled={isCompressionRunning || isCompressionComplete || (!isCompressionPaused && !canStartRealCompression)}
+          onClick={() => void (isCompressionPaused || canRetryFailedCompression ? handleResumeCompression() : handleStartCompression())}
+          disabled={isCompressionRunning || isCompressionComplete || (!isCompressionPaused && !canRetryFailedCompression && !canStartRealCompression)}
         >
           {isCompressionRunning
             ? t('compression.runningButton')
             : isCompressionPaused
               ? t('compression.resumeButton')
+              : canRetryFailedCompression
+                ? t('compression.retryFailedItems')
               : isCompressionComplete
               ? t('compression.completedButton')
               : isCompressionSetupLoading
@@ -1570,7 +1760,7 @@ export const CompressionPage = () => {
                   ? t('compression.startCopyButton')
                 : t('compression.startButton')}
         </button>
-        <button className="btn btn-ghost" type="button" onClick={() => navigate('/grouping', { state: { from: '/compression' } })} disabled={!isCompressionComplete}>
+        <button className="btn btn-ghost" type="button" onClick={handleContinueToGrouping} disabled={!canContinueToGrouping}>
           {t('compression.continueGrouping')}
         </button>
       </div>

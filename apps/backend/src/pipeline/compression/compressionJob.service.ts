@@ -12,6 +12,7 @@ import {
   buildCompressionVideosOutputDir
 } from './compressionJob.paths.js';
 import { resolveToolCommand } from './toolCommandResolver.js';
+import { clearCompressionPauseRequest, requestCompressionProcessPause } from './compressionProcessRegistry.js';
 
 export type CompressionSessionRequest = {
   name?: string;
@@ -369,13 +370,16 @@ export interface CompressionProgressData {
   currentlyProcessing: Array<{
     id: string;
     sourcePath: string;
+    displayPath?: string;
     operation: 'compress' | 'copy';
     startedAt?: number;
   }>;
   processedItems: Array<{
     id: string;
     sourcePath: string;
+    displayPath?: string;
     status: 'completed' | 'failed';
+    error?: string;
     operation: 'compress' | 'copy';
     startedAt?: number;
     finishedAt?: number;
@@ -393,6 +397,21 @@ export interface CompressionProgressData {
   failedCopy: number;
   retainedOriginalBecauseLarger: number;
 }
+
+const getSourceDisplayPath = (sourceDir: string | null, sourcePath: string) => {
+  if (!sourceDir) {
+    return sourcePath;
+  }
+
+  const relativePath = path.relative(sourceDir, sourcePath);
+  const escapesSource = relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || relativePath.startsWith('../') || relativePath.startsWith('..\\');
+
+  if (!relativePath || path.isAbsolute(relativePath) || escapesSource) {
+    return sourcePath;
+  }
+
+  return relativePath.replace(/[\\/]+/g, '\\');
+};
 
 export const getCompressionProgress = (sessionId: string): CompressionProgressData | null => {
   runMigrations();
@@ -421,11 +440,13 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   let checkpointFailedCompressCount: number | null = null;
   let checkpointFailedCopyCount: number | null = null;
   let retainedOriginalBecauseLargerCount = 0;
-  let activeItems: Array<{ id: string; sourcePath: string; operation: 'compress' | 'copy'; startedAt?: number }> = [];
+  let manifestSourceDir: string | null = null;
+  let activeItems: Array<{ id: string; sourcePath: string; displayPath?: string; operation: 'compress' | 'copy'; startedAt?: number }> = [];
   let checkpointProcessedItems: CompressionProgressData['processedItems'] = [];
   if (checkpoint?.payload_json) {
     try {
       const parsed = JSON.parse(checkpoint.payload_json);
+      manifestSourceDir = typeof parsed.manifest?.sourceDir === 'string' ? parsed.manifest.sourceDir : null;
       totalCount = parsed.totalCount ?? 0;
       checkpointCompletedCount = parsed.summary?.completedItems ?? null;
       checkpointFailedCount = parsed.summary?.failedItems ?? null;
@@ -443,9 +464,10 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
               typeof item.sourcePath === 'string' &&
               (item.operation === 'compress' || item.operation === 'copy')
             )
-            .map((item: { id: string; sourcePath: string; operation: 'compress' | 'copy'; startedAt?: unknown }) => ({
+            .map((item: { id: string; sourcePath: string; displayPath?: unknown; operation: 'compress' | 'copy'; startedAt?: unknown }) => ({
               id: item.id,
               sourcePath: item.sourcePath,
+              displayPath: typeof item.displayPath === 'string' ? item.displayPath : getSourceDisplayPath(manifestSourceDir, item.sourcePath),
               operation: item.operation,
               ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {})
             }))
@@ -460,6 +482,8 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
             .map((item: {
               source: string;
               status: 'completed' | 'failed';
+              displayPath?: unknown;
+              error?: unknown;
               operation: 'compress' | 'copy';
               startedAt?: unknown;
               finishedAt?: unknown;
@@ -471,7 +495,9 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
             }) => ({
               id: item.source,
               sourcePath: item.source,
+              displayPath: typeof item.displayPath === 'string' ? item.displayPath : getSourceDisplayPath(manifestSourceDir, item.source),
               status: item.status,
+              ...(typeof item.error === 'string' ? { error: item.error } : {}),
               operation: item.operation,
               ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {}),
               ...(typeof item.finishedAt === 'number' ? { finishedAt: item.finishedAt } : {}),
@@ -492,7 +518,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   const allProcessedItems = db
     .prepare(
       `
-      SELECT mi.id, mi.source_path, iss.status
+      SELECT mi.id, mi.source_path, iss.status, iss.last_error
       , COALESCE(idc.selected_for_compression, 0) AS selected_for_compression
       FROM item_stage_status iss
       JOIN media_items mi ON iss.item_id = mi.id
@@ -501,7 +527,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
       ORDER BY iss.updated_at ASC
     `
     )
-    .all(sessionId) as Array<{ id: string; source_path: string; status: string; selected_for_compression: number }>;
+    .all(sessionId) as Array<{ id: string; source_path: string; status: string; last_error: string | null; selected_for_compression: number }>;
 
   // Get completed and failed counts
   let completedCount = 0;
@@ -551,7 +577,9 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   const databaseProcessedItems = allProcessedItems.map((item) => ({
     id: item.id,
     sourcePath: item.source_path,
+    displayPath: getSourceDisplayPath(manifestSourceDir, item.source_path),
     status: item.status as 'completed' | 'failed',
+    ...(item.last_error ? { error: item.last_error } : {}),
     operation: item.selected_for_compression ? 'compress' as const : 'copy' as const
   }));
 
@@ -621,6 +649,7 @@ export const reconcileInterruptedCompressionSessions = () => {
 
 export const markCompressionSessionRunning = (sessionId: string) => {
   runMigrations();
+  clearCompressionPauseRequest(sessionId);
   const db = getDb();
   const timestamp = nowIso();
   const snapshot = getCompressionSession(sessionId);
@@ -667,6 +696,66 @@ export const startCompressionSessionResume = (sessionId: string) => {
   };
 };
 
+export const pauseCompressionSession = (sessionId: string) => {
+  runMigrations();
+  const db = getDb();
+  const timestamp = nowIso();
+  const snapshot = getCompressionSession(sessionId);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  if (snapshot.session.status !== 'running') {
+    return {
+      ...snapshot,
+      progress: getCompressionProgress(sessionId),
+      accepted: true
+    };
+  }
+
+  db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(
+    'paused',
+    timestamp,
+    timestamp,
+    sessionId
+  );
+
+  if (snapshot.checkpoint) {
+    const payload = parseCheckpointPayload(snapshot.checkpoint.payloadJson);
+    db.prepare(
+      `
+        UPDATE session_checkpoints
+        SET payload_json = ?, updated_at = ?
+        WHERE session_id = ? AND stage = 'compress'
+      `
+    ).run(
+      serializeCheckpointPayload({
+        ...payload,
+        activeItems: [],
+        interrupted: true,
+        interruptedAt: timestamp
+      }),
+      timestamp,
+      sessionId
+    );
+  }
+
+  requestCompressionProcessPause(sessionId);
+
+  const pausedSnapshot = getCompressionSession(sessionId);
+
+  if (!pausedSnapshot) {
+    return null;
+  }
+
+  return {
+    ...pausedSnapshot,
+    progress: getCompressionProgress(sessionId),
+    accepted: true
+  };
+};
+
 export const markCompressionSessionFailed = (sessionId: string, error: Error) => {
   runMigrations();
   const db = getDb();
@@ -680,6 +769,16 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
   db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run('failed', timestamp, timestamp, sessionId);
 
   const checkpointPayload = parseCheckpointPayload(snapshot.checkpoint?.payloadJson ?? null);
+  const processedFailedItems = Array.isArray(checkpointPayload.processedItems)
+    ? checkpointPayload.processedItems.filter((item: unknown) =>
+        typeof item === 'object' &&
+        item !== null &&
+        'status' in item &&
+        item.status === 'failed'
+      ).length
+    : 0;
+  const fallbackFailedItems = checkpointPayload.summary?.failedItems ?? 0;
+  const failedItems = processedFailedItems || fallbackFailedItems || 1;
 
   if (snapshot.checkpoint) {
     db.prepare(
@@ -694,7 +793,7 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
         summary: {
           ...checkpointPayload.summary,
           completedItems: checkpointPayload.summary?.completedItems ?? 0,
-          failedItems: Math.max(1, checkpointPayload.summary?.failedItems ?? 0)
+          failedItems
         },
         activeItems: [],
         fatalError: error.message
@@ -718,7 +817,7 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
     imageItems: 0,
     videoItems: 0,
     completedItems: checkpointPayload.summary?.completedItems ?? 0,
-    failedItems: Math.max(1, checkpointPayload.summary?.failedItems ?? 0),
+    failedItems,
     imageProfileLabel: checkpointPayload.manifest?.imageProfileLabel ?? null,
     imageQuality: checkpointPayload.manifest?.imageQuality ?? null,
     videoPresetLabel: checkpointPayload.manifest?.videoPresetLabel ?? null,

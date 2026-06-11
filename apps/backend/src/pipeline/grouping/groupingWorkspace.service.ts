@@ -407,6 +407,11 @@ const listMediaRows = (sessionId: string): MediaRow[] => {
           mi.capture_time,
           decision.target_group_label
         FROM media_items mi
+        INNER JOIN item_stage_status compress_status
+          ON compress_status.session_id = mi.session_id
+          AND compress_status.item_id = mi.id
+          AND compress_status.stage = 'compress'
+          AND compress_status.status = 'completed'
         LEFT JOIN item_decisions decision
           ON decision.session_id = mi.session_id
           AND decision.item_id = mi.id
@@ -437,6 +442,11 @@ const listMediaRowsByIds = (sessionId: string, itemIds: string[]): MediaRow[] =>
           mi.capture_time,
           decision.target_group_label
         FROM media_items mi
+        INNER JOIN item_stage_status compress_status
+          ON compress_status.session_id = mi.session_id
+          AND compress_status.item_id = mi.id
+          AND compress_status.stage = 'compress'
+          AND compress_status.status = 'completed'
         LEFT JOIN item_decisions decision
           ON decision.session_id = mi.session_id
           AND decision.item_id = mi.id

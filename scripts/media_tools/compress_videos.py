@@ -60,6 +60,18 @@ def load_resume_items(value: str):
     return items
 
 
+def load_resume_items_from_file(file_path: str):
+    if not file_path:
+        return []
+
+    resume_file = Path(file_path)
+
+    if not resume_file.is_file():
+        return []
+
+    return load_resume_items(resume_file.read_text(encoding='utf-8'))
+
+
 def resolve_scope_path(source_dir: Path, scope_path: str) -> str:
     trimmed = scope_path.strip().replace('\\', '/')
 
@@ -373,6 +385,7 @@ def main() -> int:
     parser.add_argument('--output-format-mode', choices=['preserve', 'mp4'], default='preserve')
     parser.add_argument('--encoder-command', default='HandBrakeCLI')
     parser.add_argument('--selection-scope-json', default='')
+    parser.add_argument('--resume-skip-file', default='')
     parser.add_argument('--resume-skip-json', default='')
     args = parser.parse_args()
 
@@ -384,7 +397,7 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = []
-    resume_items = load_resume_items(args.resume_skip_json)
+    resume_items = load_resume_items_from_file(args.resume_skip_file) or load_resume_items(args.resume_skip_json)
     skipped_sources = {normalize_path(item['source']) for item in resume_items}
 
     for source_file in iter_video_files(source_dir):

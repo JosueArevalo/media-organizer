@@ -360,7 +360,9 @@ export const GroupingPage = () => {
   const sourcePath = sourceSelection?.path ?? '';
   const destinationPath = destinationSelection?.path ?? '';
   const hasWorkspacePrerequisites = Boolean(sourcePath && destinationPath && compressionSessionState.backendSessionId);
-  const canOpenWorkspace = hasWorkspacePrerequisites && compressionSessionState.status === 'completed';
+  const canOpenWorkspace =
+    hasWorkspacePrerequisites &&
+    (compressionSessionState.status === 'completed' || compressionSessionState.status === 'failed');
   const isGroupingCompleted = groupingSessionState.status === 'completed';
   const canMutateGrouping = !isGroupingCompleted;
   const isWaitingForWorkspacePrerequisites =

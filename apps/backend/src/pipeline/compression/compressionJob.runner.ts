@@ -8,12 +8,19 @@ import type { MediaType } from '../../state/dto/state.types.js';
 import { upsertExecutionHistory } from '../../dashboard/dashboard.service.js';
 import { buildImageCompressionCommand, buildVideoCompressionCommand } from './compressionCommandBuilder.js';
 import { getCompressionSession } from './compressionJob.service.js';
+import {
+  clearCompressionPauseRequest,
+  isCompressionPauseRequested,
+  registerCompressionProcess,
+  unregisterCompressionProcess
+} from './compressionProcessRegistry.js';
 
 type ScriptResultItem = {
   source: string;
   output: string;
   command: string[];
   status: 'completed' | 'failed';
+  displayPath?: string;
   operation?: 'compress' | 'copy';
   startedAt?: number;
   finishedAt?: number;
@@ -36,6 +43,7 @@ type ScriptActiveItem = {
 
 type ScriptResultPayload = {
   items: ScriptResultItem[];
+  paused?: boolean;
 };
 
 type ScriptProgressEvent = {
@@ -47,6 +55,7 @@ type ScriptProgressEvent = {
 type ActiveCompressionItem = {
   id: string;
   sourcePath: string;
+  displayPath?: string;
   operation: 'compress' | 'copy';
   startedAt?: number;
 };
@@ -116,6 +125,7 @@ const calculateCompletedSizeMetrics = (items: ScriptResultItem[]) => {
 };
 
 const executeCommand = async (
+  sessionId: string,
   command: string,
   args: string[],
   onStart?: (item: ScriptActiveItem) => void,
@@ -126,6 +136,7 @@ const executeCommand = async (
       cwd: process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe']
     });
+    registerCompressionProcess(sessionId, child);
 
     const stderrChunks: Buffer[] = [];
     const items: ScriptResultItem[] = [];
@@ -167,13 +178,22 @@ const executeCommand = async (
       stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
 
-    child.on('error', reject);
+    child.on('error', (error) => {
+      unregisterCompressionProcess(sessionId, child);
+      reject(error);
+    });
 
     child.on('close', (code) => {
       const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
       stdoutReader.close();
+      unregisterCompressionProcess(sessionId, child);
 
       if (code !== 0) {
+        if (isCompressionPauseRequested(sessionId)) {
+          resolve({ items, paused: true });
+          return;
+        }
+
         reject(new Error(`Compression script failed with code ${code}: ${stderr || 'No output provided.'}`));
         return;
       }
@@ -184,6 +204,22 @@ const executeCommand = async (
 };
 
 const normalizePath = (value: string) => path.resolve(value).replace(/\\/g, '/').toLowerCase();
+
+const getSourceDisplayPath = (sourceDir: string, sourcePath: string) => {
+  const relativePath = path.relative(sourceDir, sourcePath);
+  const escapesSource = relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || relativePath.startsWith('../') || relativePath.startsWith('..\\');
+
+  if (!relativePath || path.isAbsolute(relativePath) || escapesSource) {
+    return sourcePath;
+  }
+
+  return relativePath.replace(/[\\/]+/g, '\\');
+};
+
+const enrichResultItemDisplayPath = (sourceDir: string, item: ScriptResultItem): ScriptResultItem => ({
+  ...item,
+  displayPath: item.displayPath ?? getSourceDisplayPath(sourceDir, item.source)
+});
 
 const resolveScopePath = (sourceDir: string, scopePath: string) => {
   const trimmed = scopePath.trim();
@@ -679,42 +715,21 @@ const persistCompressionItem = (
   sessionId: string,
   item: ScriptResultItem,
   outputRoot: string,
-  scope: SelectionScope,
-  counters: { completedCount: number; failedCount: number } & OperationCounts
+  scope: SelectionScope
 ) => {
   const itemId = upsertMediaItem(sessionId, item.source, outputRoot, item.output);
   const operation = item.operation ?? (isCompressOperation(item.source, scope) ? 'compress' : 'copy');
   const selectedForCompression = operation === 'compress';
   upsertDecision(sessionId, itemId, selectedForCompression);
   upsertStageStatus(sessionId, itemId, item.status, item.error ?? null);
-
-  if (item.status === 'completed') {
-    counters.completedCount += 1;
-
-    if (item.outcome === 'original-retained-size') {
-      counters.retainedOriginalBecauseLargerCount += 1;
-    } else if (operation === 'compress') {
-      counters.completedCompressCount += 1;
-    } else {
-      counters.completedCopyCount += 1;
-    }
-  } else {
-    counters.failedCount += 1;
-
-    if (operation === 'compress') {
-      counters.failedCompressCount += 1;
-    } else {
-      counters.failedCopyCount += 1;
-    }
-  }
 };
 
-const seedProgressFromCompletedItems = (items: ScriptResultItem[]) => {
+const calculateProgressFromProcessedItems = (items: ScriptResultItem[], totalCompressCount: number, totalCopyCount: number) => {
   const counters = {
     completedCount: 0,
     failedCount: 0,
-    totalCompressCount: 0,
-    totalCopyCount: 0,
+    totalCompressCount,
+    totalCopyCount,
     completedCompressCount: 0,
     completedCopyCount: 0,
     failedCompressCount: 0,
@@ -723,27 +738,36 @@ const seedProgressFromCompletedItems = (items: ScriptResultItem[]) => {
   };
 
   for (const item of items) {
-    if (item.status !== 'completed') {
-      continue;
-    }
+    const operation = item.operation ?? 'copy';
 
-    counters.completedCount += 1;
+    if (item.status === 'completed') {
+      counters.completedCount += 1;
 
-    if (item.outcome === 'original-retained-size') {
-      counters.retainedOriginalBecauseLargerCount += 1;
-    } else if (item.operation === 'compress') {
-      counters.completedCompressCount += 1;
+      if (item.outcome === 'original-retained-size') {
+        counters.retainedOriginalBecauseLargerCount += 1;
+      } else if (operation === 'compress') {
+        counters.completedCompressCount += 1;
+      } else {
+        counters.completedCopyCount += 1;
+      }
     } else {
-      counters.completedCopyCount += 1;
+      counters.failedCount += 1;
+
+      if (operation === 'compress') {
+        counters.failedCompressCount += 1;
+      } else {
+        counters.failedCopyCount += 1;
+      }
     }
   }
 
   return counters;
 };
 
-const toActiveCompressionItem = (item: ScriptActiveItem, scope: SelectionScope): ActiveCompressionItem => ({
+const toActiveCompressionItem = (item: ScriptActiveItem, scope: SelectionScope, sourceDir: string): ActiveCompressionItem => ({
   id: normalizePath(item.source),
   sourcePath: item.source,
+  displayPath: getSourceDisplayPath(sourceDir, item.source),
   operation: item.operation ?? (isCompressOperation(item.source, scope) ? 'compress' : 'copy'),
   ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {})
 });
@@ -834,24 +858,18 @@ export const executeCompressionSession = async (sessionId: string) => {
   }, videoResumeItems);
 
   const { totalCount, totalCompressCount, totalCopyCount } = countFilesToProcess(checkpointData.manifest.sourceDir, resolvedSelectionScope);
-  const checkpointProcessedItems = checkpointData.processedItems ?? [];
+  const checkpointProcessedItems = (checkpointData.processedItems ?? []).map((item) =>
+    enrichResultItemDisplayPath(checkpointData.manifest.sourceDir, item)
+  );
   const checkpointItemsBySource = new Map(checkpointProcessedItems.map((item) => [normalizePath(item.source), item]));
   const enrichedResumeCompletedItems = resumeCompletedItems.map((item) => checkpointItemsBySource.get(normalizePath(item.source)) ?? item);
-  const seededProgress = seedProgressFromCompletedItems(enrichedResumeCompletedItems);
-  const progressState = {
-    ...seededProgress,
-    totalCompressCount,
-    totalCopyCount,
-    failedCompressCount: 0,
-    failedCopyCount: 0,
-    retainedOriginalBecauseLargerCount: seededProgress.retainedOriginalBecauseLargerCount
-  };
   let activeItems: ActiveCompressionItem[] = [];
   const completedSources = new Set(resumeCompletedItems.map((item) => normalizePath(item.source)));
   const processedItems: ScriptResultItem[] = [
     ...enrichedResumeCompletedItems,
     ...checkpointProcessedItems.filter((item) => item.status === 'failed' && !completedSources.has(normalizePath(item.source)))
   ];
+  let progressState = calculateProgressFromProcessedItems(processedItems, totalCompressCount, totalCopyCount);
 
   // Seed the checkpoint with the total before any phase finishes.
   updateCompressionProgressCheckpoint(sessionId, {
@@ -865,8 +883,8 @@ export const executeCompressionSession = async (sessionId: string) => {
     processedItems
   });
 
-  const imageResult = await executeCommand(imageCommand.command, imageCommand.args, (item) => {
-    activeItems = [toActiveCompressionItem(item, resolvedSelectionScope)];
+  const imageResult = await executeCommand(sessionId, imageCommand.command, imageCommand.args, (item) => {
+    activeItems = [toActiveCompressionItem(item, resolvedSelectionScope, checkpointData.manifest.sourceDir)];
 
     updateCompressionProgressCheckpoint(sessionId, {
       outputRoot: checkpointData.outputRoot,
@@ -879,9 +897,11 @@ export const executeCompressionSession = async (sessionId: string) => {
       processedItems
     });
   }, (item) => {
-    persistCompressionItem(sessionId, item, checkpointData.outputRoot, resolvedSelectionScope, progressState);
-    activeItems = withoutActiveItem(activeItems, item.source);
-    replaceProcessedItem(processedItems, item);
+    const displayItem = enrichResultItemDisplayPath(checkpointData.manifest.sourceDir, item);
+    persistCompressionItem(sessionId, displayItem, checkpointData.outputRoot, resolvedSelectionScope);
+    activeItems = withoutActiveItem(activeItems, displayItem.source);
+    replaceProcessedItem(processedItems, displayItem);
+    progressState = calculateProgressFromProcessedItems(processedItems, totalCompressCount, totalCopyCount);
 
     updateCompressionProgressCheckpoint(sessionId, {
       outputRoot: checkpointData.outputRoot,
@@ -895,8 +915,29 @@ export const executeCompressionSession = async (sessionId: string) => {
     });
   });
 
-  const videoResult = await executeCommand(videoCommand.command, videoCommand.args, (item) => {
-    activeItems = [toActiveCompressionItem(item, resolvedSelectionScope)];
+  if (imageResult.paused) {
+    clearCompressionPauseRequest(sessionId);
+    updateCompressionProgressCheckpoint(sessionId, {
+      outputRoot: checkpointData.outputRoot,
+      manifest: checkpointData.manifest,
+      totalCount,
+      completedCount: progressState.completedCount,
+      failedCount: progressState.failedCount,
+      operationCounts: progressState,
+      activeItems: [],
+      processedItems
+    });
+
+    return {
+      sessionId,
+      completedCount: progressState.completedCount,
+      failedCount: progressState.failedCount,
+      totalCount
+    };
+  }
+
+  const videoResult = await executeCommand(sessionId, videoCommand.command, videoCommand.args, (item) => {
+    activeItems = [toActiveCompressionItem(item, resolvedSelectionScope, checkpointData.manifest.sourceDir)];
 
     updateCompressionProgressCheckpoint(sessionId, {
       outputRoot: checkpointData.outputRoot,
@@ -909,9 +950,11 @@ export const executeCompressionSession = async (sessionId: string) => {
       processedItems
     });
   }, (item) => {
-    persistCompressionItem(sessionId, item, checkpointData.outputRoot, resolvedSelectionScope, progressState);
-    activeItems = withoutActiveItem(activeItems, item.source);
-    replaceProcessedItem(processedItems, item);
+    const displayItem = enrichResultItemDisplayPath(checkpointData.manifest.sourceDir, item);
+    persistCompressionItem(sessionId, displayItem, checkpointData.outputRoot, resolvedSelectionScope);
+    activeItems = withoutActiveItem(activeItems, displayItem.source);
+    replaceProcessedItem(processedItems, displayItem);
+    progressState = calculateProgressFromProcessedItems(processedItems, totalCompressCount, totalCopyCount);
 
     updateCompressionProgressCheckpoint(sessionId, {
       outputRoot: checkpointData.outputRoot,
@@ -924,6 +967,29 @@ export const executeCompressionSession = async (sessionId: string) => {
       processedItems
     });
   });
+
+  if (videoResult.paused) {
+    clearCompressionPauseRequest(sessionId);
+    updateCompressionProgressCheckpoint(sessionId, {
+      outputRoot: checkpointData.outputRoot,
+      manifest: checkpointData.manifest,
+      totalCount,
+      completedCount: progressState.completedCount,
+      failedCount: progressState.failedCount,
+      operationCounts: progressState,
+      activeItems: [],
+      processedItems
+    });
+
+    return {
+      sessionId,
+      completedCount: progressState.completedCount,
+      failedCount: progressState.failedCount,
+      totalCount
+    };
+  }
+
+  clearCompressionPauseRequest(sessionId);
 
   // Log results for debugging
   console.log(`[compression] Session ${sessionId}: images=${imageResult.items.length}, videos=${videoResult.items.length}, total=${imageResult.items.length + videoResult.items.length}`);

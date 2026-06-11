@@ -199,3 +199,55 @@ test('resume route accepts a resumable session and returns initial progress', as
   assert.equal(payload.session.status, 'running');
   assert.equal(payload.progress?.sessionId, started.session.id);
 });
+
+test('pause route pauses a running compression session and returns progress', async () => {
+  const { startCompressionSession } = await import('../src/pipeline/compression/compressionJob.service.js?routes-pause=1');
+  const started = startCompressionSession({
+    sourceDir,
+    outputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Fast 1080p30',
+    imageToolCommand: '__missing_image_encoder__',
+    videoToolCommand: '__missing_video_encoder__'
+  });
+
+  const { response, responsePromise } = createResponse();
+  const handled = handleCompressionRoutes({
+    req: createRequest('POST'),
+    res: response,
+    requestUrl: new URL(`http://localhost/api/compression/sessions/${started.session.id}/pause`)
+  });
+
+  assert.equal(handled, true);
+
+  const captured = await responsePromise;
+  assert.equal(captured.statusCode, 202);
+
+  const payload = JSON.parse(captured.body) as {
+    accepted: boolean;
+    session: { id: string; status: string };
+    progress: { sessionId: string; status: string; currentlyProcessing: unknown[] } | null;
+  };
+
+  assert.equal(payload.accepted, true);
+  assert.equal(payload.session.id, started.session.id);
+  assert.equal(payload.session.status, 'paused');
+  assert.equal(payload.progress?.sessionId, started.session.id);
+  assert.equal(payload.progress?.status, 'paused');
+  assert.equal(payload.progress?.currentlyProcessing.length, 0);
+});
+
+test('pause route returns 404 for missing compression sessions', async () => {
+  const { response, responsePromise } = createResponse();
+  const handled = handleCompressionRoutes({
+    req: createRequest('POST'),
+    res: response,
+    requestUrl: new URL('http://localhost/api/compression/sessions/missing-session/pause')
+  });
+
+  assert.equal(handled, true);
+
+  const captured = await responsePromise;
+  assert.equal(captured.statusCode, 404);
+});

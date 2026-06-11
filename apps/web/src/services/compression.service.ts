@@ -44,13 +44,16 @@ export type CompressionProgressApiResponse = {
   currentlyProcessing: Array<{
     id: string;
     sourcePath: string;
+    displayPath?: string;
     operation: 'compress' | 'copy';
     startedAt?: number;
   }>;
   processedItems: Array<{
     id: string;
     sourcePath: string;
+    displayPath?: string;
     status: 'completed' | 'failed';
+    error?: string;
     operation: 'compress' | 'copy';
     startedAt?: number;
     finishedAt?: number;
@@ -74,6 +77,11 @@ export type ActiveCompressionSessionApiResponse = (CompressionSessionApiResponse
 }) | null;
 
 export type ResumeCompressionSessionApiResponse = CompressionSessionApiResponse & {
+  progress: CompressionProgressApiResponse | null;
+  accepted: true;
+};
+
+export type PauseCompressionSessionApiResponse = CompressionSessionApiResponse & {
   progress: CompressionProgressApiResponse | null;
   accepted: true;
 };
@@ -152,6 +160,17 @@ export const resumeCompressionSessionRequest = async (sessionId: string): Promis
   }
 
   return (await response.json()) as ResumeCompressionSessionApiResponse;
+};
+
+export const pauseCompressionSessionRequest = async (sessionId: string): Promise<PauseCompressionSessionApiResponse> => {
+  const response = await fetch(`/api/compression/sessions/${sessionId}/pause`, { method: 'POST' });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Could not pause compression session (${response.status}): ${body}`);
+  }
+
+  return (await response.json()) as PauseCompressionSessionApiResponse;
 };
 
 export const loadHandBrakePresetsRequest = async (command: string): Promise<HandBrakePresetsApiResponse> => {
