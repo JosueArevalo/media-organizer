@@ -14,6 +14,12 @@ import {
   registerCompressionProcess,
   unregisterCompressionProcess
 } from './compressionProcessRegistry.js';
+import {
+  closeCompressionTimingSegment,
+  getCompressionTimingSnapshot,
+  normalizeCompressionTiming,
+  type CompressionTiming
+} from './compressionTiming.js';
 
 type ScriptResultItem = {
   source: string;
@@ -88,6 +94,7 @@ type CompressionManifestData = {
     createdAt?: string;
   };
   processedItems?: ScriptResultItem[];
+  timing?: CompressionTiming;
 };
 
 type OperationCounts = {
@@ -275,6 +282,36 @@ const parseManifestFromCheckpoint = (payloadJson: string | null) => {
   } catch {
     return null;
   }
+};
+
+const parseCheckpointPayload = (payloadJson: string | null) => {
+  if (!payloadJson) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(payloadJson) as Partial<CompressionManifestData>;
+  } catch {
+    return null;
+  }
+};
+
+const getPersistedCompressionTiming = (sessionId: string, fallbackStartedAt: string | null = null) => {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT payload_json FROM session_checkpoints WHERE session_id = ? AND stage = ?')
+    .get(sessionId, 'compress') as { payload_json: string | null } | undefined;
+  const payload = parseCheckpointPayload(row?.payload_json ?? null);
+  return normalizeCompressionTiming(payload?.timing, fallbackStartedAt);
+};
+
+const getTimingHistoryFields = (timing: CompressionTiming, timestamp: string, includeOpenSegment: boolean) => {
+  const timingSnapshot = getCompressionTimingSnapshot(timing, timestamp, includeOpenSegment);
+
+  return {
+    compressionActiveDurationMs: timingSnapshot.durationMs,
+    compressionActiveStartedAt: includeOpenSegment ? timingSnapshot.activeStartedAt : null
+  };
 };
 
 const getSessionBasics = (sessionId: string) => {
@@ -594,6 +631,11 @@ const updateSessionAndCheckpoint = (
   const now = new Date().toISOString();
   const nextStatus = payload.failedCount > 0 ? 'failed' : 'completed';
   const session = getSessionBasics(sessionId);
+  const timing = closeCompressionTimingSegment(
+    getPersistedCompressionTiming(sessionId, session?.created_at ?? payload.manifest.createdAt ?? null),
+    now,
+    payload.failedCount > 0 ? 'fail' : 'complete'
+  );
 
   db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(nextStatus, now, now, sessionId);
 
@@ -615,6 +657,7 @@ const updateSessionAndCheckpoint = (
       },
       activeItems: payload.activeItems,
       processedItems: payload.processedItems,
+      timing,
       image: payload.image,
       video: payload.video
     }),
@@ -644,6 +687,7 @@ const updateSessionAndCheckpoint = (
     imageProfileLabel: payload.manifest.imageProfileLabel,
     imageQuality: payload.manifest.imageQuality,
     videoPresetLabel: payload.manifest.videoPresetLabel,
+    ...getTimingHistoryFields(timing, now, false),
     errorSummary: collectFailedItems(payload.image, payload.video)
   });
 };
@@ -664,6 +708,7 @@ const updateCompressionProgressCheckpoint = (
   const db = getDb();
   const now = new Date().toISOString();
   const session = getSessionBasics(sessionId);
+  const timing = getPersistedCompressionTiming(sessionId, session?.created_at ?? payload.manifest.createdAt ?? null);
 
   db.prepare(
     `
@@ -682,7 +727,8 @@ const updateCompressionProgressCheckpoint = (
         ...getOperationCounts(payload.operationCounts)
       },
       activeItems: payload.activeItems,
-      processedItems: payload.processedItems
+      processedItems: payload.processedItems,
+      timing
     }),
     now,
     sessionId
@@ -707,6 +753,7 @@ const updateCompressionProgressCheckpoint = (
     imageProfileLabel: payload.manifest.imageProfileLabel,
     imageQuality: payload.manifest.imageQuality,
     videoPresetLabel: payload.manifest.videoPresetLabel,
+    ...getTimingHistoryFields(timing, now, true),
     errorSummary: []
   });
 };

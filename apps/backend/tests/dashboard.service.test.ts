@@ -46,6 +46,8 @@ test('dashboard history can be listed and deleted independently', async () => {
     failedItems: 0,
     originalBytes: 3000,
     finalBytes: 2100,
+    compressionActiveDurationMs: 120000,
+    compressionActiveStartedAt: null,
     imageProfileLabel: 'Balanced',
     imageQuality: 80,
     videoPresetLabel: 'Fast 1080p30',
@@ -55,6 +57,8 @@ test('dashboard history can be listed and deleted independently', async () => {
   assert.equal(listExecutionHistory().length, 1);
   assert.equal(listExecutionHistory()[0].originalBytes, 3000);
   assert.equal(listExecutionHistory()[0].finalBytes, 2100);
+  assert.equal(listExecutionHistory()[0].compressionActiveDurationMs, 120000);
+  assert.equal(listExecutionHistory()[0].compressionActiveStartedAt, null);
   assert.equal(listExecutionHistory()[0].imageQuality, 80);
   assert.equal(getDashboardSummary().totals.filesProcessed, 3);
   assert.equal(deleteExecutionHistory(execution.id), true);
@@ -126,6 +130,8 @@ test('dashboard serializes verification snapshots and defaults old executions to
   assert.deepEqual(legacy?.verification.expected, { total: 0, images: 0, videos: 0, unknown: 0 });
   assert.equal(legacy?.originalBytes, null);
   assert.equal(legacy?.finalBytes, null);
+  assert.equal(legacy?.compressionActiveDurationMs, null);
+  assert.equal(legacy?.compressionActiveStartedAt, null);
   assert.equal(legacy?.imageQuality, null);
 });
 
