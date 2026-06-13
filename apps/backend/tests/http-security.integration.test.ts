@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import http, { type Server } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, test } from 'node:test';
 import { MAX_JSON_BODY_BYTES } from '../src/http/localAccess.js';
-import { resetDbForTests } from '../src/state/db.js';
+import { getDb, resetDbForTests } from '../src/state/db.js';
 import { createBackendServer } from '../src/index.js';
 
 type TestResponse = {
@@ -102,6 +103,135 @@ const request = async (input: {
   });
 };
 
+const writeFakeMagick = (toolsDir: string) => {
+  const extension = process.platform === 'win32' ? '.cmd' : '.sh';
+  const filePath = path.join(toolsDir, `magick-thumbnail${extension}`);
+  const script = process.platform === 'win32'
+    ? `@echo off
+if "%~1"=="identify" (
+  echo JPEG RW
+  exit /b 0
+)
+set "last="
+for %%A in (%*) do set "last=%%~A"
+echo preview > "%last%"
+exit /b 0
+`
+    : `#!/usr/bin/env sh
+if [ "$1" = "identify" ]; then
+  echo "JPEG RW"
+  exit 0
+fi
+last=""
+for arg in "$@"; do
+  last="$arg"
+done
+printf 'preview\\n' > "$last"
+`;
+
+  fs.mkdirSync(toolsDir, { recursive: true });
+  fs.writeFileSync(filePath, script, 'utf8');
+
+  if (process.platform !== 'win32') {
+    fs.chmodSync(filePath, 0o755);
+  }
+
+  return filePath;
+};
+
+const seedCompressionSession = (input: {
+  sourceDir: string;
+  outputDir: string;
+  relativePath: string;
+  imageMagickCommand: string;
+}) => {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const compressionSessionId = randomUUID();
+  const itemId = randomUUID();
+  const sourcePath = path.join(input.sourceDir, input.relativePath);
+  const outputPath = path.join(input.outputDir, input.relativePath);
+
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(sourcePath, 'source image');
+  fs.writeFileSync(outputPath, 'output image');
+
+  db.prepare(
+    `
+      INSERT INTO sessions (id, name, source_dir, output_dir, status, created_at, updated_at, last_opened_at)
+      VALUES (?, 'Compression source', ?, ?, 'completed', ?, ?, ?)
+    `
+  ).run(compressionSessionId, input.sourceDir, input.outputDir, now, now, now);
+
+  db.prepare(
+    `
+      INSERT INTO media_items (
+        id,
+        session_id,
+        source_path,
+        relative_path,
+        media_type,
+        source_kind_detected,
+        source_kind_override,
+        size_bytes,
+        capture_time,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, 'image', 'camera', NULL, 100, NULL, ?, ?)
+    `
+  ).run(itemId, compressionSessionId, sourcePath, input.relativePath, now, now);
+
+  db.prepare(
+    `
+      INSERT INTO item_decisions (
+        id,
+        session_id,
+        item_id,
+        selected_for_compression,
+        selected_for_output,
+        target_group_label,
+        user_overridden,
+        updated_at
+      ) VALUES (?, ?, ?, 1, 1, NULL, 0, ?)
+    `
+  ).run(randomUUID(), compressionSessionId, itemId, now);
+
+  db.prepare(
+    `
+      INSERT INTO item_stage_status (
+        id,
+        session_id,
+        item_id,
+        stage,
+        status,
+        attempt_count,
+        last_error,
+        updated_at
+      ) VALUES (?, ?, ?, 'compress', 'completed', 1, NULL, ?)
+    `
+  ).run(randomUUID(), compressionSessionId, itemId, now);
+
+  db.prepare(
+    `
+      INSERT INTO session_checkpoints (id, session_id, stage, cursor, payload_json, updated_at)
+      VALUES (?, ?, 'compress', NULL, ?, ?)
+    `
+  ).run(
+    randomUUID(),
+    compressionSessionId,
+    JSON.stringify({
+      outputRoot: input.outputDir,
+      manifest: {
+        imageMagickCommand: input.imageMagickCommand
+      }
+    }),
+    now
+  );
+
+  return compressionSessionId;
+};
+
 beforeEach(async () => {
   process.env.MEDIA_ORGANIZER_DATA_DIR = tempDataDir;
   process.env.MEDIA_ORGANIZER_DB_PATH = tempDbPath;
@@ -153,6 +283,45 @@ test('local CORS response reflects the local origin and never uses wildcard', as
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers['access-control-allow-origin'], origin);
   assert.notEqual(response.headers['access-control-allow-origin'], '*');
+});
+
+test('grouping thumbnail endpoint returns a cached JPEG preview', async () => {
+  const sourceDir = path.join(tempRoot, 'thumbnail-source');
+  const outputDir = path.join(tempRoot, 'thumbnail-output');
+  fs.rmSync(sourceDir, { recursive: true, force: true });
+  fs.rmSync(outputDir, { recursive: true, force: true });
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const imageMagickCommand = writeFakeMagick(path.join(tempRoot, 'thumbnail-tools'));
+  const compressionSessionId = seedCompressionSession({
+    sourceDir,
+    outputDir,
+    relativePath: 'photo.jpg',
+    imageMagickCommand
+  });
+
+  const workspaceResponse = await request({
+    method: 'POST',
+    path: '/api/grouping/workspace',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sourceDir,
+      outputDir,
+      compressionSessionId
+    })
+  });
+
+  assert.equal(workspaceResponse.statusCode, 201);
+  const workspace = JSON.parse(workspaceResponse.body) as { sessionId: string; items: Array<{ id: string }> };
+  const thumbnailResponse = await request({
+    path: `/api/grouping/${workspace.sessionId}/items/${workspace.items[0].id}/thumbnail`
+  });
+
+  assert.equal(thumbnailResponse.statusCode, 200);
+  assert.equal(thumbnailResponse.headers['content-type'], 'image/jpeg');
+  assert.equal(thumbnailResponse.headers['cache-control'], 'private, max-age=86400');
+  assert.equal(thumbnailResponse.body.trim(), 'preview');
 });
 
 test('backend health offline reports are logged for local diagnostics', async () => {

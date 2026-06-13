@@ -423,6 +423,7 @@ export const en = {
   'grouping.noTemplates': 'No templates yet.',
   'grouping.visibleFiles': '{count} visible files',
   'grouping.selectVisible': 'Select visible',
+  'grouping.showMoreMedia': 'Show more ({shown} / {total})',
   'grouping.loadingWorkspace': 'Loading workspace...',
   'grouping.noDate': 'No date',
   'grouping.preservedStructure': 'Keeps original structure',

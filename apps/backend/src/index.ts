@@ -29,6 +29,7 @@ import {
   deleteGroupingTemplate,
   getGroupingMediaPath,
   getGroupingPreviewPath,
+  getGroupingThumbnailPath,
   getGroupingWorkspace,
   GroupingPreviewError,
   listGroupingTemplates,
@@ -189,13 +190,30 @@ const getMediaContentType = (filePath: string) => {
 const streamMediaFile = (
   req: import('node:http').IncomingMessage,
   res: import('node:http').ServerResponse,
-  filePath: string
+  filePath: string,
+  cacheControl = 'private, max-age=3600'
 ) => {
   const stats = fs.statSync(filePath);
   const range = req.headers.range;
   const headersBase = {
     'Accept-Ranges': 'bytes',
+    'Cache-Control': cacheControl,
+    'Last-Modified': stats.mtime.toUTCString(),
     'Content-Type': getMediaContentType(filePath)
+  };
+
+  const pipeStream = (stream: fs.ReadStream) => {
+    req.on('aborted', () => stream.destroy());
+    stream.on('error', () => {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'error', message: 'Could not stream media file.' }));
+        return;
+      }
+
+      res.destroy();
+    });
+    stream.pipe(res);
   };
 
   if (!range) {
@@ -203,7 +221,7 @@ const streamMediaFile = (
       ...headersBase,
       'Content-Length': stats.size
     });
-    fs.createReadStream(filePath).pipe(res);
+    pipeStream(fs.createReadStream(filePath));
     return;
   }
 
@@ -232,7 +250,7 @@ const streamMediaFile = (
     'Content-Length': end - start + 1,
     'Content-Range': `bytes ${start}-${end}/${stats.size}`
   });
-  fs.createReadStream(filePath, { start, end }).pipe(res);
+  pipeStream(fs.createReadStream(filePath, { start, end }));
 };
 
 export const createBackendServer = (appliedMigrations = runMigrations()) => {
@@ -685,6 +703,34 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not stream media preview.'
+        });
+      }
+
+      return;
+    }
+
+    if (req.method === 'GET' && subPath === 'items' && subId && tailPath === 'thumbnail') {
+      try {
+        const media = getGroupingThumbnailPath(sessionId, subId);
+
+        if (!media || !fs.existsSync(media.path)) {
+          sendJson(res, 404, { status: 'not_found' });
+          return;
+        }
+
+        streamMediaFile(req, res, media.path, 'private, max-age=86400');
+      } catch (error) {
+        if (error instanceof GroupingPreviewError) {
+          sendJson(res, 422, {
+            status: 'preview_unavailable',
+            message: error.message
+          });
+          return;
+        }
+
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not stream media thumbnail.'
         });
       }
 

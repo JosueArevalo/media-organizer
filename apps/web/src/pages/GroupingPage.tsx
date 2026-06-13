@@ -11,6 +11,7 @@ import {
   assignGroupingItemsRequest,
   buildGroupingMediaUrl,
   buildGroupingPreviewUrl,
+  buildGroupingThumbnailUrl,
   createGroupingFolderFromTemplateRequest,
   createGroupingFolderRequest,
   createGroupingTemplateRequest,
@@ -155,6 +156,8 @@ type GroupingView = 'setup' | 'review';
 
 const DEFAULT_SINGLE_DATE_HANDLING: GroupingSingleDateHandling = 'year-unique';
 const DEFAULT_SOURCE_FOLDER_MODE: GroupingSourceFolderMode = 'nearest-folder';
+const GROUPING_GRID_INITIAL_LIMIT = 160;
+const GROUPING_GRID_INCREMENT = 160;
 const VERIFICATION_STATUS_KEYS: Record<ExecutionVerification['status'], TranslationKey> = {
   ok: 'verification.status.ok',
   mismatch: 'verification.status.mismatch',
@@ -199,6 +202,96 @@ const getDirectoryPath = (relativePath: string) => {
   const segments = normalized.split('/').filter(Boolean);
   segments.pop();
   return segments.join('/');
+};
+
+const getFileExtensionLabel = (fileName: string, fallback: string) => {
+  const extension = fileName.split('.').pop()?.trim();
+  return extension ? extension.toUpperCase() : fallback;
+};
+
+type GroupingMediaPreviewProps = {
+  item: GroupingWorkspaceItem;
+  imageThumbnailUrl: string;
+  videoMediaUrl: string;
+  hasPreviewFailed: boolean;
+  previewUnavailableLabel: string;
+  onPreviewFailed: (itemId: string) => void;
+  onOpenPreview: () => void;
+};
+
+const GroupingMediaPreview = ({
+  item,
+  imageThumbnailUrl,
+  videoMediaUrl,
+  hasPreviewFailed,
+  previewUnavailableLabel,
+  onPreviewFailed,
+  onOpenPreview
+}: GroupingMediaPreviewProps) => {
+  const previewRef = useRef<HTMLButtonElement | null>(null);
+  const [shouldLoadVideo, setShouldLoadVideo] = useState(false);
+  const formatLabel = getFileExtensionLabel(item.fileName, item.mediaType === 'video' ? 'VIDEO' : 'FILE');
+
+  useEffect(() => {
+    setShouldLoadVideo(false);
+  }, [item.id]);
+
+  useEffect(() => {
+    if (item.mediaType !== 'video' || hasPreviewFailed) {
+      return;
+    }
+
+    const element = previewRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setShouldLoadVideo(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldLoadVideo(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '320px 0px' }
+    );
+
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, [hasPreviewFailed, item.mediaType]);
+
+  return (
+    <button ref={previewRef} className="grouping-media-preview" type="button" onDoubleClick={onOpenPreview}>
+      {item.mediaType === 'image' && !hasPreviewFailed ? (
+        <img src={imageThumbnailUrl} alt={item.fileName} loading="lazy" onError={() => onPreviewFailed(item.id)} />
+      ) : item.mediaType === 'image' ? (
+        <span>{previewUnavailableLabel}</span>
+      ) : item.mediaType === 'video' && !hasPreviewFailed ? (
+        <>
+          {shouldLoadVideo ? (
+            <video src={videoMediaUrl} muted playsInline preload="metadata" onError={() => onPreviewFailed(item.id)} />
+          ) : (
+            <span>{formatLabel}</span>
+          )}
+          <span className="grouping-media-type-badge">{formatLabel}</span>
+        </>
+      ) : item.mediaType === 'video' ? (
+        <>
+          <span>{formatLabel}</span>
+          <span className="grouping-media-type-badge">{formatLabel}</span>
+        </>
+      ) : (
+        <span>{formatLabel}</span>
+      )}
+    </button>
+  );
 };
 
 const ensureDirectoryNode = (root: GroupingDirectoryNode, directoryPath: string) => {
@@ -354,6 +447,8 @@ export const GroupingPage = () => {
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(new Set());
+  const [failedThumbnailIds, setFailedThumbnailIds] = useState<Set<string>>(new Set());
+  const [renderedItemLimit, setRenderedItemLimit] = useState(GROUPING_GRID_INITIAL_LIMIT);
   const [marqueeSelection, setMarqueeSelection] = useState<MarqueeSelection | null>(null);
   const [verification, setVerification] = useState<ExecutionVerification | null>(null);
 
@@ -456,6 +551,10 @@ export const GroupingPage = () => {
     setView('review');
   }, [isGroupingCompleted]);
 
+  useEffect(() => {
+    setRenderedItemLimit(GROUPING_GRID_INITIAL_LIMIT);
+  }, [activeFolderLabel, searchTerm, workspace?.sessionId]);
+
   const preservedFolderScopes = useMemo<PreservedFolderScope[]>(() => {
     if (!workspace) {
       return [];
@@ -505,6 +604,13 @@ export const GroupingPage = () => {
       return matchesSearch;
     });
   }, [folderScopeItems, searchTerm]);
+
+  const renderedItems = useMemo(
+    () => visibleItems.slice(0, renderedItemLimit),
+    [renderedItemLimit, visibleItems]
+  );
+
+  const canRenderMoreItems = renderedItems.length < visibleItems.length;
 
   const previewItem = useMemo(() => {
     if (!workspace || !previewItemId) {
@@ -794,6 +900,10 @@ export const GroupingPage = () => {
 
   const markPreviewFailed = (itemId: string) => {
     setFailedPreviewIds((current) => new Set(current).add(itemId));
+  };
+
+  const markThumbnailFailed = (itemId: string) => {
+    setFailedThumbnailIds((current) => new Set(current).add(itemId));
   };
 
   const getMarqueePoint = (event: PointerEvent<HTMLElement>): Point | null => {
@@ -1459,12 +1569,12 @@ export const GroupingPage = () => {
                   }}
                 />
               )}
-              {visibleItems.map((item) => {
+              {renderedItems.map((item) => {
                 const isSelected = selectedIds.has(item.id);
                 const canEditItem = canMutateGrouping && !item.preservedStructure;
+                const itemThumbnailUrl = workspace ? buildGroupingThumbnailUrl(workspace.sessionId, item.id) : '';
                 const itemMediaUrl = workspace ? buildGroupingMediaUrl(workspace.sessionId, item.id) : '';
-                const itemPreviewUrl = workspace ? buildGroupingPreviewUrl(workspace.sessionId, item.id) : '';
-                const hasPreviewFailed = failedPreviewIds.has(item.id);
+                const hasThumbnailFailed = failedThumbnailIds.has(item.id);
 
                 return (
                   <article
@@ -1481,17 +1591,15 @@ export const GroupingPage = () => {
                         }
                       : undefined}
                   >
-                    <button className="grouping-media-preview" type="button" onDoubleClick={() => setPreviewItemId(item.id)}>
-                      {item.mediaType === 'image' && !hasPreviewFailed ? (
-                        <img src={itemPreviewUrl} alt={item.fileName} loading="lazy" onError={() => markPreviewFailed(item.id)} />
-                      ) : item.mediaType === 'image' ? (
-                        <span>{t('grouping.previewUnavailable')}</span>
-                      ) : item.mediaType === 'video' ? (
-                        <video src={itemMediaUrl} muted preload="metadata" />
-                      ) : (
-                        <span>{item.fileName.split('.').pop()?.toUpperCase() ?? 'FILE'}</span>
-                      )}
-                    </button>
+                    <GroupingMediaPreview
+                      item={item}
+                      imageThumbnailUrl={itemThumbnailUrl}
+                      videoMediaUrl={itemMediaUrl}
+                      hasPreviewFailed={hasThumbnailFailed}
+                      previewUnavailableLabel={t('grouping.previewUnavailable')}
+                      onPreviewFailed={markThumbnailFailed}
+                      onOpenPreview={() => setPreviewItemId(item.id)}
+                    />
                     <div className="grouping-media-meta">
                       <strong title={item.fileName}>{item.fileName}</strong>
                       <span>{item.captureDate ?? t('grouping.noDate')} - {formatBytes(item.sizeBytes)}</span>
@@ -1500,6 +1608,20 @@ export const GroupingPage = () => {
                   </article>
                 );
               })}
+            </div>
+          )}
+          {!isLoading && canRenderMoreItems && (
+            <div className="grouping-load-more">
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => setRenderedItemLimit((current) => current + GROUPING_GRID_INCREMENT)}
+              >
+                {t('grouping.showMoreMedia', {
+                  shown: renderedItems.length,
+                  total: visibleItems.length
+                })}
+              </button>
             </div>
           )}
         </section>
