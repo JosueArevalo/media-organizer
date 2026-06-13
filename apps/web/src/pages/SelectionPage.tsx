@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFolderSelections } from '../hooks/useFolderSelections';
+import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useTranslation } from '../i18n';
 import {
   loadFolderSelectionHandle,
@@ -12,6 +13,7 @@ import {
 } from '../services/folder-selection.store';
 import { notifyCompletion } from '../services/completion-notification.service';
 import { scanSourceTreeRequest } from '../services/source-tree.service';
+import { isPreCompressionStepReadOnly } from '../services/workflow-locks';
 
 type SelectionMode = 'files' | 'directories';
 type ScopePreset = 'all' | 'whatsapp' | 'camera' | 'custom';
@@ -416,6 +418,8 @@ export const SelectionPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { sourceSelection, destinationSelection } = useFolderSelections();
+  const compressionSessionState = useCompressionSessionState();
+  const isWorkflowReadOnly = isPreCompressionStepReadOnly(compressionSessionState);
   const [scanState, setScanState] = useState<ScanState>({ status: 'idle', root: null, error: null });
   const [mode, setMode] = useState<SelectionMode>('files');
   const [activePreset, setActivePreset] = useState<ScopePreset>('all');
@@ -523,7 +527,7 @@ export const SelectionPage = () => {
   ]);
 
   useEffect(() => {
-    if (scanState.status !== 'ready' || !scanState.root) {
+    if (isWorkflowReadOnly || scanState.status !== 'ready' || !scanState.root) {
       return;
     }
 
@@ -538,7 +542,7 @@ export const SelectionPage = () => {
       mode,
       expandedDirectories: sortPaths(expandedDirectories)
     });
-  }, [scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles, activePreset, mode, expandedDirectories]);
+  }, [isWorkflowReadOnly, scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles, activePreset, mode, expandedDirectories]);
 
   const totalBytes = summary ? summary.includedBytes + summary.excludedBytes : 0;
   const totalFiles = summary ? summary.includedFiles + summary.excludedFiles : 0;
@@ -565,6 +569,10 @@ export const SelectionPage = () => {
   };
 
   const handlePreset = (preset: ScopePreset) => {
+    if (isWorkflowReadOnly) {
+      return;
+    }
+
     setActivePreset(preset);
 
     if (scanState.status !== 'ready' || !scanState.root) {
@@ -579,6 +587,10 @@ export const SelectionPage = () => {
   };
 
   const toggleDirectory = (path: string, isExcluded: boolean, parentExcluded: boolean) => {
+    if (isWorkflowReadOnly) {
+      return;
+    }
+
     setActivePreset('custom');
 
     setExcludedDirectories((current) => {
@@ -621,6 +633,10 @@ export const SelectionPage = () => {
   };
 
   const toggleFile = (path: string, isExcluded: boolean, parentExcluded: boolean) => {
+    if (isWorkflowReadOnly) {
+      return;
+    }
+
     setActivePreset('custom');
 
     setExcludedFiles((current) => {
@@ -653,6 +669,7 @@ export const SelectionPage = () => {
       <div className="page-header">
         <h2 className="page-title">{t('selection.title')}</h2>
         <p className="page-subtitle">{t('selection.subtitle')}</p>
+        {isWorkflowReadOnly && <p className="page-summary-note compression-warning">{t('workflow.readOnlyNotice')}</p>}
       </div>
 
       <div className="selection-top-grid">
@@ -674,13 +691,19 @@ export const SelectionPage = () => {
         <article className="page-card elevated selection-hero-card">
           <p className="page-section-title">{t('selection.scopePresets')}</p>
           <div className="page-pill-row">
-            <button className={`selection-pill ${activePreset === 'all' ? 'is-active' : ''}`} type="button" onClick={() => handlePreset('all')}>
+            <button
+              className={`selection-pill ${activePreset === 'all' ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => handlePreset('all')}
+              disabled={isWorkflowReadOnly}
+            >
               {t('selection.preset.keepEverything')}
             </button>
             <button
               className={`selection-pill ${activePreset === 'whatsapp' ? 'is-active' : ''}`}
               type="button"
               onClick={() => handlePreset('whatsapp')}
+              disabled={isWorkflowReadOnly}
             >
               {t('selection.preset.excludeWhatsapp')}
             </button>
@@ -688,13 +711,19 @@ export const SelectionPage = () => {
               className={`selection-pill ${activePreset === 'camera' ? 'is-active' : ''}`}
               type="button"
               onClick={() => handlePreset('camera')}
+              disabled={isWorkflowReadOnly}
             >
               {t('selection.preset.cameraFocused')}
             </button>
             <button
               className={`selection-pill ${activePreset === 'custom' ? 'is-active' : ''}`}
               type="button"
-              onClick={() => setActivePreset('custom')}
+              onClick={() => {
+                if (!isWorkflowReadOnly) {
+                  setActivePreset('custom');
+                }
+              }}
+              disabled={isWorkflowReadOnly}
             >
               {t('selection.preset.custom')}
             </button>
@@ -786,6 +815,7 @@ export const SelectionPage = () => {
                               type="checkbox"
                               checked={!row.isExcluded}
                               onChange={() => toggleDirectory(row.entry.path, row.isExcluded, row.parentExcluded)}
+                              disabled={isWorkflowReadOnly}
                             />
                             <div className="selection-tree-copy">
                               <div className="selection-row-head">
@@ -816,6 +846,7 @@ export const SelectionPage = () => {
                           type="checkbox"
                           checked={!row.isExcluded}
                           onChange={() => toggleFile(row.entry.path, row.isExcluded, row.parentExcluded)}
+                          disabled={isWorkflowReadOnly}
                         />
                         <div className="selection-tree-copy">
                           <div className="selection-row-head">

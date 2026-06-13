@@ -39,6 +39,7 @@ export const en = {
   'workflow.export.description': 'Copy to a backup target',
   'workflow.lockedTitle': 'Complete previous steps to unlock',
   'workflow.ariaLabel': 'Workflow steps',
+  'workflow.readOnlyNotice': 'This session has already started. You can review these values, but start a new session to change them.',
 
   'dashboard.status': 'Status',
   'dashboard.status.running': 'In progress',
@@ -405,6 +406,7 @@ export const en = {
   'grouping.applying': 'Applying...',
   'grouping.apply': 'Apply organization',
   'grouping.editSetup': 'Edit setup',
+  'grouping.exportActiveReadOnlyNotice': 'An export is active for this grouping. Pause or finish that export before changing the organization.',
   'grouping.unavailable': 'Grouping is available after compression completes and source/destination folders are selected.',
   'grouping.searchPlaceholder': 'Search media',
   'grouping.newFolder': 'New folder',

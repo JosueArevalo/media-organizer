@@ -19,6 +19,7 @@ type FolderPickerCardProps = {
   onClear: () => void;
   inputRef?: React.Ref<HTMLInputElement>;
   onPathInputKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+  isReadOnly?: boolean;
 };
 
 const formatTimestamp = (timestamp: number) =>
@@ -37,7 +38,8 @@ export const FolderPickerCard = ({
   onBrowse,
   onClear,
   inputRef,
-  onPathInputKeyDown
+  onPathInputKeyDown,
+  isReadOnly = false
 }: FolderPickerCardProps) => {
   const { t } = useTranslation();
   const [inputValue, setInputValue] = useState(selection?.path ?? '');
@@ -49,6 +51,10 @@ export const FolderPickerCard = ({
   }, [selection?.path]);
 
   const handleInputChange = (val: string) => {
+    if (isReadOnly) {
+      return;
+    }
+
     setInputValue(val);
     setBrowseMessage(null);
 
@@ -60,12 +66,20 @@ export const FolderPickerCard = ({
   };
 
   const handleClear = () => {
+    if (isReadOnly) {
+      return;
+    }
+
     setInputValue('');
     setBrowseMessage(null);
     onClear();
   };
 
   const handleBrowse = async () => {
+    if (isReadOnly) {
+      return;
+    }
+
     setIsBrowsing(true);
     setBrowseMessage(null);
 
@@ -117,6 +131,8 @@ export const FolderPickerCard = ({
                   onChange={(event) => handleInputChange(event.target.value)}
                   onKeyDown={onPathInputKeyDown}
                   placeholder={t('folder.pathPlaceholder')}
+                  readOnly={isReadOnly}
+                  disabled={isReadOnly}
                 />
                 {selection && (
                   <button
@@ -124,6 +140,7 @@ export const FolderPickerCard = ({
                     type="button"
                     aria-label={t('folder.clearAria')}
                     onClick={handleClear}
+                    disabled={isReadOnly}
                   >
                     x
                   </button>
@@ -136,7 +153,7 @@ export const FolderPickerCard = ({
                 className="btn btn-secondary folder-picker-button"
                 type="button"
                 onClick={() => void handleBrowse()}
-                disabled={isBrowsing}
+                disabled={isBrowsing || isReadOnly}
               >
                 {isBrowsing ? t('folder.openingPicker') : t('folder.choose', { title: title.toLowerCase() })}
               </button>

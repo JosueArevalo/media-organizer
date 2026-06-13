@@ -41,6 +41,7 @@ export const es: TranslationDictionary = {
   'workflow.export.description': 'Copia a un destino de backup',
   'workflow.lockedTitle': 'Completa los pasos anteriores para desbloquear',
   'workflow.ariaLabel': 'Pasos del flujo',
+  'workflow.readOnlyNotice': 'Esta sesion ya empezo. Puedes revisar estos valores, pero inicia una nueva sesion para cambiarlos.',
 
   'dashboard.status': 'Estado',
   'dashboard.status.running': 'En progreso',
@@ -408,6 +409,7 @@ export const es: TranslationDictionary = {
   'grouping.apply': 'Aplicar organización',
   'grouping.editSetup': 'Editar preparación',
   'grouping.unavailable': 'Agrupar está disponible después de completar la compresión y seleccionar carpetas de origen/destino.',
+  'grouping.exportActiveReadOnlyNotice': 'Hay una exportacion activa para esta agrupacion. Pausa o termina esa exportacion antes de cambiar la organizacion.',
   'grouping.searchPlaceholder': 'Buscar medios',
   'grouping.newFolder': 'Nueva carpeta',
   'grouping.moveSelected': 'Mover selección',

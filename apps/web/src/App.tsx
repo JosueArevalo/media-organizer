@@ -18,23 +18,8 @@ import { useCompletionNotifications } from './hooks/useCompletionNotifications';
 const isCompressionUsableForGrouping = (status: ReturnType<typeof useCompressionSessionState>['status']) =>
   status === 'completed' || status === 'failed';
 
-const RedirectCompletedWorkflow = ({ children }: { children: JSX.Element }) => {
-  const groupingSessionState = useGroupingSessionState();
-
-  if (groupingSessionState.status === 'completed') {
-    return <Navigate to="/export" replace />;
-  }
-
-  return children;
-};
-
 const GuardedWorkflowStep = ({ children }: { children: JSX.Element }) => {
   const isImportStepComplete = useImportStepCompletion();
-  const groupingSessionState = useGroupingSessionState();
-
-  if (groupingSessionState.status === 'completed') {
-    return <Navigate to="/export" replace />;
-  }
 
   if (!isImportStepComplete) {
     return <Navigate to="/import" replace />;
@@ -89,11 +74,7 @@ const App = () => {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route
             path="/import"
-            element={
-              <RedirectCompletedWorkflow>
-                <ImportPage />
-              </RedirectCompletedWorkflow>
-            }
+            element={<ImportPage />}
           />
           <Route path="/settings" element={<SettingsPage />} />
           <Route
