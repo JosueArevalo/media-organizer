@@ -14,5 +14,15 @@ test('Grouping grid uses thumbnails and keeps full media for the modal', () => {
   assert.match(pageSource, /itemThumbnailUrl/);
   assert.match(pageSource, /buildGroupingPreviewUrl\(workspace\.sessionId, previewItem\.id\)/);
   assert.match(pageSource, /GROUPING_GRID_INITIAL_LIMIT/);
-  assert.doesNotMatch(pageSource, /<video src=\{itemMediaUrl\}/);
+  assert.match(pageSource, /const GroupingMediaPreview =/);
+  assert.match(pageSource, /IntersectionObserver/);
+  assert.match(pageSource, /grouping-media-type-badge/);
+
+  const previewComponentStart = pageSource.indexOf('const GroupingMediaPreview =');
+  const previewComponentEnd = pageSource.indexOf('const ensureDirectoryNode', previewComponentStart);
+  const previewComponentSource = pageSource.slice(previewComponentStart, previewComponentEnd);
+
+  assert.match(previewComponentSource, /<video src=\{videoMediaUrl\} muted playsInline preload="metadata"/);
+  assert.doesNotMatch(previewComponentSource, /controls/);
+  assert.doesNotMatch(previewComponentSource, /autoPlay/);
 });

@@ -2873,6 +2873,12 @@ body {
   gap: 12px;
 }
 
+.grouping-load-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 16px;
+}
+
 .grouping-marquee {
   position: absolute;
   z-index: 5;
@@ -2921,6 +2927,7 @@ body {
 }
 
 .grouping-media-preview {
+  position: relative;
   width: 100%;
   aspect-ratio: 1;
   border: 0;
@@ -2945,6 +2952,22 @@ body {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.grouping-media-type-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #ffffff !important;
+  font-size: 10px !important;
+  line-height: 1;
+  letter-spacing: 0;
+  padding: 4px 6px;
+  pointer-events: none;
 }
 
 .grouping-media-meta {

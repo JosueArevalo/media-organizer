@@ -425,6 +425,7 @@ export const es: TranslationDictionary = {
   'grouping.noTemplates': 'Aún no hay plantillas.',
   'grouping.visibleFiles': '{count} archivos visibles',
   'grouping.selectVisible': 'Seleccionar visibles',
+  'grouping.showMoreMedia': 'Mostrar mas ({shown} / {total})',
   'grouping.loadingWorkspace': 'Cargando espacio de trabajo...',
   'grouping.noDate': 'Sin fecha',
   'grouping.preservedStructure': 'Mantiene estructura original',

@@ -111,6 +111,8 @@ const HEIC_EXTENSIONS = new Set(['.heic', '.heif']);
 const WEB_SAFE_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
 const PREVIEW_MAX_SIZE = '2400x2400';
 const PREVIEW_QUALITY = '85';
+const THUMBNAIL_MAX_SIZE = '360x360';
+const THUMBNAIL_QUALITY = '78';
 
 export class GroupingPreviewError extends Error {
   constructor(message: string) {
@@ -1438,7 +1440,11 @@ export const getGroupingMediaPath = (sessionId: string, itemId: string) => {
   };
 };
 
-const getPreviewFileName = (itemId: string) => `${itemId.replace(/[^a-zA-Z0-9_-]/g, '_')}.jpg`;
+const getSafePreviewId = (itemId: string) => itemId.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+const getPreviewFileName = (itemId: string) => `${getSafePreviewId(itemId)}.jpg`;
+
+const getThumbnailFileName = (itemId: string) => `${getSafePreviewId(itemId)}-thumb.jpg`;
 
 const runImageMagick = (imageMagickCommand: string, args: string[]) =>
   spawnSync(imageMagickCommand, args, {
@@ -1465,30 +1471,51 @@ const ensureHeicPreviewSupport = (imageMagickCommand: string) => {
   }
 };
 
-const generateHeicPreview = (imageMagickCommand: string, sourcePath: string, previewPath: string) => {
-  ensureHeicPreviewSupport(imageMagickCommand);
-  fs.mkdirSync(path.dirname(previewPath), { recursive: true });
+const generateImageDerivative = (input: {
+  imageMagickCommand: string;
+  sourcePath: string;
+  outputPath: string;
+  maxSize: string;
+  quality: string;
+  verifyHeicSupport: boolean;
+}) => {
+  if (input.verifyHeicSupport) {
+    ensureHeicPreviewSupport(input.imageMagickCommand);
+  }
 
-  const result = runImageMagick(imageMagickCommand, [
-    sourcePath,
+  fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
+
+  const result = runImageMagick(input.imageMagickCommand, [
+    input.sourcePath,
     '-auto-orient',
     '-colorspace',
     'sRGB',
     '-resize',
-    PREVIEW_MAX_SIZE,
+    input.maxSize,
     '-quality',
-    PREVIEW_QUALITY,
-    previewPath
+    input.quality,
+    input.outputPath
   ]);
 
   if (result.error) {
-    throw new GroupingPreviewError(`ImageMagick command not found: ${imageMagickCommand}`);
+    throw new GroupingPreviewError(`ImageMagick command not found: ${input.imageMagickCommand}`);
   }
 
   if (result.status !== 0) {
     const stderr = (result.stderr ?? '').trim();
-    throw new GroupingPreviewError(stderr || 'Could not generate HEIC preview.');
+    throw new GroupingPreviewError(stderr || 'Could not generate media preview.');
   }
+};
+
+const generateHeicPreview = (imageMagickCommand: string, sourcePath: string, previewPath: string) => {
+  generateImageDerivative({
+    imageMagickCommand,
+    sourcePath,
+    outputPath: previewPath,
+    maxSize: PREVIEW_MAX_SIZE,
+    quality: PREVIEW_QUALITY,
+    verifyHeicSupport: true
+  });
 };
 
 const isPreviewFresh = (sourcePath: string, previewPath: string) => {
@@ -1553,6 +1580,58 @@ export const getGroupingPreviewPath = (sessionId: string, itemId: string) => {
 
   return {
     path: previewPath,
+    mediaType: item.mediaType
+  };
+};
+
+export const getGroupingThumbnailPath = (sessionId: string, itemId: string) => {
+  const workspace = getGroupingWorkspace(sessionId);
+
+  if (!workspace) {
+    return null;
+  }
+
+  const item = workspace.items.find((candidate) => candidate.id === itemId);
+
+  if (!item || item.mediaType !== 'image') {
+    return null;
+  }
+
+  const extension = path.extname(item.outputPath).toLowerCase();
+
+  if (!IMAGE_EXTENSIONS.has(extension)) {
+    return null;
+  }
+
+  if (!isPathInside(workspace.outputDir, item.outputPath)) {
+    throw new Error('Refusing to read media outside the destination folder.');
+  }
+
+  if (!fs.existsSync(item.outputPath)) {
+    return null;
+  }
+
+  const thumbnailPath = path.join(workspace.outputDir, '.media-organizer', 'previews', sessionId, getThumbnailFileName(item.id));
+
+  if (!isPathInside(workspace.outputDir, thumbnailPath)) {
+    throw new Error('Refusing to write preview outside the destination folder.');
+  }
+
+  if (!isPreviewFresh(item.outputPath, thumbnailPath)) {
+    const compressionManifest = getCompressionManifest(workspace.compressionSessionId);
+    const imageMagickCommand = compressionManifest?.imageMagickCommand?.trim() || 'magick';
+    generateImageDerivative({
+      imageMagickCommand,
+      sourcePath: item.outputPath,
+      outputPath: thumbnailPath,
+      maxSize: THUMBNAIL_MAX_SIZE,
+      quality: THUMBNAIL_QUALITY,
+      verifyHeicSupport: HEIC_EXTENSIONS.has(extension)
+    });
+  }
+
+  return {
+    path: thumbnailPath,
     mediaType: item.mediaType
   };
 };
