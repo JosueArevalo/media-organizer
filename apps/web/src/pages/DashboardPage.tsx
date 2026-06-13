@@ -37,15 +37,12 @@ const formatDateTime = (value: string | null) => {
   }).format(date);
 };
 
-const formatDuration = (start: string, end: string | null, t: (key: TranslationKey) => string) => {
-  const startMs = new Date(start).getTime();
-  const endMs = end ? new Date(end).getTime() : Date.now();
-
-  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
+const formatDurationMs = (durationMs: number, t: (key: TranslationKey) => string) => {
+  if (!Number.isFinite(durationMs) || durationMs < 0) {
     return '-';
   }
 
-  const totalSeconds = Math.max(0, Math.round((endMs - startMs) / 1000));
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
@@ -64,6 +61,28 @@ const formatDuration = (start: string, end: string | null, t: (key: TranslationK
   }
 
   return parts.join(' ');
+};
+
+const formatCompressionDuration = (execution: DashboardExecution, t: (key: TranslationKey) => string) => {
+  if (typeof execution.compressionActiveDurationMs === 'number') {
+    const activeStartedAtMs = execution.compressionActiveStartedAt
+      ? new Date(execution.compressionActiveStartedAt).getTime()
+      : null;
+    const activeDurationMs = activeStartedAtMs !== null && !Number.isNaN(activeStartedAtMs)
+      ? Date.now() - activeStartedAtMs
+      : 0;
+
+    return formatDurationMs(execution.compressionActiveDurationMs + activeDurationMs, t);
+  }
+
+  const startMs = new Date(execution.startedAt).getTime();
+  const endMs = execution.finishedAt ? new Date(execution.finishedAt).getTime() : Date.now();
+
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
+    return '-';
+  }
+
+  return formatDurationMs(endMs - startMs, t);
 };
 
 const basename = (value: string) => value.split(/[\\/]/).filter(Boolean).pop() ?? value;
@@ -651,7 +670,7 @@ export const DashboardPage = () => {
                         <div className="dashboard-compression-row dashboard-compression-row-timing">
                           <p><strong>{t('dashboard.compressionStarted')}</strong><br />{formatDateTime(execution.startedAt)}</p>
                           <p><strong>{t('dashboard.compressionFinished')}</strong><br />{formatDateTime(execution.finishedAt)}</p>
-                          <p><strong>{t('dashboard.compressionDuration')}</strong><br />{formatDuration(execution.startedAt, execution.finishedAt, t)}</p>
+                          <p><strong>{t('dashboard.compressionDuration')}</strong><br />{formatCompressionDuration(execution, t)}</p>
                         </div>
                         <div className="dashboard-compression-row dashboard-compression-row-profiles">
                           <p>

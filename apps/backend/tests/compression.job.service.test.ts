@@ -229,6 +229,19 @@ test('startCompressionSession creates a resumable session and output scaffold', 
   assert.equal(checkpointRows.length, 1);
   assert.equal(checkpointRows[0].stage, 'compress');
   assert.ok(checkpointRows[0].payload_json?.includes('outputRoot'));
+
+  const checkpointPayload = JSON.parse(checkpointRows[0].payload_json ?? '{}') as {
+    timing?: { segments?: Array<{ startedAt: string; endedAt?: string }> };
+  };
+  assert.equal(checkpointPayload.timing?.segments?.length, 1);
+  assert.equal(checkpointPayload.timing?.segments?.[0].startedAt, result.session.createdAt);
+  assert.equal(checkpointPayload.timing?.segments?.[0].endedAt, undefined);
+
+  const historyRow = db.prepare(
+    'SELECT compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
+  ).get(result.session.id) as { compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+  assert.equal(historyRow.compression_active_duration_ms, 0);
+  assert.equal(historyRow.compression_active_started_at, result.session.createdAt);
 });
 
 test('compression resume commands use skip files instead of inline JSON arguments', async () => {
@@ -633,14 +646,40 @@ test('pauseCompressionSession stops active compression and resume processes pend
   assert.equal(getCompressionSession(started.session.id)?.session.status, 'paused');
   assert.equal(pausedProgress?.currentlyProcessing.length, 0);
   assert.equal(pausedProgress?.failed, 0);
+  const db = getDb();
+  const pausedHistory = db.prepare(
+    'SELECT compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
+  ).get(started.session.id) as { compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+  assert.equal(pausedHistory.compression_active_started_at, null);
+  assert.equal(typeof pausedHistory.compression_active_duration_ms, 'number');
+  assert.ok((pausedHistory.compression_active_duration_ms ?? 0) > 0);
+
+  const pausedCheckpoint = db.prepare(
+    'SELECT payload_json FROM session_checkpoints WHERE session_id = ? AND stage = ?'
+  ).get(started.session.id, 'compress') as { payload_json: string | null };
+  const pausedPayload = JSON.parse(pausedCheckpoint.payload_json ?? '{}') as {
+    timing?: { segments?: Array<{ endedAt?: string; reason?: string }> };
+  };
+  assert.equal(pausedPayload.timing?.segments?.at(-1)?.reason, 'pause');
+  assert.equal(typeof pausedPayload.timing?.segments?.at(-1)?.endedAt, 'string');
 
   markCompressionSessionRunning(started.session.id);
+  const resumedHistory = db.prepare(
+    'SELECT compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
+  ).get(started.session.id) as { compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+  assert.equal(resumedHistory.compression_active_duration_ms, pausedHistory.compression_active_duration_ms);
+  assert.equal(typeof resumedHistory.compression_active_started_at, 'string');
   await executeCompressionSession(started.session.id);
 
   const finalProgress = getCompressionProgress(started.session.id);
   assert.equal(finalProgress?.status, 'completed');
   assert.equal(finalProgress?.completed, 2);
   assert.equal(finalProgress?.failed, 0);
+  const completedHistory = db.prepare(
+    'SELECT compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
+  ).get(started.session.id) as { compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+  assert.equal(completedHistory.compression_active_started_at, null);
+  assert.ok((completedHistory.compression_active_duration_ms ?? 0) >= (pausedHistory.compression_active_duration_ms ?? 0));
 });
 
 test('compression progress falls back to absolute display paths outside the source directory', async () => {
@@ -920,6 +959,12 @@ test('fatal compression resume errors preserve existing failed item counts', asy
   const checkpointPayload = JSON.parse(getCompressionSession(started.session.id)?.checkpoint?.payloadJson ?? '{}');
   assert.equal(checkpointPayload.summary.failedItems, 2);
   assert.equal(checkpointPayload.fatalError, 'spawn ENAMETOOLONG');
+  assert.equal(checkpointPayload.timing.segments.at(-1).reason, 'fail');
+  const historyRow = getDb().prepare(
+    'SELECT compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
+  ).get(started.session.id) as { compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+  assert.equal(historyRow.compression_active_started_at, null);
+  assert.equal(typeof historyRow.compression_active_duration_ms, 'number');
 });
 
 test('interrupted compression sessions pause on startup and resume only unconfirmed image outputs', async () => {
@@ -1043,6 +1088,7 @@ test('interrupted compression sessions pause on startup and resume only unconfir
         failedCopyCount: 0
       },
       activeItems: [{ id: interruptedSource, sourcePath: interruptedSource, operation: 'compress', startedAt: Date.now() }],
+      timing: { segments: [{ startedAt: started.session.createdAt }] },
       processedItems: completedItems.map((name) => ({
         source: path.join(scopedSourceDir, name),
         output: path.join(scopedOutputDir, name),
@@ -1057,6 +1103,16 @@ test('interrupted compression sessions pause on startup and resume only unconfir
   assert.ok(reconcileInterruptedCompressionSessions() >= 1);
   assert.equal(getCompressionSession(started.session.id)?.session.status, 'paused');
   assert.equal(getCompressionProgress(started.session.id)?.currentlyProcessing.length, 0);
+  const interruptedPayload = JSON.parse(getCompressionSession(started.session.id)?.checkpoint?.payloadJson ?? '{}') as {
+    timing?: { segments?: Array<{ endedAt?: string; reason?: string }> };
+  };
+  assert.equal(interruptedPayload.timing?.segments?.at(-1)?.reason, 'interrupted');
+  assert.equal(typeof interruptedPayload.timing?.segments?.at(-1)?.endedAt, 'string');
+  const interruptedHistory = db.prepare(
+    'SELECT compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
+  ).get(started.session.id) as { compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+  assert.equal(interruptedHistory.compression_active_started_at, null);
+  assert.equal(typeof interruptedHistory.compression_active_duration_ms, 'number');
 
   markCompressionSessionRunning(started.session.id);
   await executeCompressionSession(started.session.id);

@@ -34,6 +34,8 @@ export type DashboardExecution = {
   failedItems: number;
   originalBytes: number | null;
   finalBytes: number | null;
+  compressionActiveDurationMs: number | null;
+  compressionActiveStartedAt: string | null;
   imageProfileLabel: string | null;
   imageQuality: number | null;
   videoPresetLabel: string | null;

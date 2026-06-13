@@ -13,6 +13,15 @@ import {
 } from './compressionJob.paths.js';
 import { resolveToolCommand } from './toolCommandResolver.js';
 import { clearCompressionPauseRequest, requestCompressionProcessPause } from './compressionProcessRegistry.js';
+import {
+  closeCompressionTimingSegment,
+  createCompressionTiming,
+  getCompressionTimingSnapshot,
+  normalizeCompressionTiming,
+  openCompressionTimingSegment,
+  type CompressionTiming,
+  type CompressionTimingReason
+} from './compressionTiming.js';
 
 export type CompressionSessionRequest = {
   name?: string;
@@ -85,6 +94,7 @@ type CompressionCheckpointPayload = {
   };
   activeItems?: unknown[];
   processedItems?: unknown[];
+  timing?: CompressionTiming;
   interrupted?: boolean;
   interruptedAt?: string;
   fatalError?: string;
@@ -149,7 +159,7 @@ const upsertCompressionCheckpoint = (sessionId: string, outputRoot: string, mani
         payload_json = excluded.payload_json,
         updated_at = excluded.updated_at
     `
-  ).run(randomUUID(), sessionId, JSON.stringify({ outputRoot, manifest }), timestamp);
+  ).run(randomUUID(), sessionId, JSON.stringify({ outputRoot, manifest, timing: createCompressionTiming(timestamp) }), timestamp);
 
   return db
     .prepare('SELECT id, session_id, stage, cursor, payload_json, updated_at FROM session_checkpoints WHERE session_id = ? AND stage = ?')
@@ -176,6 +186,48 @@ const parseCheckpointPayload = (payloadJson: string | null): CompressionCheckpoi
 };
 
 const serializeCheckpointPayload = (payload: CompressionCheckpointPayload) => JSON.stringify(payload);
+
+const getPayloadTiming = (payload: CompressionCheckpointPayload, fallbackStartedAt: string | null = null) =>
+  normalizeCompressionTiming(payload.timing, fallbackStartedAt);
+
+const getTimingHistoryFields = (timing: CompressionTiming, timestamp: string, includeOpenSegment: boolean) => {
+  const timingSnapshot = getCompressionTimingSnapshot(timing, timestamp, includeOpenSegment);
+
+  return {
+    compressionActiveDurationMs: timingSnapshot.durationMs,
+    compressionActiveStartedAt: includeOpenSegment ? timingSnapshot.activeStartedAt : null
+  };
+};
+
+const updateCompressionExecutionTiming = (
+  sessionId: string,
+  payload: CompressionCheckpointPayload,
+  timestamp: string,
+  includeOpenSegment: boolean
+) => {
+  const fields = getTimingHistoryFields(getPayloadTiming(payload), timestamp, includeOpenSegment);
+  const db = getDb();
+
+  db.prepare(
+    `
+      UPDATE execution_history
+      SET compression_active_duration_ms = ?,
+          compression_active_started_at = ?,
+          updated_at = ?
+      WHERE session_id = ?
+    `
+  ).run(fields.compressionActiveDurationMs, fields.compressionActiveStartedAt, timestamp, sessionId);
+};
+
+const closePayloadTiming = (
+  payload: CompressionCheckpointPayload,
+  timestamp: string,
+  reason: CompressionTimingReason,
+  fallbackStartedAt: string | null = null
+): CompressionCheckpointPayload => ({
+  ...payload,
+  timing: closeCompressionTimingSegment(getPayloadTiming(payload, fallbackStartedAt), timestamp, reason)
+});
 
 export const startCompressionSession = (request: CompressionSessionRequest): CompressionSessionLaunchResult => {
   runMigrations();
@@ -246,6 +298,8 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
     videoItems: 0,
     completedItems: 0,
     failedItems: 0,
+    compressionActiveDurationMs: 0,
+    compressionActiveStartedAt: timestamp,
     imageProfileLabel: manifest.imageProfileLabel,
     imageQuality: manifest.imageQuality,
     videoPresetLabel: manifest.videoPresetLabel,
@@ -617,7 +671,7 @@ export const reconcileInterruptedCompressionSessions = () => {
     .all() as Array<{ id: string; payload_json: string | null }>;
 
   for (const row of runningRows) {
-    const payload = parseCheckpointPayload(row.payload_json);
+    const payload = closePayloadTiming(parseCheckpointPayload(row.payload_json), timestamp, 'interrupted');
 
     db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(
       'paused',
@@ -642,6 +696,7 @@ export const reconcileInterruptedCompressionSessions = () => {
       timestamp,
       row.id
     );
+    updateCompressionExecutionTiming(row.id, payload, timestamp, false);
   }
 
   return runningRows.length;
@@ -662,6 +717,13 @@ export const markCompressionSessionRunning = (sessionId: string) => {
 
   if (snapshot.checkpoint) {
     const payload = parseCheckpointPayload(snapshot.checkpoint.payloadJson);
+    const timing = openCompressionTimingSegment(getPayloadTiming(payload, snapshot.session.createdAt), timestamp);
+    const nextPayload = {
+      ...payload,
+      timing,
+      activeItems: [],
+      interrupted: false
+    };
     db.prepare(
       `
         UPDATE session_checkpoints
@@ -669,14 +731,11 @@ export const markCompressionSessionRunning = (sessionId: string) => {
         WHERE session_id = ? AND stage = 'compress'
       `
     ).run(
-      serializeCheckpointPayload({
-        ...payload,
-        activeItems: [],
-        interrupted: false
-      }),
+      serializeCheckpointPayload(nextPayload),
       timestamp,
       sessionId
     );
+    updateCompressionExecutionTiming(sessionId, nextPayload, timestamp, true);
   }
 
   return getCompressionSession(sessionId);
@@ -722,7 +781,7 @@ export const pauseCompressionSession = (sessionId: string) => {
   );
 
   if (snapshot.checkpoint) {
-    const payload = parseCheckpointPayload(snapshot.checkpoint.payloadJson);
+    const payload = closePayloadTiming(parseCheckpointPayload(snapshot.checkpoint.payloadJson), timestamp, 'pause', snapshot.session.createdAt);
     db.prepare(
       `
         UPDATE session_checkpoints
@@ -739,6 +798,7 @@ export const pauseCompressionSession = (sessionId: string) => {
       timestamp,
       sessionId
     );
+    updateCompressionExecutionTiming(sessionId, payload, timestamp, false);
   }
 
   requestCompressionProcessPause(sessionId);
@@ -768,7 +828,12 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
 
   db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run('failed', timestamp, timestamp, sessionId);
 
-  const checkpointPayload = parseCheckpointPayload(snapshot.checkpoint?.payloadJson ?? null);
+  const checkpointPayload = closePayloadTiming(
+    parseCheckpointPayload(snapshot.checkpoint?.payloadJson ?? null),
+    timestamp,
+    'fail',
+    snapshot.session.createdAt
+  );
   const processedFailedItems = Array.isArray(checkpointPayload.processedItems)
     ? checkpointPayload.processedItems.filter((item: unknown) =>
         typeof item === 'object' &&
@@ -821,6 +886,7 @@ export const markCompressionSessionFailed = (sessionId: string, error: Error) =>
     imageProfileLabel: checkpointPayload.manifest?.imageProfileLabel ?? null,
     imageQuality: checkpointPayload.manifest?.imageQuality ?? null,
     videoPresetLabel: checkpointPayload.manifest?.videoPresetLabel ?? null,
+    ...getTimingHistoryFields(getPayloadTiming(checkpointPayload), timestamp, false),
     errorSummary: [{ source: snapshot.session.sourceDir, error: error.message }]
   });
 

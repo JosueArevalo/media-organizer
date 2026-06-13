@@ -41,6 +41,8 @@ export type ExecutionHistoryInput = {
   failedItems: number;
   originalBytes?: number | null;
   finalBytes?: number | null;
+  compressionActiveDurationMs?: number | null;
+  compressionActiveStartedAt?: string | null;
   imageProfileLabel: string | null;
   imageQuality?: number | null;
   videoPresetLabel: string | null;
@@ -66,6 +68,8 @@ export type ExecutionHistoryRecord = {
   failedItems: number;
   originalBytes: number | null;
   finalBytes: number | null;
+  compressionActiveDurationMs: number | null;
+  compressionActiveStartedAt: string | null;
   imageProfileLabel: string | null;
   imageQuality: number | null;
   videoPresetLabel: string | null;
@@ -114,6 +118,8 @@ type ExecutionHistoryRow = {
   failed_items: number;
   original_bytes: number | null;
   final_bytes: number | null;
+  compression_active_duration_ms: number | null;
+  compression_active_started_at: string | null;
   image_profile_label: string | null;
   image_quality: number | null;
   video_preset_label: string | null;
@@ -223,6 +229,8 @@ const toExecution = (row: ExecutionHistoryRow): ExecutionHistoryRecord => ({
   failedItems: row.failed_items,
   originalBytes: row.original_bytes,
   finalBytes: row.final_bytes,
+  compressionActiveDurationMs: row.compression_active_duration_ms,
+  compressionActiveStartedAt: row.compression_active_started_at,
   imageProfileLabel: row.image_profile_label,
   imageQuality: row.image_quality,
   videoPresetLabel: row.video_preset_label,
@@ -259,6 +267,8 @@ const listExecutionRows = () => {
           failed_items,
           original_bytes,
           final_bytes,
+          compression_active_duration_ms,
+          compression_active_started_at,
           image_profile_label,
           image_quality,
           video_preset_label,
@@ -304,12 +314,14 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
         failed_items,
         original_bytes,
         final_bytes,
+        compression_active_duration_ms,
+        compression_active_started_at,
         image_profile_label,
         image_quality,
         video_preset_label,
         error_summary_json,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
         name = excluded.name,
         source_dir = excluded.source_dir,
@@ -326,6 +338,8 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
         failed_items = excluded.failed_items,
         original_bytes = excluded.original_bytes,
         final_bytes = excluded.final_bytes,
+        compression_active_duration_ms = excluded.compression_active_duration_ms,
+        compression_active_started_at = excluded.compression_active_started_at,
         image_profile_label = excluded.image_profile_label,
         image_quality = excluded.image_quality,
         video_preset_label = excluded.video_preset_label,
@@ -349,6 +363,8 @@ export const upsertExecutionHistory = (input: ExecutionHistoryInput): ExecutionH
     input.failedItems,
     input.originalBytes ?? null,
     input.finalBytes ?? null,
+    input.compressionActiveDurationMs ?? null,
+    input.compressionActiveStartedAt ?? null,
     input.imageProfileLabel,
     input.imageQuality ?? null,
     input.videoPresetLabel,
@@ -514,6 +530,8 @@ export const getDashboardSummary = (): DashboardSummary => {
           failedItems: 0,
           originalBytes: null,
           finalBytes: null,
+          compressionActiveDurationMs: null,
+          compressionActiveStartedAt: null,
           imageProfileLabel: null,
           imageQuality: null,
           videoPresetLabel: null,
