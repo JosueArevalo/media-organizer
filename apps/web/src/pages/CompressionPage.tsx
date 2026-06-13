@@ -36,6 +36,7 @@ import {
   type HandBrakePresetOption
 } from '../services/compression.service';
 import { scanSourceTreeRequest } from '../services/source-tree.service';
+import { isPreCompressionStepReadOnly } from '../services/workflow-locks';
 
 type ImagePresetId = CompressionImagePreset;
 
@@ -489,6 +490,7 @@ export const CompressionPage = () => {
   const location = useLocation();
   const { sourceSelection, destinationSelection, isLoading: areFolderSelectionsLoading } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
+  const isWorkflowReadOnly = isPreCompressionStepReadOnly(compressionSessionState);
   const savedCompressionSettings = useMemo(() => loadCompressionSettings(), []);
   const [imagePreset, setImagePreset] = useState<ImagePresetId>(savedCompressionSettings.imagePreset);
   const [customQuality, setCustomQuality] = useState<number>(savedCompressionSettings.customQuality);
@@ -1020,6 +1022,10 @@ export const CompressionPage = () => {
   })();
   const compressionSessionWarningMessage = toolWarnings.join(' ');
   const handleStartCompression = async () => {
+    if (isWorkflowReadOnly) {
+      return;
+    }
+
     if (!destinationSelection || !sourceSelection || mediaStatsState.status === 'error') {
       return;
     }
@@ -1310,6 +1316,7 @@ export const CompressionPage = () => {
       <div className="page-header">
         <h2 className="page-title">{t('compression.title')}</h2>
         <p className="page-subtitle">{t('compression.subtitle')}</p>
+        {isWorkflowReadOnly && <p className="page-summary-note compression-warning">{t('workflow.readOnlyNotice')}</p>}
       </div>
 
       <div className="page-card compression-session-card">
@@ -1566,7 +1573,7 @@ export const CompressionPage = () => {
           <h3 className="page-section-title">📸 {t('compression.imageTitle')}</h3>
           <p className="page-summary-note">{t('compression.imageNote')}</p>
 
-          <fieldset className="page-option-list compression-controls-fieldset" disabled={isCompressionRunning}>
+          <fieldset className="page-option-list compression-controls-fieldset" disabled={isCompressionRunning || isWorkflowReadOnly}>
             {IMAGE_PRESETS.map((preset) => (
               <label className="page-option" key={preset.id}>
                 <input
@@ -1613,7 +1620,7 @@ export const CompressionPage = () => {
           <h3 className="page-section-title">🎬 {t('compression.videoTitle')}</h3>
           <p className="page-summary-note">{t('compression.videoNote')}</p>
 
-          <fieldset className="page-option-list compression-controls-fieldset compression-video-options" disabled={isCompressionRunning}>
+          <fieldset className="page-option-list compression-controls-fieldset compression-video-options" disabled={isCompressionRunning || isWorkflowReadOnly}>
             {videoPresetsState.status === 'idle' && (
               <p className="page-summary-note">{t('compression.configureHandBrake')}</p>
             )}
@@ -1744,7 +1751,11 @@ export const CompressionPage = () => {
           className="btn btn-primary"
           type="button"
           onClick={() => void (isCompressionPaused || canRetryFailedCompression ? handleResumeCompression() : handleStartCompression())}
-          disabled={isCompressionRunning || isCompressionComplete || (!isCompressionPaused && !canRetryFailedCompression && !canStartRealCompression)}
+          disabled={
+            isCompressionRunning ||
+            isCompressionComplete ||
+            (!isCompressionPaused && !canRetryFailedCompression && (isWorkflowReadOnly || !canStartRealCompression))
+          }
         >
           {isCompressionRunning
             ? t('compression.runningButton')

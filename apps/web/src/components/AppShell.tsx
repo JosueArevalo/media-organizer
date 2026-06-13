@@ -63,7 +63,6 @@ const AppShell = () => {
     ...step,
     label: t(`workflow.${step.id}.label`),
     description: t(`workflow.${step.id}.description`),
-    isNavigable: isGroupingReadyForExport ? step.id === 'export' : undefined,
     state: (() => {
       if (step.id === 'import') {
         return isImportStepComplete ? 'completed' : 'pending';

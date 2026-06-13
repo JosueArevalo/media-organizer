@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
+import { useExportJobState } from '../hooks/useExportJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation, type TranslationKey } from '../i18n';
 import { notifyCompletion } from '../services/completion-notification.service';
+import { resetExportJobSnapshot } from '../services/export-job.store';
+import { isGroupingReadOnlyForExport } from '../services/workflow-locks';
 import { completeGroupingSession, failGroupingSession, startGroupingSession } from '../services/grouping-job.store';
 import {
   applyGroupingWorkspaceRequest,
@@ -459,10 +462,17 @@ export const GroupingPage = () => {
     hasWorkspacePrerequisites &&
     (compressionSessionState.status === 'completed' || compressionSessionState.status === 'failed');
   const isGroupingCompleted = groupingSessionState.status === 'completed';
-  const canMutateGrouping = !isGroupingCompleted;
   const isWaitingForWorkspacePrerequisites =
     isLoadingFolderSelections || (hasWorkspacePrerequisites && compressionSessionState.status === 'running');
   const sourceRootPath = workspace?.sourceDir ?? 'Source';
+  const exportContext = {
+    groupingSessionId: groupingSessionState.backendSessionId,
+    sourceRoot: workspace?.outputDir ?? groupingSessionState.outputRootLabel
+  };
+  const networkExportJobState = useExportJobState('network-folder', exportContext);
+  const googlePhotosExportJobState = useExportJobState('google-photos', exportContext);
+  const isExportActive = isGroupingReadOnlyForExport([networkExportJobState, googlePhotosExportJobState]);
+  const canMutateGrouping = !isExportActive;
 
   const refreshWorkspace = useCallback(
     async (sessionId: string) => {
@@ -473,6 +483,27 @@ export const GroupingPage = () => {
     },
     []
   );
+
+  const markGroupingDraftChanged = useCallback(() => {
+    if (networkExportJobState.status === 'completed' || networkExportJobState.status === 'failed') {
+      resetExportJobSnapshot('network-folder');
+    }
+
+    if (googlePhotosExportJobState.status === 'completed' || googlePhotosExportJobState.status === 'failed') {
+      resetExportJobSnapshot('google-photos');
+    }
+
+    if (workspace) {
+      startGroupingSession({
+        backendSessionId: workspace.sessionId,
+        outputRootLabel: workspace.outputDir
+      });
+    }
+  }, [
+    googlePhotosExportJobState.status,
+    networkExportJobState.status,
+    workspace
+  ]);
 
   useEffect(() => {
     let isActive = true;
@@ -662,10 +693,6 @@ export const GroupingPage = () => {
   }, [activeFolder, activeFolderLabel, activePreservedFolder, t]);
 
   const handleBack = () => {
-    if (isGroupingCompleted) {
-      return;
-    }
-
     const from = (location.state as { from?: string } | null)?.from;
 
     if (from && from !== location.pathname) {
@@ -750,6 +777,7 @@ export const GroupingPage = () => {
       setActiveFolderLabel('__all__');
       setView('review');
       setBackendError(null);
+      markGroupingDraftChanged();
       void notifyCompletion('groupingReorganized', {
         title: t('notifications.groupingReorganized.title'),
         body: t('notifications.groupingReorganized.body', { count: nextWorkspace.items.length })
@@ -770,6 +798,7 @@ export const GroupingPage = () => {
     try {
       await createGroupingFolderRequest(workspace.sessionId, label);
       await refreshWorkspace(workspace.sessionId);
+      markGroupingDraftChanged();
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.createFolderError'));
     }
@@ -785,6 +814,7 @@ export const GroupingPage = () => {
       await renameGroupingFolderRequest(workspace.sessionId, folder.id, label);
       setActiveFolderLabel(label);
       await refreshWorkspace(workspace.sessionId);
+      markGroupingDraftChanged();
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.renameFolderError'));
     }
@@ -797,6 +827,7 @@ export const GroupingPage = () => {
       await deleteGroupingFolderRequest(workspace.sessionId, folder.id);
       setActiveFolderLabel('__all__');
       await refreshWorkspace(workspace.sessionId);
+      markGroupingDraftChanged();
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.deleteFolderError'));
     }
@@ -813,6 +844,7 @@ export const GroupingPage = () => {
       setWorkspace(nextWorkspace);
       setSelectedIds(new Set());
       setBackendError(null);
+      markGroupingDraftChanged();
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.moveMediaError'));
     }
@@ -855,6 +887,7 @@ export const GroupingPage = () => {
       setWorkspace(nextWorkspace);
       setSelectedIds(new Set());
       setBackendError(null);
+      markGroupingDraftChanged();
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.deleteSelectedError'));
     }
@@ -879,6 +912,7 @@ export const GroupingPage = () => {
       });
       setPreviewItemId(getNextPreviewItemId(nextWorkspace.items, activeFolderLabel, sourceRootPath, previewIndex));
       setBackendError(null);
+      markGroupingDraftChanged();
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.deletePreviewError'));
     }
@@ -893,6 +927,7 @@ export const GroupingPage = () => {
       setSelectedIds(new Set());
       setPreviewItemId(getNextPreviewItemId(nextWorkspace.items, activeFolderLabel, sourceRootPath, previewIndex, previewItem.id));
       setBackendError(null);
+      markGroupingDraftChanged();
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.movePreviewError'));
     }
@@ -1083,6 +1118,7 @@ export const GroupingPage = () => {
     try {
       await createGroupingFolderFromTemplateRequest(workspace.sessionId, template.id);
       await refreshWorkspace(workspace.sessionId);
+      markGroupingDraftChanged();
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.createFromTemplateError'));
     }
@@ -1164,7 +1200,7 @@ export const GroupingPage = () => {
     : null;
 
   return (
-    <div className={`grouping-workspace page-stack ${isGroupingCompleted ? 'is-read-only' : ''}`}>
+    <div className={`grouping-workspace page-stack ${!canMutateGrouping ? 'is-read-only' : ''}`}>
       <div className="page-header grouping-header">
         <div>
           <h2 className="page-title">{t('grouping.title')}</h2>
@@ -1175,7 +1211,7 @@ export const GroupingPage = () => {
           </p>
         </div>
         <div className="grouping-header-actions">
-          <button className="btn btn-secondary" type="button" onClick={handleBack} disabled={isGroupingCompleted}>
+          <button className="btn btn-secondary" type="button" onClick={handleBack}>
             {t('grouping.back')}
           </button>
           {view === 'setup' && (
@@ -1184,12 +1220,12 @@ export const GroupingPage = () => {
             </button>
           )}
           {view === 'review' && (
-            <button className="btn btn-secondary" type="button" onClick={() => setView('setup')} disabled={!workspace || isApplying || isGroupingCompleted}>
+            <button className="btn btn-secondary" type="button" onClick={() => setView('setup')} disabled={!workspace || isApplying || !canMutateGrouping}>
               {t('grouping.editSetup')}
             </button>
           )}
           {view === 'review' && (
-            <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying || isGroupingCompleted}>
+            <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying || !canMutateGrouping}>
               {isApplying ? t('grouping.applying') : t('grouping.apply')}
             </button>
           )}
@@ -1200,6 +1236,10 @@ export const GroupingPage = () => {
           )}
         </div>
       </div>
+
+      {!canMutateGrouping && (
+        <p className="page-summary-note compression-warning">{t('grouping.exportActiveReadOnlyNotice')}</p>
+      )}
 
       {isWaitingForWorkspacePrerequisites && !workspace && !backendError && (
         <p className="empty-note">{t('grouping.loadingWorkspace')}</p>
@@ -1405,7 +1445,7 @@ export const GroupingPage = () => {
           placeholder={t('grouping.searchPlaceholder')}
           type="search"
         />
-        <button className="btn btn-secondary" type="button" onClick={() => void handleCreateFolder()} disabled={!workspace || isGroupingCompleted}>
+        <button className="btn btn-secondary" type="button" onClick={() => void handleCreateFolder()} disabled={!workspace || !canMutateGrouping}>
           {t('grouping.newFolder')}
         </button>
       </div>}
@@ -1463,10 +1503,10 @@ export const GroupingPage = () => {
                   <strong>{folder.itemCount}</strong>
                 </button>
                 <div className="grouping-folder-actions">
-                  <button type="button" onClick={() => void handleRenameFolder(folder)} disabled={isGroupingCompleted} title={t('grouping.renameTitle')}>
+                  <button type="button" onClick={() => void handleRenameFolder(folder)} disabled={!canMutateGrouping} title={t('grouping.renameTitle')}>
                     {t('grouping.rename')}
                   </button>
-                  <button type="button" onClick={() => void handleDeleteFolder(folder)} disabled={isGroupingCompleted || folder.itemCount > 0} title={t('grouping.deleteTitle')}>
+                  <button type="button" onClick={() => void handleDeleteFolder(folder)} disabled={!canMutateGrouping || folder.itemCount > 0} title={t('grouping.deleteTitle')}>
                     {t('grouping.delete')}
                   </button>
                 </div>
@@ -1477,20 +1517,20 @@ export const GroupingPage = () => {
           <div className="grouping-templates">
             <div className="grouping-section-head">
               <p className="page-section-title">{t('grouping.templates')}</p>
-              <button type="button" onClick={() => void handleCreateTemplate()} disabled={isGroupingCompleted}>
+              <button type="button" onClick={() => void handleCreateTemplate()} disabled={!canMutateGrouping}>
                 {t('grouping.add')}
               </button>
             </div>
             {workspace?.templates.length ? (
               workspace.templates.map((template) => (
                 <div key={template.id} className="grouping-template-row">
-                  <button type="button" onClick={() => void handleCreateFolderFromTemplate(template)} disabled={isGroupingCompleted || !template.enabled}>
+                  <button type="button" onClick={() => void handleCreateFolderFromTemplate(template)} disabled={!canMutateGrouping || !template.enabled}>
                     {template.name}
                   </button>
-                  <button type="button" onClick={() => void handleToggleTemplate(template)} disabled={isGroupingCompleted}>
+                  <button type="button" onClick={() => void handleToggleTemplate(template)} disabled={!canMutateGrouping}>
                     {template.enabled ? t('grouping.on') : t('grouping.off')}
                   </button>
-                  <button type="button" onClick={() => void handleDeleteTemplate(template)} disabled={isGroupingCompleted}>
+                  <button type="button" onClick={() => void handleDeleteTemplate(template)} disabled={!canMutateGrouping}>
                     {t('grouping.delete')}
                   </button>
                 </div>
@@ -1520,7 +1560,7 @@ export const GroupingPage = () => {
                     void handleMoveSelected(event.target.value);
                   }
                 }}
-                disabled={!workspace || isGroupingCompleted}
+                disabled={!workspace || !canMutateGrouping}
               >
                 <option value="">{t('grouping.moveSelected')}</option>
                 {workspace?.folders.map((folder) => (
@@ -1529,7 +1569,7 @@ export const GroupingPage = () => {
                   </option>
                 ))}
               </select>
-              <button className="btn btn-danger-secondary" type="button" onClick={() => void handleDeleteSelected()} disabled={isGroupingCompleted}>
+              <button className="btn btn-danger-secondary" type="button" onClick={() => void handleDeleteSelected()} disabled={!canMutateGrouping}>
                 {t('grouping.delete')}
               </button>
               <span className="grouping-selection-divider" aria-hidden="true" />
@@ -1548,7 +1588,7 @@ export const GroupingPage = () => {
               className="btn btn-ghost"
               type="button"
               onClick={() => setSelectedIds(new Set(visibleItems.filter((item) => !item.preservedStructure).map((item) => item.id)))}
-              disabled={isGroupingCompleted || visibleItems.every((item) => item.preservedStructure)}
+              disabled={!canMutateGrouping || visibleItems.every((item) => item.preservedStructure)}
             >
               {t('grouping.selectVisible')}
             </button>

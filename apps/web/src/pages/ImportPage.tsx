@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { FolderPickerCard } from '../components/FolderPickerCard';
 import { useFolderSelections } from '../hooks/useFolderSelections';
+import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useTranslation, type TranslationKey } from '../i18n';
 import { pickDirectoryRequest } from '../services/system-picker.service';
 import type { FolderSlot } from '../services/folder-selection.store';
@@ -10,6 +11,7 @@ import {
   validateImportFoldersRequest,
   type ImportValidationCode
 } from '../services/import-validation.service';
+import { isPreCompressionStepReadOnly } from '../services/workflow-locks';
 
 const validationMessageKeys: Record<ImportValidationCode, TranslationKey> = {
   missing_paths: 'import.validation.missingPaths',
@@ -36,6 +38,8 @@ export const ImportPage = () => {
   const [nonEmptyDestinationEntryCount, setNonEmptyDestinationEntryCount] = useState<number | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [isClearingDestination, setIsClearingDestination] = useState(false);
+  const compressionSessionState = useCompressionSessionState();
+  const isWorkflowReadOnly = isPreCompressionStepReadOnly(compressionSessionState);
   const {
     sourceSelection,
     destinationSelection,
@@ -55,13 +59,16 @@ export const ImportPage = () => {
     [sourcePath, destinationPath]
   );
   const hasNonEmptyDestinationWarning = nonEmptyDestinationEntryCount !== null;
-  const canContinue = Boolean(
+  const canSubmitImport = Boolean(
     sourcePath &&
     destinationPath &&
     localValidation.ok &&
+    !isWorkflowReadOnly &&
     !isValidating &&
     !isClearingDestination
   );
+  const canReviewSelection = Boolean(isWorkflowReadOnly && sourcePath && destinationPath);
+  const canContinue = canSubmitImport || canReviewSelection;
 
   const getValidationMessage = (code: ImportValidationCode, fallback: string, entryCount?: number) =>
     validationMessageKeys[code]
@@ -90,6 +97,14 @@ export const ImportPage = () => {
   };
 
   const handleContinue = async () => {
+    if (isWorkflowReadOnly) {
+      if (canReviewSelection) {
+        navigate('/selection');
+      }
+
+      return;
+    }
+
     if (hasNonEmptyDestinationWarning) {
       await handleClearDestinationAndContinue();
       return;
@@ -102,7 +117,7 @@ export const ImportPage = () => {
       return;
     }
 
-    if (!canContinue) {
+    if (!canSubmitImport) {
       return;
     }
 
@@ -130,6 +145,10 @@ export const ImportPage = () => {
 
   const handleClearDestinationAndContinue = async () => {
     if (!sourcePath || !destinationPath || nonEmptyDestinationEntryCount === null) {
+      return;
+    }
+
+    if (isWorkflowReadOnly) {
       return;
     }
 
@@ -197,7 +216,7 @@ export const ImportPage = () => {
 
     event.preventDefault();
 
-    if (!sourcePath || !destinationPath || isValidating || isClearingDestination || event.repeat) {
+    if (!sourcePath || !destinationPath || isWorkflowReadOnly || isValidating || isClearingDestination || event.repeat) {
       return;
     }
 
@@ -226,6 +245,10 @@ export const ImportPage = () => {
   };
 
   const handleBrowseFolder = async (slot: FolderSlot) => {
+    if (isWorkflowReadOnly) {
+      return { status: 'cancelled' as const };
+    }
+
     const currentSelection = slot === 'source' ? sourceSelection : destinationSelection;
     const result = await pickDirectoryRequest({
       title: slot === 'source' ? t('import.chooseSourceDialog') : t('import.chooseDestinationDialog'),
@@ -260,6 +283,7 @@ export const ImportPage = () => {
       <div className="page-header">
         <h2 className="page-title">{t('import.title')}</h2>
         <p className="page-subtitle">{t('import.subtitle')}</p>
+        {isWorkflowReadOnly && <p className="page-summary-note compression-warning">{t('workflow.readOnlyNotice')}</p>}
       </div>
 
       <div className="page-grid-2">
@@ -274,6 +298,7 @@ export const ImportPage = () => {
           onClear={clearSourceFolder}
           inputRef={sourcePathInputRef}
           onPathInputKeyDown={handleSourcePathInputKeyDown}
+          isReadOnly={isWorkflowReadOnly}
         />
 
         <FolderPickerCard
@@ -287,6 +312,7 @@ export const ImportPage = () => {
           onClear={clearDestinationFolder}
           inputRef={destinationPathInputRef}
           onPathInputKeyDown={handleDestinationPathInputKeyDown}
+          isReadOnly={isWorkflowReadOnly}
         />
       </div>
 
