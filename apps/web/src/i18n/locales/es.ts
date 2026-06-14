@@ -408,6 +408,9 @@ export const es: TranslationDictionary = {
   'grouping.back': 'Atrás',
   'grouping.applying': 'Aplicando...',
   'grouping.apply': 'Aplicar organización',
+  'grouping.resetting': 'Restaurando...',
+  'grouping.reset': 'Resetear organización',
+  'grouping.resetConfirm': '¿Restaurar Destination a la estructura que tenía al empezar grouping? Los elementos borrados de Destination se restaurarán desde el backup interno de grouping cuando esté disponible.',
   'grouping.editSetup': 'Editar preparación',
   'grouping.unavailable': 'Agrupar está disponible después de completar la compresión y seleccionar carpetas de origen/destino.',
   'grouping.exportActiveReadOnlyNotice': 'Hay una exportacion activa para esta agrupacion. Pausa o termina esa exportacion antes de cambiar la organizacion.',
@@ -488,6 +491,8 @@ export const es: TranslationDictionary = {
   'grouping.deleteTemplateError': 'No se pudo eliminar la plantilla.',
   'grouping.createFromTemplateError': 'No se pudo crear la carpeta desde la plantilla.',
   'grouping.applyError': 'No se pudo aplicar la organización.',
+  'grouping.resetError': 'No se pudo resetear la organización.',
+  'grouping.resetPartialFailure': 'El reset terminó con {count} elementos que no se pudieron restaurar.',
   'grouping.failedApply': '{count} archivos no se pudieron organizar.',
   'grouping.continueExport': 'Continuar a Exportar ->',
 

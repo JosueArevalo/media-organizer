@@ -25,6 +25,7 @@ import {
   getGroupingWorkspaceRequest,
   reorganizeGroupingWorkspaceRequest,
   renameGroupingFolderRequest,
+  resetGroupingWorkspaceRequest,
   updateGroupingTemplateRequest,
   type GroupingFolderTemplate,
   type GroupingSingleDateHandling,
@@ -440,6 +441,7 @@ export const GroupingPage = () => {
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [isReorganizing, setIsReorganizing] = useState(false);
   const [view, setView] = useState<GroupingView>('setup');
   const [selectedStrategy, setSelectedStrategy] = useState<GroupingStrategy | null>(null);
@@ -1193,6 +1195,50 @@ export const GroupingPage = () => {
     }
   };
 
+  const handleReset = async () => {
+    if (!workspace || !canMutateGrouping) return;
+
+    const confirmed = window.confirm(t('grouping.resetConfirm'));
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsResetting(true);
+
+    try {
+      const result = await resetGroupingWorkspaceRequest(workspace.sessionId);
+      setVerification(result.verification);
+      const nextWorkspace = await refreshWorkspace(workspace.sessionId);
+      setSelectedStrategy(nextWorkspace.strategy);
+      setSingleDateHandling(nextWorkspace.dateOptions.singleDateHandling);
+      setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
+      setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
+      setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
+      setSelectedIds(new Set());
+      setPreviewItemId(null);
+      setActiveFolderLabel('__all__');
+      startGroupingSession({
+        backendSessionId: workspace.sessionId,
+        outputRootLabel: workspace.outputDir
+      });
+      markGroupingDraftChanged();
+
+      if (result.status === 'partial_failed') {
+        failGroupingSession(t('grouping.resetPartialFailure', { count: result.failedItems }));
+        setBackendError(t('grouping.resetPartialFailure', { count: result.failedItems }));
+      } else {
+        setBackendError(null);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('grouping.resetError');
+      setBackendError(message);
+      failGroupingSession(message);
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   const mediaUrl = previewItem && workspace
     ? previewItem.mediaType === 'image'
       ? buildGroupingPreviewUrl(workspace.sessionId, previewItem.id)
@@ -1220,12 +1266,32 @@ export const GroupingPage = () => {
             </button>
           )}
           {view === 'review' && (
-            <button className="btn btn-secondary" type="button" onClick={() => setView('setup')} disabled={!workspace || isApplying || !canMutateGrouping}>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => setView('setup')}
+              disabled={!workspace || isApplying || isResetting || !canMutateGrouping}
+            >
               {t('grouping.editSetup')}
             </button>
           )}
           {view === 'review' && (
-            <button className="btn btn-primary" type="button" onClick={() => void handleApply()} disabled={!workspace || isApplying || !canMutateGrouping}>
+            <button
+              className="btn btn-danger-secondary"
+              type="button"
+              onClick={() => void handleReset()}
+              disabled={!workspace || isApplying || isResetting || !canMutateGrouping}
+            >
+              {isResetting ? t('grouping.resetting') : t('grouping.reset')}
+            </button>
+          )}
+          {view === 'review' && (
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={() => void handleApply()}
+              disabled={!workspace || isApplying || isResetting || !canMutateGrouping}
+            >
               {isApplying ? t('grouping.applying') : t('grouping.apply')}
             </button>
           )}

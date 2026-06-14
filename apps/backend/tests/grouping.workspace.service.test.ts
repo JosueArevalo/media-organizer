@@ -760,6 +760,148 @@ test('applyGroupingWorkspace verifies expected media against destination files',
   assert.deepEqual(result?.verification.destination, { total: 2, images: 1, videos: 1, unknown: 0 });
 });
 
+test('applyGroupingWorkspace can be safely run twice without creating new collision names', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['album-a/photo.jpg', 'album-b/photo.jpg']);
+  const { applyGroupingWorkspace, assignGroupingItems, createGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js?apply-idempotent=1'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  assignGroupingItems(
+    workspace.sessionId,
+    items.map((item) => item.itemId),
+    'Party'
+  );
+
+  const firstApply = applyGroupingWorkspace(workspace.sessionId);
+  const secondApply = applyGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(firstApply?.movedItems, 2);
+  assert.equal(secondApply?.movedItems, 0);
+  assert.equal(fs.existsSync(path.join(outputDir, 'Party', 'photo.jpg')), true);
+  assert.equal(fs.existsSync(path.join(outputDir, 'Party', 'photo (2).jpg')), true);
+  assert.equal(fs.existsSync(path.join(outputDir, 'Party', 'photo (3).jpg')), false);
+});
+
+test('applyGroupingWorkspace moves already-applied files when grouping assignments change', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['album-a/photo.jpg', 'album-b/photo.jpg']);
+  const { applyGroupingWorkspace, assignGroupingItems, createGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js?apply-reassignment=1'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  assignGroupingItems(
+    workspace.sessionId,
+    items.map((item) => item.itemId),
+    'Party'
+  );
+  applyGroupingWorkspace(workspace.sessionId);
+
+  assignGroupingItems(workspace.sessionId, [items[1].itemId], 'Other');
+  const result = applyGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(result?.status, 'completed');
+  assert.equal(result?.movedItems, 1);
+  assert.equal(fs.existsSync(path.join(outputDir, 'Party', 'photo.jpg')), true);
+  assert.equal(fs.existsSync(path.join(outputDir, 'Party', 'photo (2).jpg')), false);
+  assert.equal(fs.existsSync(path.join(outputDir, 'Other', 'photo.jpg')), true);
+});
+
+test('resetGroupingWorkspace restores deleted destination files from grouping backups', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['keep.jpg', 'delete.jpg']);
+  const { applyGroupingWorkspace, createGroupingWorkspace, deleteGroupingItems, getGroupingWorkspace, resetGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js?reset-restore=1'
+  );
+  const deletedItem = items.find((item) => item.relativePath === 'delete.jpg');
+  assert.ok(deletedItem);
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  deleteGroupingItems(workspace.sessionId, [deletedItem.itemId]);
+  const applyResult = applyGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(applyResult?.deletedItems, 1);
+  assert.equal(fs.existsSync(path.join(outputDir, 'delete.jpg')), false);
+
+  const resetResult = resetGroupingWorkspace(workspace.sessionId);
+  const afterReset = getGroupingWorkspace(workspace.sessionId);
+  const decision = getDb()
+    .prepare('SELECT selected_for_output, target_group_label, user_overridden FROM item_decisions WHERE session_id = ? AND item_id = ?')
+    .get(compressionSessionId, deletedItem.itemId) as { selected_for_output: number; target_group_label: string | null; user_overridden: number };
+
+  assert.equal(resetResult?.status, 'completed');
+  assert.equal(resetResult?.restoredItems, 1);
+  assert.equal(fs.existsSync(path.join(outputDir, 'delete.jpg')), true);
+  assert.equal(fs.readFileSync(path.join(outputDir, 'delete.jpg'), 'utf8'), 'output delete.jpg');
+  assert.equal(decision.selected_for_output, 1);
+  assert.equal(decision.target_group_label, null);
+  assert.equal(decision.user_overridden, 0);
+  assert.equal(afterReset?.items.length, 2);
+  assert.deepEqual(afterReset?.folders, []);
+});
+
+test('resetGroupingWorkspace removes empty grouping folders and restores baseline relative paths', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['album-a/photo.jpg', 'album-b/clip.mp4']);
+  const { applyGroupingWorkspace, assignGroupingItems, createGroupingWorkspace, getGroupingWorkspace, resetGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js?reset-folders=1'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  assignGroupingItems(
+    workspace.sessionId,
+    items.map((item) => item.itemId),
+    'Party'
+  );
+  applyGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(fs.existsSync(path.join(outputDir, 'Party', 'photo.jpg')), true);
+  assert.equal(fs.existsSync(path.join(outputDir, 'Party', 'clip.mp4')), true);
+
+  const resetResult = resetGroupingWorkspace(workspace.sessionId);
+  const afterReset = getGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(resetResult?.status, 'completed');
+  assert.equal(fs.existsSync(path.join(outputDir, 'Party')), false);
+  assert.equal(fs.existsSync(path.join(outputDir, 'album-a', 'photo.jpg')), true);
+  assert.equal(fs.existsSync(path.join(outputDir, 'album-b', 'clip.mp4')), true);
+  assert.deepEqual(
+    afterReset?.items.map((item) => item.relativePath).sort(),
+    ['album-a/photo.jpg', 'album-b/clip.mp4'].sort()
+  );
+});
+
+test('resetGroupingWorkspace reports partial failure when a deleted file backup is missing', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['delete.jpg']);
+  const { applyGroupingWorkspace, createGroupingWorkspace, deleteGroupingItems, resetGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js?reset-missing-backup=1'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  deleteGroupingItems(workspace.sessionId, [items[0].itemId]);
+  applyGroupingWorkspace(workspace.sessionId);
+  fs.rmSync(path.join(outputDir, '.media-organizer', 'grouping-baselines', workspace.sessionId, 'delete.jpg'), { force: true });
+
+  const resetResult = resetGroupingWorkspace(workspace.sessionId);
+
+  assert.equal(resetResult?.status, 'partial_failed');
+  assert.equal(resetResult?.failedItems, 1);
+  assert.equal(resetResult?.errors[0].relativePath, 'delete.jpg');
+  assert.equal(fs.existsSync(path.join(outputDir, 'delete.jpg')), false);
+});
+
+test('resetGroupingWorkspace refuses baseline paths outside the destination folder', async () => {
+  const { compressionSessionId } = seedCompressionSession(['inside.jpg']);
+  const { createGroupingWorkspace, resetGroupingWorkspace } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js?reset-path-traversal=1'
+  );
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  getDb()
+    .prepare('UPDATE grouping_item_baselines SET initial_relative_path = ? WHERE grouping_session_id = ?')
+    .run(path.join('..', 'outside.jpg'), workspace.sessionId);
+
+  assert.throws(() => resetGroupingWorkspace(workspace.sessionId), /outside the destination folder/);
+});
+
 test('verifyGroupingWorkspaceDestination reports mismatch when a destination file is missing', async () => {
   const { compressionSessionId } = seedCompressionSession(['photo.jpg', 'clip.mp4']);
   const { createGroupingWorkspace, verifyGroupingWorkspaceDestination } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');

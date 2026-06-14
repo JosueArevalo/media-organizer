@@ -406,6 +406,9 @@ export const en = {
   'grouping.back': 'Back',
   'grouping.applying': 'Applying...',
   'grouping.apply': 'Apply organization',
+  'grouping.resetting': 'Resetting...',
+  'grouping.reset': 'Reset organization',
+  'grouping.resetConfirm': 'Reset Destination to the layout it had when grouping started? Items deleted from Destination will be restored from the internal grouping backup when available.',
   'grouping.editSetup': 'Edit setup',
   'grouping.exportActiveReadOnlyNotice': 'An export is active for this grouping. Pause or finish that export before changing the organization.',
   'grouping.unavailable': 'Grouping is available after compression completes and source/destination folders are selected.',
@@ -486,6 +489,8 @@ export const en = {
   'grouping.deleteTemplateError': 'Could not delete template.',
   'grouping.createFromTemplateError': 'Could not create folder from template.',
   'grouping.applyError': 'Could not apply organization.',
+  'grouping.resetError': 'Could not reset organization.',
+  'grouping.resetPartialFailure': 'Reset completed with {count} items that could not be restored.',
   'grouping.failedApply': '{count} files could not be organized.',
   'grouping.continueExport': 'Continue to Export ->',
 
