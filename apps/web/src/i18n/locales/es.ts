@@ -45,6 +45,7 @@ export const es: TranslationDictionary = {
 
   'dashboard.status': 'Estado',
   'dashboard.status.running': 'En progreso',
+  'dashboard.status.paused': 'Pausado',
   'dashboard.status.completed': 'Finalizado',
   'dashboard.status.failed': 'Con errores',
   'dashboard.status.cancelled': 'Cancelado',

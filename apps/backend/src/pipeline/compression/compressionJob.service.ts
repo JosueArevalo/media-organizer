@@ -3,7 +3,11 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../../state/db.js';
 import { runMigrations } from '../../state/migrations/runMigrations.js';
-import { upsertExecutionHistory } from '../../dashboard/dashboard.service.js';
+import {
+  pauseNonTerminalExecutionHistory,
+  updateExecutionHistoryStatus,
+  upsertExecutionHistory
+} from '../../dashboard/dashboard.service.js';
 import type { SessionRecord, SessionCheckpointRecord } from '../../state/dto/state.types.js';
 import {
   buildCompressionImagesOutputDir,
@@ -279,6 +283,8 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
   ensureDirectory(path.dirname(manifestPath));
 
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+  pauseNonTerminalExecutionHistory({ excludeSessionId: sessionId });
 
   const session = upsertSession(request, sessionId, timestamp);
   const checkpointRow = upsertCompressionCheckpoint(sessionId, outputRoot, manifest, timestamp);
@@ -697,6 +703,7 @@ export const reconcileInterruptedCompressionSessions = () => {
       row.id
     );
     updateCompressionExecutionTiming(row.id, payload, timestamp, false);
+    updateExecutionHistoryStatus(row.id, 'paused');
   }
 
   return runningRows.length;
@@ -737,6 +744,8 @@ export const markCompressionSessionRunning = (sessionId: string) => {
     );
     updateCompressionExecutionTiming(sessionId, nextPayload, timestamp, true);
   }
+
+  updateExecutionHistoryStatus(sessionId, 'running');
 
   return getCompressionSession(sessionId);
 };
@@ -802,6 +811,7 @@ export const pauseCompressionSession = (sessionId: string) => {
   }
 
   requestCompressionProcessPause(sessionId);
+  updateExecutionHistoryStatus(sessionId, 'paused');
 
   const pausedSnapshot = getCompressionSession(sessionId);
 

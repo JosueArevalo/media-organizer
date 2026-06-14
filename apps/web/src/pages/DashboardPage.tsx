@@ -129,6 +129,7 @@ const formatImageCompression = (label: string | null, quality: number | null) =>
 
 const STATUS_LABEL_KEYS: Record<ExecutionStatus, TranslationKey> = {
   running: 'dashboard.status.running',
+  paused: 'dashboard.status.paused',
   completed: 'dashboard.status.completed',
   failed: 'dashboard.status.failed',
   cancelled: 'dashboard.status.cancelled'

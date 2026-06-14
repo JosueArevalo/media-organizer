@@ -317,8 +317,8 @@ const getTimingHistoryFields = (timing: CompressionTiming, timestamp: string, in
 const getSessionBasics = (sessionId: string) => {
   const db = getDb();
   return db
-    .prepare('SELECT name, source_dir, output_dir, created_at FROM sessions WHERE id = ?')
-    .get(sessionId) as { name: string | null; source_dir: string; output_dir: string; created_at: string } | undefined;
+    .prepare('SELECT name, source_dir, output_dir, status, created_at FROM sessions WHERE id = ?')
+    .get(sessionId) as { name: string | null; source_dir: string; output_dir: string; status: string; created_at: string } | undefined;
 };
 
 const getPersistedMediaCounts = (sessionId: string) => {
@@ -741,7 +741,7 @@ const updateCompressionProgressCheckpoint = (
     sourceDir: session?.source_dir ?? payload.manifest.sourceDir,
     outputDir: session?.output_dir ?? payload.manifest.outputDir ?? '',
     outputRoot: payload.outputRoot,
-    status: 'running',
+    status: session?.status === 'paused' ? 'paused' : 'running',
     startedAt: session?.created_at ?? payload.manifest.createdAt ?? now,
     finishedAt: null,
     updatedAt: now,

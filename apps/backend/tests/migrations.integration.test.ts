@@ -41,7 +41,8 @@ test('initial migration creates core state tables', async () => {
     '011_google_photos_oauth_config.sql',
     '012_export_execution_history.sql',
     '013_execution_image_quality.sql',
-    '014_execution_compression_timing.sql'
+    '014_execution_compression_timing.sql',
+    '015_execution_history_paused.sql'
   ]);
 
   const db = getDb();
@@ -80,8 +81,98 @@ test('initial migration creates core state tables', async () => {
     '011_google_photos_oauth_config.sql',
     '012_export_execution_history.sql',
     '013_execution_image_quality.sql',
-    '014_execution_compression_timing.sql'
+    '014_execution_compression_timing.sql',
+    '015_execution_history_paused.sql'
   ]);
+});
+
+test('paused execution history migration backfills stale running rows', () => {
+  const db = getDb();
+
+  db.exec(`
+    CREATE TABLE execution_history (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL UNIQUE,
+      grouping_session_id TEXT,
+      name TEXT,
+      source_dir TEXT NOT NULL,
+      output_dir TEXT NOT NULL,
+      output_root TEXT,
+      status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'cancelled')),
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
+      updated_at TEXT NOT NULL,
+      total_items INTEGER NOT NULL DEFAULT 0,
+      image_items INTEGER NOT NULL DEFAULT 0,
+      video_items INTEGER NOT NULL DEFAULT 0,
+      completed_items INTEGER NOT NULL DEFAULT 0,
+      failed_items INTEGER NOT NULL DEFAULT 0,
+      image_profile_label TEXT,
+      video_preset_label TEXT,
+      error_summary_json TEXT,
+      grouping_status TEXT CHECK (grouping_status IN ('running', 'completed', 'failed', 'cancelled')),
+      grouping_total_items INTEGER NOT NULL DEFAULT 0,
+      grouping_completed_items INTEGER NOT NULL DEFAULT 0,
+      grouping_failed_items INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      verification_json TEXT,
+      original_bytes INTEGER,
+      final_bytes INTEGER,
+      image_quality INTEGER,
+      compression_active_duration_ms INTEGER,
+      compression_active_started_at TEXT
+    );
+
+    INSERT INTO execution_history (
+      id,
+      session_id,
+      source_dir,
+      output_dir,
+      status,
+      started_at,
+      updated_at,
+      grouping_status,
+      created_at,
+      compression_active_started_at
+    ) VALUES (
+      'history-1',
+      'session-1',
+      '${sourceDir.replace(/'/g, "''")}',
+      '${outputDir.replace(/'/g, "''")}',
+      'running',
+      '2026-06-01T10:00:00.000Z',
+      '2026-06-01T10:01:00.000Z',
+      'running',
+      '2026-06-01T10:00:00.000Z',
+      '2026-06-01T10:00:00.000Z'
+    );
+  `);
+
+  db.exec(fs.readFileSync(path.join(migrationsDir, '015_execution_history_paused.sql'), 'utf8'));
+
+  const row = db.prepare('SELECT status, grouping_status, compression_active_started_at FROM execution_history WHERE session_id = ?').get('session-1') as {
+    status: string;
+    grouping_status: string | null;
+    compression_active_started_at: string | null;
+  };
+
+  assert.equal(row.status, 'paused');
+  assert.equal(row.grouping_status, 'paused');
+  assert.equal(row.compression_active_started_at, null);
+  db.prepare(
+    `
+      INSERT INTO execution_history (
+        id,
+        session_id,
+        source_dir,
+        output_dir,
+        status,
+        started_at,
+        updated_at,
+        created_at
+      ) VALUES (?, ?, ?, ?, 'paused', ?, ?, ?)
+    `
+  ).run('history-2', 'session-2', sourceDir, outputDir, '2026-06-01T11:00:00.000Z', '2026-06-01T11:01:00.000Z', '2026-06-01T11:00:00.000Z');
 });
 
 test('image quality migration backfills execution history from compression checkpoints', () => {
@@ -241,7 +332,8 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '011_google_photos_oauth_config.sql',
     '012_export_execution_history.sql',
     '013_execution_image_quality.sql',
-    '014_execution_compression_timing.sql'
+    '014_execution_compression_timing.sql',
+    '015_execution_history_paused.sql'
   ]);
 
   const tableNames = db
@@ -296,6 +388,7 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '011_google_photos_oauth_config.sql',
     '012_export_execution_history.sql',
     '013_execution_image_quality.sql',
-    '014_execution_compression_timing.sql'
+    '014_execution_compression_timing.sql',
+    '015_execution_history_paused.sql'
   ]);
 });

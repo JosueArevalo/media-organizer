@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { getDb } from '../state/db.js';
 import { runMigrations } from '../state/migrations/runMigrations.js';
 import type { SessionRecord } from '../state/dto/state.types.js';
 import { listExportProviderSummaries } from '../pipeline/export/exportSummary.service.js';
 import type { ExportProviderSummary } from '../pipeline/export/export.types.js';
 
-type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+type ExecutionStatus = 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 export type VerificationCounts = {
   total: number;
@@ -147,7 +148,7 @@ export const createNotVerifiedSnapshot = (outputRoot: string | null = null): Exe
 });
 
 const toStatus = (status: string): ExecutionStatus => {
-  if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+  if (status === 'paused' || status === 'completed' || status === 'failed' || status === 'cancelled') {
     return status;
   }
 
@@ -463,6 +464,86 @@ export const deleteExecutionHistory = (id: string): boolean => {
   }
 };
 
+export const pauseNonTerminalExecutionHistory = (options: { destinationPath?: string | null; excludeSessionId?: string | null } = {}): number => {
+  runMigrations();
+  const db = getDb();
+  const timestamp = new Date().toISOString();
+  const destinationPath = options.destinationPath?.trim();
+  const normalizedDestination = destinationPath ? path.resolve(destinationPath) : null;
+  const pathExpression = process.platform === 'win32'
+    ? 'LOWER(COALESCE(output_root, output_dir)) = LOWER(?) OR LOWER(output_dir) = LOWER(?)'
+    : 'COALESCE(output_root, output_dir) = ? OR output_dir = ?';
+  const filters: string[] = [];
+  const parameters: Array<string | null> = [];
+
+  if (options.excludeSessionId) {
+    filters.push('session_id <> ?');
+    parameters.push(options.excludeSessionId);
+  }
+
+  if (normalizedDestination) {
+    filters.push(`(${pathExpression})`);
+    parameters.push(normalizedDestination, normalizedDestination);
+  }
+
+  const whereSuffix = filters.length > 0 ? ` AND ${filters.join(' AND ')}` : '';
+  const result = db.prepare(
+    `
+      UPDATE execution_history
+      SET
+        status = CASE WHEN status = 'running' THEN 'paused' ELSE status END,
+        grouping_status = CASE WHEN grouping_status = 'running' THEN 'paused' ELSE grouping_status END,
+        compression_active_started_at = CASE WHEN status = 'running' THEN NULL ELSE compression_active_started_at END,
+        updated_at = ?
+      WHERE (status IN ('running', 'paused') OR grouping_status IN ('running', 'paused'))
+      ${whereSuffix}
+    `
+  ).run(timestamp, ...parameters);
+
+  return Number(result.changes);
+};
+
+export const updateExecutionHistoryStatus = (
+  sessionId: string,
+  status: Extract<ExecutionStatus, 'running' | 'paused' | 'failed' | 'cancelled'>,
+  options: { finishedAt?: string | null } = {}
+): number => {
+  runMigrations();
+  const timestamp = new Date().toISOString();
+  const db = getDb();
+  const result = db.prepare(
+    `
+      UPDATE execution_history
+      SET
+        status = ?,
+        finished_at = ?,
+        compression_active_started_at = CASE WHEN ? = 'running' THEN compression_active_started_at ELSE NULL END,
+        updated_at = ?
+      WHERE session_id = ?
+    `
+  ).run(status, options.finishedAt ?? null, status, timestamp, sessionId);
+
+  return Number(result.changes);
+};
+
+export const updateExecutionHistoryGroupingStatus = (
+  groupingSessionId: string,
+  status: Extract<ExecutionStatus, 'running' | 'paused' | 'failed' | 'cancelled'>
+): number => {
+  runMigrations();
+  const timestamp = new Date().toISOString();
+  const db = getDb();
+  const result = db.prepare(
+    `
+      UPDATE execution_history
+      SET grouping_status = ?, updated_at = ?
+      WHERE grouping_session_id = ?
+    `
+  ).run(status, timestamp, groupingSessionId);
+
+  return Number(result.changes);
+};
+
 const getActiveRuntimeSession = (): SessionRecord | null => {
   const db = getDb();
   const row = db
@@ -470,7 +551,7 @@ const getActiveRuntimeSession = (): SessionRecord | null => {
       `
         SELECT id, name, source_dir, output_dir, status, created_at, updated_at, last_opened_at
         FROM sessions
-        WHERE status IN ('running', 'paused')
+        WHERE status = 'running'
         ORDER BY datetime(updated_at) DESC
         LIMIT 1
       `
