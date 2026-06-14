@@ -8,7 +8,13 @@ import { useTranslation, type TranslationKey } from '../i18n';
 import { notifyCompletion } from '../services/completion-notification.service';
 import { resetExportJobSnapshot } from '../services/export-job.store';
 import { isGroupingReadOnlyForExport } from '../services/workflow-locks';
-import { completeGroupingSession, failGroupingSession, startGroupingSession } from '../services/grouping-job.store';
+import {
+  completeGroupingSession,
+  failGroupingSession,
+  setGroupingActiveView,
+  startGroupingSession,
+  type GroupingActiveView
+} from '../services/grouping-job.store';
 import {
   applyGroupingWorkspaceRequest,
   assignGroupingItemsRequest,
@@ -156,7 +162,21 @@ const getNextPreviewItemId = (
   return scopedItems[Math.min(Math.max(previousIndex, 0), scopedItems.length - 1)].id;
 };
 
-type GroupingView = 'setup' | 'review';
+type GroupingView = GroupingActiveView;
+
+const areSortedValuesEqual = (left: string[], right: string[]) => {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+};
+
+const getSortedSetValues = (values: Set<string>) =>
+  Array.from(values).sort((left, right) => left.localeCompare(right));
+
+const getSortedValues = (values: string[]) =>
+  [...values].sort((left, right) => left.localeCompare(right));
 
 const DEFAULT_SINGLE_DATE_HANDLING: GroupingSingleDateHandling = 'year-unique';
 const DEFAULT_SOURCE_FOLDER_MODE: GroupingSourceFolderMode = 'nearest-folder';
@@ -486,6 +506,11 @@ export const GroupingPage = () => {
     []
   );
 
+  const changeGroupingView = useCallback((nextView: GroupingView) => {
+    setView(nextView);
+    setGroupingActiveView(nextView);
+  }, []);
+
   const markGroupingDraftChanged = useCallback(() => {
     if (networkExportJobState.status === 'completed' || networkExportJobState.status === 'failed') {
       resetExportJobSnapshot('network-folder');
@@ -537,12 +562,15 @@ export const GroupingPage = () => {
         setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
         setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
         setExpandedDirectories(new Set([nextWorkspace.sourceDir.split(/[\\/]/).filter(Boolean).pop() ?? 'Source']));
-        setView(nextWorkspace.folders.length > 0 || nextWorkspace.strategy ? 'review' : 'setup');
+        changeGroupingView(
+          groupingSessionState.activeView ?? (nextWorkspace.folders.length > 0 || nextWorkspace.strategy ? 'review' : 'setup')
+        );
         setBackendError(null);
 
         if (!groupingSessionState.backendSessionId) {
           startGroupingSession({
             backendSessionId: nextWorkspace.sessionId,
+            activeView: groupingSessionState.activeView ?? (nextWorkspace.folders.length > 0 || nextWorkspace.strategy ? 'review' : 'setup'),
             outputRootLabel: nextWorkspace.outputDir
           });
         }
@@ -571,6 +599,7 @@ export const GroupingPage = () => {
     compressionSessionState.backendSessionId,
     compressionSessionState.status,
     destinationPath,
+    changeGroupingView,
     groupingSessionState.backendSessionId,
     sourcePath
   ]);
@@ -581,8 +610,8 @@ export const GroupingPage = () => {
     }
 
     setSelectedIds(new Set());
-    setView('review');
-  }, [isGroupingCompleted]);
+    changeGroupingView('review');
+  }, [changeGroupingView, isGroupingCompleted]);
 
   useEffect(() => {
     setRenderedItemLimit(GROUPING_GRID_INITIAL_LIMIT);
@@ -680,7 +709,29 @@ export const GroupingPage = () => {
   const preservedCount = directoryRows.filter((row) => row.isPreserved).length;
   const unassignedItemsCount =
     workspace?.items.filter((item) => !item.preservedStructure && !item.targetGroupLabel).length ?? 0;
-  const canReorganize = Boolean(selectedStrategy && workspace) && !isReorganizing && canMutateGrouping;
+  const hasGroupingProposal = Boolean(workspace && (workspace.folders.length > 0 || workspace.strategy));
+  const hasSetupChanges = Boolean(
+    workspace &&
+    (
+      selectedStrategy !== workspace.strategy ||
+      singleDateHandling !== workspace.dateOptions.singleDateHandling ||
+      sourceFolderMode !== workspace.sourceFolderOptions.mode ||
+      !areSortedValuesEqual(getSortedSetValues(preservedDirectories), getSortedValues(workspace.preservedDirectories)) ||
+      !areSortedValuesEqual(getSortedSetValues(reorganizedDirectories), getSortedValues(workspace.reorganizedDirectories))
+    )
+  );
+  const shouldUpdateGroupingProposal = !hasGroupingProposal || hasSetupChanges;
+  const canUseSetupPrimary = Boolean(workspace) &&
+    !isReorganizing &&
+    canMutateGrouping &&
+    (shouldUpdateGroupingProposal ? Boolean(selectedStrategy) : hasGroupingProposal);
+  const setupPrimaryLabel = isReorganizing
+    ? t('grouping.reorganizing')
+    : shouldUpdateGroupingProposal && hasGroupingProposal
+      ? t('grouping.updateProposal')
+      : shouldUpdateGroupingProposal
+        ? t('grouping.reorganize')
+        : t('grouping.reviewOrganization');
 
   const activeFolderTitle = useMemo(() => {
     if (activePreservedFolder) {
@@ -777,7 +828,7 @@ export const GroupingPage = () => {
       setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
       setSelectedIds(new Set());
       setActiveFolderLabel('__all__');
-      setView('review');
+      changeGroupingView('review');
       setBackendError(null);
       markGroupingDraftChanged();
       void notifyCompletion('groupingReorganized', {
@@ -789,6 +840,15 @@ export const GroupingPage = () => {
     } finally {
       setIsReorganizing(false);
     }
+  };
+
+  const handleSetupPrimaryAction = async () => {
+    if (shouldUpdateGroupingProposal) {
+      await handleReorganize();
+      return;
+    }
+
+    changeGroupingView('review');
   };
 
   const handleCreateFolder = async () => {
@@ -1218,8 +1278,10 @@ export const GroupingPage = () => {
       setSelectedIds(new Set());
       setPreviewItemId(null);
       setActiveFolderLabel('__all__');
+      changeGroupingView('setup');
       startGroupingSession({
         backendSessionId: workspace.sessionId,
+        activeView: 'setup',
         outputRootLabel: workspace.outputDir
       });
       markGroupingDraftChanged();
@@ -1261,15 +1323,15 @@ export const GroupingPage = () => {
             {t('grouping.back')}
           </button>
           {view === 'setup' && (
-            <button className="btn btn-primary" type="button" onClick={() => void handleReorganize()} disabled={!canReorganize}>
-              {isReorganizing ? t('grouping.reorganizing') : t('grouping.reorganize')}
+            <button className="btn btn-primary" type="button" onClick={() => void handleSetupPrimaryAction()} disabled={!canUseSetupPrimary}>
+              {setupPrimaryLabel}
             </button>
           )}
           {view === 'review' && (
             <button
               className="btn btn-secondary"
               type="button"
-              onClick={() => setView('setup')}
+              onClick={() => changeGroupingView('setup')}
               disabled={!workspace || isApplying || isResetting || !canMutateGrouping}
             >
               {t('grouping.editSetup')}
@@ -1358,7 +1420,7 @@ export const GroupingPage = () => {
           </div>
           {verification.status === 'mismatch' && (
             <div className="verification-actions">
-              <button className="btn btn-secondary" type="button" onClick={() => setView('review')}>
+              <button className="btn btn-secondary" type="button" onClick={() => changeGroupingView('review')}>
                 {t('verification.reviewAgain')}
               </button>
             </div>

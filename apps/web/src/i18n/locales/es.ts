@@ -455,6 +455,8 @@ export const es: TranslationDictionary = {
   'grouping.setupSummary': 'Resumen de preparación',
   'grouping.setupSummaryText': '{files} medios, {preserved} carpeta(s) preservada(s), {strategy} estrategia seleccionada.',
   'grouping.reorganize': 'Reorganizar',
+  'grouping.updateProposal': 'Actualizar propuesta',
+  'grouping.reviewOrganization': 'Revisar organizacion',
   'grouping.reorganizing': 'Reorganizando...',
   'grouping.keepStructure': 'Mantener estructura',
   'grouping.reorganizeMode': 'Reorganizar',

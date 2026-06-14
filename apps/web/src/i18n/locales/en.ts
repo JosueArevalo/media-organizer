@@ -453,6 +453,8 @@ export const en = {
   'grouping.setupSummary': 'Setup summary',
   'grouping.setupSummaryText': '{files} media files, {preserved} preserved folder(s), {strategy} selected strategy.',
   'grouping.reorganize': 'Reorganize',
+  'grouping.updateProposal': 'Update proposal',
+  'grouping.reviewOrganization': 'Review organization',
   'grouping.reorganizing': 'Reorganizing...',
   'grouping.keepStructure': 'Keep structure',
   'grouping.reorganizeMode': 'Reorganize',
