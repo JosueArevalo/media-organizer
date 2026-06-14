@@ -35,6 +35,7 @@ import {
   listGroupingTemplates,
   reorganizeGroupingWorkspace,
   renameGroupingFolder,
+  resetGroupingWorkspace,
   updateGroupingTemplate
 } from './pipeline/grouping/groupingWorkspace.service.js';
 import { handleSourceTreeRoutes } from './pipeline/source/sourceTree.routes.js';
@@ -655,6 +656,26 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not apply grouping workspace.'
+        });
+      }
+
+      return;
+    }
+
+    if (req.method === 'POST' && subPath === 'reset') {
+      try {
+        const result = resetGroupingWorkspace(sessionId);
+
+        if (!result) {
+          sendJson(res, 404, { status: 'not_found' });
+          return;
+        }
+
+        sendJson(res, result.status === 'partial_failed' ? 207 : 200, result);
+      } catch (error) {
+        sendJson(res, 500, {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not reset grouping workspace.'
         });
       }
 

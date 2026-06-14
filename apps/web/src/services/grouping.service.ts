@@ -79,6 +79,20 @@ export type GroupingApplyResponse = {
   verification: ExecutionVerification;
 };
 
+export type GroupingResetResponse = {
+  sessionId: string;
+  status: 'completed' | 'partial_failed';
+  movedItems: number;
+  restoredItems: number;
+  failedItems: number;
+  errors: Array<{
+    itemId: string;
+    relativePath: string;
+    message: string;
+  }>;
+  verification: ExecutionVerification;
+};
+
 const readErrorBody = async (response: Response) => {
   const body = await response.text();
   return body || response.statusText;
@@ -171,6 +185,9 @@ export const deleteGroupingItemsRequest = async (sessionId: string, itemIds: str
 
 export const applyGroupingWorkspaceRequest = async (sessionId: string) =>
   requestJson<GroupingApplyResponse>(`/api/grouping/${sessionId}/apply`, { method: 'POST' });
+
+export const resetGroupingWorkspaceRequest = async (sessionId: string) =>
+  requestJson<GroupingResetResponse>(`/api/grouping/${sessionId}/reset`, { method: 'POST' });
 
 export const listGroupingTemplatesRequest = async () =>
   requestJson<{ templates: GroupingFolderTemplate[] }>('/api/grouping/templates');

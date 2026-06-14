@@ -42,7 +42,8 @@ test('initial migration creates core state tables', async () => {
     '012_export_execution_history.sql',
     '013_execution_image_quality.sql',
     '014_execution_compression_timing.sql',
-    '015_execution_history_paused.sql'
+    '015_execution_history_paused.sql',
+    '016_grouping_baselines.sql'
   ]);
 
   const db = getDb();
@@ -65,6 +66,7 @@ test('initial migration creates core state tables', async () => {
   assert.ok(tableNames.includes('google_photos_albums'));
   assert.ok(tableNames.includes('google_photos_oauth_config'));
   assert.ok(tableNames.includes('export_google_photos_items'));
+  assert.ok(tableNames.includes('grouping_item_baselines'));
   assert.ok(tableNames.includes('schema_migrations'));
 
   const migrationRows = db.prepare('SELECT id FROM schema_migrations;').all() as Array<{ id: string }>;
@@ -82,7 +84,8 @@ test('initial migration creates core state tables', async () => {
     '012_export_execution_history.sql',
     '013_execution_image_quality.sql',
     '014_execution_compression_timing.sql',
-    '015_execution_history_paused.sql'
+    '015_execution_history_paused.sql',
+    '016_grouping_baselines.sql'
   ]);
 });
 
@@ -333,7 +336,8 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '012_export_execution_history.sql',
     '013_execution_image_quality.sql',
     '014_execution_compression_timing.sql',
-    '015_execution_history_paused.sql'
+    '015_execution_history_paused.sql',
+    '016_grouping_baselines.sql'
   ]);
 
   const tableNames = db
@@ -389,6 +393,7 @@ test('legacy jobs schema upgrades to sessions without data loss', async () => {
     '012_export_execution_history.sql',
     '013_execution_image_quality.sql',
     '014_execution_compression_timing.sql',
-    '015_execution_history_paused.sql'
+    '015_execution_history_paused.sql',
+    '016_grouping_baselines.sql'
   ]);
 });

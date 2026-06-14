@@ -1,4 +1,5 @@
 export type GroupingSessionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+export type GroupingActiveView = 'setup' | 'review';
 
 export type GroupingSessionSnapshot = {
   backendSessionId: string | null;
@@ -7,12 +8,14 @@ export type GroupingSessionSnapshot = {
   completedAt: number | null;
   outputRootLabel: string | null;
   errorMessage: string | null;
+  activeView: GroupingActiveView | null;
   updatedAt: number;
 };
 
 export type GroupingSessionStartPayload = {
   backendSessionId: string | null;
   outputRootLabel: string;
+  activeView?: GroupingActiveView | null;
 };
 
 const STORAGE_KEY = 'media-organizer-grouping-session';
@@ -25,8 +28,12 @@ const createEmptySnapshot = (): GroupingSessionSnapshot => ({
   completedAt: null,
   outputRootLabel: null,
   errorMessage: null,
+  activeView: null,
   updatedAt: 0
 });
+
+const isGroupingActiveView = (value: unknown): value is GroupingActiveView =>
+  value === 'setup' || value === 'review';
 
 const readSnapshot = (): GroupingSessionSnapshot => {
   if (typeof window === 'undefined') {
@@ -45,7 +52,8 @@ const readSnapshot = (): GroupingSessionSnapshot => {
     return {
       ...createEmptySnapshot(),
       ...parsed,
-      status: parsed.status ?? 'idle'
+      status: parsed.status ?? 'idle',
+      activeView: isGroupingActiveView(parsed.activeView) ? parsed.activeView : null
     };
   } catch {
     return createEmptySnapshot();
@@ -68,6 +76,8 @@ const writeSnapshot = (snapshot: GroupingSessionSnapshot) => {
 export const loadGroupingSessionSnapshot = () => readSnapshot();
 
 export const startGroupingSession = (payload: GroupingSessionStartPayload) => {
+  const current = readSnapshot();
+  const isSameSession = Boolean(payload.backendSessionId && current.backendSessionId === payload.backendSessionId);
   const snapshot: GroupingSessionSnapshot = {
     backendSessionId: payload.backendSessionId,
     status: 'running',
@@ -75,6 +85,20 @@ export const startGroupingSession = (payload: GroupingSessionStartPayload) => {
     completedAt: null,
     outputRootLabel: payload.outputRootLabel,
     errorMessage: null,
+    activeView: payload.activeView ?? (isSameSession ? current.activeView : null),
+    updatedAt: Date.now()
+  };
+
+  writeSnapshot(snapshot);
+
+  return snapshot;
+};
+
+export const setGroupingActiveView = (activeView: GroupingActiveView) => {
+  const current = readSnapshot();
+  const snapshot: GroupingSessionSnapshot = {
+    ...current,
+    activeView,
     updatedAt: Date.now()
   };
 
