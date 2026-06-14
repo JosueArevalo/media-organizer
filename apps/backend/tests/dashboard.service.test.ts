@@ -175,3 +175,132 @@ test('runtime reset tables do not remove execution history', async () => {
   assert.equal(executions.length, 1);
   assert.equal(executions[0].failedItems, 1);
 });
+
+test('paused execution history does not count as current dashboard progress', async () => {
+  const { upsertExecutionHistory, getDashboardSummary } = await import('../src/dashboard/dashboard.service.js?dashboard-paused-current=1');
+
+  upsertExecutionHistory({
+    sessionId: 'paused-session',
+    name: 'Interrupted run',
+    sourceDir,
+    outputDir,
+    outputRoot: outputDir,
+    status: 'paused',
+    startedAt: '2026-06-01T10:00:00.000Z',
+    finishedAt: null,
+    updatedAt: '2026-06-01T10:02:00.000Z',
+    totalItems: 6,
+    imageItems: 6,
+    videoItems: 0,
+    completedItems: 3,
+    failedItems: 0,
+    imageProfileLabel: null,
+    videoPresetLabel: null,
+    errorSummary: []
+  });
+
+  const summary = getDashboardSummary();
+  assert.equal(summary.currentExecution, null);
+  assert.equal(summary.lastExecution?.status, 'paused');
+});
+
+test('new compression session pauses older non-terminal execution history', async () => {
+  const { upsertExecutionHistory, listExecutionHistory } = await import('../src/dashboard/dashboard.service.js?dashboard-new-session=1');
+  const { startCompressionSession } = await import('../src/pipeline/compression/compressionJob.service.js?dashboard-new-session=1');
+
+  upsertExecutionHistory({
+    sessionId: 'old-running-session',
+    name: 'Old run',
+    sourceDir,
+    outputDir,
+    outputRoot: outputDir,
+    status: 'running',
+    startedAt: '2026-06-01T10:00:00.000Z',
+    finishedAt: null,
+    updatedAt: '2026-06-01T10:02:00.000Z',
+    totalItems: 6,
+    imageItems: 6,
+    videoItems: 0,
+    completedItems: 3,
+    failedItems: 0,
+    imageProfileLabel: null,
+    videoPresetLabel: null,
+    errorSummary: []
+  });
+
+  const nextSourceDir = path.join(tempRoot, 'next-source');
+  const nextOutputDir = path.join(tempRoot, 'next-output');
+  fs.mkdirSync(nextSourceDir, { recursive: true });
+  fs.mkdirSync(nextOutputDir, { recursive: true });
+
+  const started = startCompressionSession({
+    name: 'Next run',
+    sourceDir: nextSourceDir,
+    outputDir: nextOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Fast 1080p30',
+    imageToolCommand: '__missing_image_encoder__',
+    videoToolCommand: '__missing_video_encoder__'
+  });
+
+  const executions = listExecutionHistory();
+  const oldExecution = executions.find((execution) => execution.sessionId === 'old-running-session');
+  const newExecution = executions.find((execution) => execution.sessionId === started.session.id);
+
+  assert.equal(oldExecution?.status, 'paused');
+  assert.equal(newExecution?.status, 'running');
+  assert.equal(executions.filter((execution) => execution.status === 'running').length, 1);
+});
+
+test('destination maintenance pauses only matching non-terminal history', async () => {
+  const { listExecutionHistory, pauseNonTerminalExecutionHistory, upsertExecutionHistory } = await import(
+    '../src/dashboard/dashboard.service.js?dashboard-destination-pause=1'
+  );
+  const otherOutputDir = path.join(tempRoot, 'other-output');
+
+  upsertExecutionHistory({
+    sessionId: 'matching-session',
+    name: null,
+    sourceDir,
+    outputDir,
+    outputRoot: outputDir,
+    status: 'running',
+    startedAt: '2026-06-01T10:00:00.000Z',
+    finishedAt: null,
+    updatedAt: '2026-06-01T10:02:00.000Z',
+    totalItems: 6,
+    imageItems: 6,
+    videoItems: 0,
+    completedItems: 3,
+    failedItems: 0,
+    imageProfileLabel: null,
+    videoPresetLabel: null,
+    errorSummary: []
+  });
+  upsertExecutionHistory({
+    sessionId: 'other-session',
+    name: null,
+    sourceDir,
+    outputDir: otherOutputDir,
+    outputRoot: otherOutputDir,
+    status: 'running',
+    startedAt: '2026-06-01T11:00:00.000Z',
+    finishedAt: null,
+    updatedAt: '2026-06-01T11:02:00.000Z',
+    totalItems: 6,
+    imageItems: 6,
+    videoItems: 0,
+    completedItems: 2,
+    failedItems: 0,
+    imageProfileLabel: null,
+    videoPresetLabel: null,
+    errorSummary: []
+  });
+
+  assert.equal(pauseNonTerminalExecutionHistory({ destinationPath: outputDir }), 1);
+
+  const executions = listExecutionHistory();
+  assert.equal(executions.find((execution) => execution.sessionId === 'matching-session')?.status, 'paused');
+  assert.equal(executions.find((execution) => execution.sessionId === 'other-session')?.status, 'running');
+});

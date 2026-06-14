@@ -782,6 +782,11 @@ body {
   color: var(--accent-deep);
 }
 
+.dashboard-status-paused {
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--muted);
+}
+
 .dashboard-status-completed {
   background: rgba(16, 185, 129, 0.12);
   color: #047857;

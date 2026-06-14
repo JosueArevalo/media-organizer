@@ -1,4 +1,4 @@
-export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+export type ExecutionStatus = 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 export type VerificationCounts = {
   total: number;

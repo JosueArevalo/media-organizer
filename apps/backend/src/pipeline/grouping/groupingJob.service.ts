@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../../state/db.js';
 import { runMigrations } from '../../state/migrations/runMigrations.js';
-import { linkGroupingExecution } from '../../dashboard/dashboard.service.js';
+import { linkGroupingExecution, updateExecutionHistoryGroupingStatus } from '../../dashboard/dashboard.service.js';
 import type { SessionCheckpointRecord, SessionRecord } from '../../state/dto/state.types.js';
 import type {
   GroupingProgressData,
@@ -293,6 +293,10 @@ const updateGroupingSessionStatus = (sessionId: string, status: SessionRecord['s
   const timestamp = nowIso();
 
   db.prepare('UPDATE sessions SET status = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(status, timestamp, timestamp, sessionId);
+
+  if (status === 'running' || status === 'paused' || status === 'failed' || status === 'cancelled') {
+    updateExecutionHistoryGroupingStatus(sessionId, status);
+  }
 
   return getGroupingSession(sessionId);
 };

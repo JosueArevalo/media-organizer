@@ -648,8 +648,9 @@ test('pauseCompressionSession stops active compression and resume processes pend
   assert.equal(pausedProgress?.failed, 0);
   const db = getDb();
   const pausedHistory = db.prepare(
-    'SELECT compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
-  ).get(started.session.id) as { compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+    'SELECT status, compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
+  ).get(started.session.id) as { status: string; compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+  assert.equal(pausedHistory.status, 'paused');
   assert.equal(pausedHistory.compression_active_started_at, null);
   assert.equal(typeof pausedHistory.compression_active_duration_ms, 'number');
   assert.ok((pausedHistory.compression_active_duration_ms ?? 0) > 0);
@@ -665,8 +666,9 @@ test('pauseCompressionSession stops active compression and resume processes pend
 
   markCompressionSessionRunning(started.session.id);
   const resumedHistory = db.prepare(
-    'SELECT compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
-  ).get(started.session.id) as { compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+    'SELECT status, compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
+  ).get(started.session.id) as { status: string; compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+  assert.equal(resumedHistory.status, 'running');
   assert.equal(resumedHistory.compression_active_duration_ms, pausedHistory.compression_active_duration_ms);
   assert.equal(typeof resumedHistory.compression_active_started_at, 'string');
   await executeCompressionSession(started.session.id);
@@ -1109,8 +1111,9 @@ test('interrupted compression sessions pause on startup and resume only unconfir
   assert.equal(interruptedPayload.timing?.segments?.at(-1)?.reason, 'interrupted');
   assert.equal(typeof interruptedPayload.timing?.segments?.at(-1)?.endedAt, 'string');
   const interruptedHistory = db.prepare(
-    'SELECT compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
-  ).get(started.session.id) as { compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+    'SELECT status, compression_active_duration_ms, compression_active_started_at FROM execution_history WHERE session_id = ?'
+  ).get(started.session.id) as { status: string; compression_active_duration_ms: number | null; compression_active_started_at: string | null };
+  assert.equal(interruptedHistory.status, 'paused');
   assert.equal(interruptedHistory.compression_active_started_at, null);
   assert.equal(typeof interruptedHistory.compression_active_duration_ms, 'number');
 

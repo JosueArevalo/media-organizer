@@ -43,6 +43,7 @@ export const en = {
 
   'dashboard.status': 'Status',
   'dashboard.status.running': 'In progress',
+  'dashboard.status.paused': 'Paused',
   'dashboard.status.completed': 'Completed',
   'dashboard.status.failed': 'With errors',
   'dashboard.status.cancelled': 'Cancelled',

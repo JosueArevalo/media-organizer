@@ -176,17 +176,42 @@ test('pauseGroupingSession and resumeGroupingSession update resumable session st
     resumeGroupingSession,
     startGroupingSession
   } = await import('../src/pipeline/grouping/groupingJob.service.js');
+  const { listExecutionHistory, upsertExecutionHistory } = await import('../src/dashboard/dashboard.service.js?grouping-pause-history=1');
+  const compressionSessionId = randomUUID();
+
+  upsertExecutionHistory({
+    sessionId: compressionSessionId,
+    name: null,
+    sourceDir,
+    outputDir,
+    outputRoot: outputDir,
+    status: 'completed',
+    startedAt: '2026-06-01T10:00:00.000Z',
+    finishedAt: '2026-06-01T10:01:00.000Z',
+    updatedAt: '2026-06-01T10:01:00.000Z',
+    totalItems: 2,
+    imageItems: 2,
+    videoItems: 0,
+    completedItems: 2,
+    failedItems: 0,
+    imageProfileLabel: null,
+    videoPresetLabel: null,
+    errorSummary: []
+  });
 
   const grouping = startGroupingSession({
     sourceDir,
-    outputDir
+    outputDir,
+    compressionSessionId
   });
 
   const paused = pauseGroupingSession(grouping.session.id);
   assert.equal(paused?.session.status, 'paused');
+  assert.equal(listExecutionHistory().find((execution) => execution.sessionId === compressionSessionId)?.groupingStatus, 'paused');
 
   const resumed = resumeGroupingSession(grouping.session.id);
   assert.equal(resumed?.session.status, 'running');
+  assert.equal(listExecutionHistory().find((execution) => execution.sessionId === compressionSessionId)?.groupingStatus, 'running');
 
   const persisted = getGroupingSession(grouping.session.id);
   assert.equal(persisted?.session.status, 'running');

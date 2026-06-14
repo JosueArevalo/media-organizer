@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { readdir, rm, stat } from 'node:fs/promises';
+import { pauseNonTerminalExecutionHistory } from '../dashboard/dashboard.service.js';
 import { getDb } from '../state/db.js';
 import { resolveToolCommand } from '../pipeline/compression/toolCommandResolver.js';
 import { listHandBrakePresets } from '../pipeline/compression/handbrakePresets.service.js';
@@ -120,11 +121,13 @@ export const handleSystemRoutes: RouteHandler = ({ req, res, requestUrl }) => {
         }
 
         const deletedEntries = await clearDirectoryContents(validation.destinationResolved);
+        const pausedExecutions = pauseNonTerminalExecutionHistory({ destinationPath: validation.destinationResolved });
 
         sendJson(res, 200, {
           status: 'ok',
           destinationPath: validation.destinationResolved,
-          deletedEntries
+          deletedEntries,
+          pausedExecutions
         });
       } catch (error) {
         sendCaughtError(res, error, 'Could not clear destination folder.');
@@ -148,6 +151,7 @@ export const handleSystemRoutes: RouteHandler = ({ req, res, requestUrl }) => {
         }
 
         const db = getDb();
+        pauseNonTerminalExecutionHistory();
 
         db.exec(`
           BEGIN TRANSACTION;
