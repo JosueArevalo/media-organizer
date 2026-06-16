@@ -8,7 +8,7 @@ It is designed for large, periodic imports from mobile devices into a local work
 
 ### Prerequisites
 
-- Node.js `22.13.0` or newer. Node `22.22.3` is recommended and pinned in `.nvmrc` and `.node-version`.
+- Node.js `22.13.0` or newer. Node 22 LTS or Node 24 LTS are recommended.
 - npm, bundled with Node.js.
 - Python, for media helper scripts.
 - mozjpeg-compatible `cjpeg`, for image compression.
@@ -18,12 +18,11 @@ The backend uses Node's built-in `node:sqlite` module. Node `22.9.0` is too old 
 
 ### macOS / Linux
 
-Using `nvm` is recommended:
+Install Node.js 22 LTS or 24 LTS from the official Node.js website, then run:
 
 ```bash
 cd media-organizer
-nvm install
-nvm use
+node -v
 npm ci
 npm run dev
 ```
@@ -31,6 +30,17 @@ npm run dev
 Dashboard: `http://localhost:5173`
 
 Backend health check: `http://localhost:4000/api/health`
+
+If you already use a Node version manager such as `nvm`, `fnm`, `asdf`, or mise, the repository also includes `.nvmrc` and `.node-version` pinned to Node `22.22.3`.
+
+With `nvm`:
+
+```bash
+nvm install
+nvm use
+npm ci
+npm run dev
+```
 
 ### Windows PowerShell
 
@@ -55,13 +65,15 @@ On Windows PowerShell, use `npm.cmd` if script execution blocks `npm.ps1`.
 
 ### Install Notes
 
+`npm` installs project dependencies after Node.js is already installed. It does not replace Node.js itself.
+
 Use `npm ci` for a clean install from the committed `package-lock.json`. This is the best option when validating the project from a fresh clone or downloaded zip.
 
 Use `npm install` when intentionally updating dependencies.
 
 Do not run `npm audit fix --force` as part of normal setup. It can change major dependency versions and make the local install less predictable. Audit warnings are separate from the Node version required to start the app.
 
-Docker is not required for local development. The simplest supported path is using the pinned Node version and running the commands above.
+Docker is not required for local development. The simplest supported path is installing a compatible Node.js LTS version and running the commands above.
 
 Stop development servers with `Ctrl+C` in the terminal where the command is running.
 
