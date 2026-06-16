@@ -26,8 +26,8 @@ if (compareVersions(currentVersion, minimumVersion) >= 0) {
 
 const isWindows = process.platform === "win32";
 const installHint = isWindows
-  ? "Install Node.js 22.22.3 or newer, then run: npm.cmd ci"
-  : "Install nvm, then run: nvm install && nvm use && npm ci";
+  ? "Install Node.js 22.22.3 or 24 LTS from https://nodejs.org/en/download, reopen PowerShell, then run: npm.cmd ci"
+  : "Install Node.js 22.22.3 or 24 LTS from https://nodejs.org/en/download, reopen the terminal, then run: npm ci";
 
 console.error("");
 console.error("Media Organizer cannot run with this Node.js version.");
@@ -40,6 +40,11 @@ console.error("Reason: the backend uses Node's built-in node:sqlite module.");
 console.error("Node 22.9.0 is too old for this project setup.");
 console.error("");
 console.error(installHint);
+console.error("");
+console.error("Optional version-manager route:");
+console.error("Install nvm with: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | bash");
+console.error("Then reopen the terminal.");
+console.error("Then run: nvm install && nvm use && npm ci");
 console.error("");
 
 process.exit(1);

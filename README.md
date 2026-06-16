@@ -8,7 +8,7 @@ It is designed for large, periodic imports from mobile devices into a local work
 
 ### Prerequisites
 
-- Node.js `22.13.0` or newer. Node 22 LTS or Node 24 LTS are recommended.
+- Node.js `22.13.0` or newer. Node `22.22.3` or Node 24 LTS are recommended.
 - npm, bundled with Node.js.
 - Python, for media helper scripts.
 - mozjpeg-compatible `cjpeg`, for image compression.
@@ -16,9 +16,11 @@ It is designed for large, periodic imports from mobile devices into a local work
 
 The backend uses Node's built-in `node:sqlite` module. Node `22.9.0` is too old and will fail before the app starts.
 
+Important: "Node 22" by itself is not specific enough. Check the full version with `node -v`; it must be `v22.13.0` or newer.
+
 ### macOS / Linux
 
-Install Node.js 22 LTS or 24 LTS from the official Node.js website, then run:
+Install Node.js `22.22.3` or Node 24 LTS from the official Node.js website, then run:
 
 ```bash
 cd media-organizer
@@ -32,6 +34,14 @@ Dashboard: `http://localhost:5173`
 Backend health check: `http://localhost:4000/api/health`
 
 If you already use a Node version manager such as `nvm`, `fnm`, `asdf`, or mise, the repository also includes `.nvmrc` and `.node-version` pinned to Node `22.22.3`.
+
+`nvm` is not included with macOS or npm. If you want to use it, install it first:
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | bash
+```
+
+Then close and reopen the terminal.
 
 With `nvm`:
 
