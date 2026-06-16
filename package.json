@@ -8,13 +8,20 @@
     "apps/web"
   ],
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
+    "preinstall": "node scripts/check-node-version.mjs",
+    "setup:check": "node scripts/check-node-version.mjs",
+    "predev": "node scripts/check-node-version.mjs",
     "dev": "node scripts/dev-all.mjs",
+    "predev:backend": "node scripts/check-node-version.mjs",
     "dev:backend": "npm run dev --workspace apps/backend",
+    "predev:web": "node scripts/check-node-version.mjs",
     "dev:web": "npm run dev --workspace apps/web",
+    "prebuild": "node scripts/check-node-version.mjs",
     "build": "npm run build --workspace apps/backend && npm run build --workspace apps/web",
+    "pretest": "node scripts/check-node-version.mjs",
     "test": "npm run test --workspace apps/backend",
     "verify:hello": "node scripts/verify-hello.mjs"
   }

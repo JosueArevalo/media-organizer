@@ -4,6 +4,89 @@ Media Organizer is a local-first application for organizing, compressing and man
 
 It is designed for large, periodic imports from mobile devices into a local workflow that stays under the user's control.
 
+## Quick Start
+
+### Prerequisites
+
+- Node.js `22.13.0` or newer. Node `22.22.3` or Node 24 LTS are recommended.
+- npm, bundled with Node.js.
+- Python, for media helper scripts.
+- mozjpeg-compatible `cjpeg`, for image compression.
+- `HandBrakeCLI`, for video compression.
+
+The backend uses Node's built-in `node:sqlite` module. Node `22.9.0` is too old and will fail before the app starts.
+
+Important: "Node 22" by itself is not specific enough. Check the full version with `node -v`; it must be `v22.13.0` or newer.
+
+### macOS / Linux
+
+Install Node.js `22.22.3` or Node 24 LTS from the official Node.js website, then run:
+
+```bash
+cd media-organizer
+node -v
+npm ci
+npm run dev
+```
+
+Dashboard: `http://localhost:5173`
+
+Backend health check: `http://localhost:4000/api/health`
+
+If you already use a Node version manager such as `nvm`, `fnm`, `asdf`, or mise, the repository also includes `.nvmrc` and `.node-version` pinned to Node `22.22.3`.
+
+`nvm` is not included with macOS or npm. If you want to use it, install it first:
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | bash
+```
+
+Then close and reopen the terminal.
+
+With `nvm`:
+
+```bash
+nvm install
+nvm use
+npm ci
+npm run dev
+```
+
+### Windows PowerShell
+
+```powershell
+cd media-organizer
+node -v
+npm.cmd ci
+npm.cmd run dev
+```
+
+Dashboard: `http://localhost:5173`
+
+Backend health check: `http://localhost:4000/api/health`
+
+If Node is not installed on Windows:
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+```
+
+On Windows PowerShell, use `npm.cmd` if script execution blocks `npm.ps1`.
+
+### Install Notes
+
+`npm` installs project dependencies after Node.js is already installed. It does not replace Node.js itself.
+
+Use `npm ci` for a clean install from the committed `package-lock.json`. This is the best option when validating the project from a fresh clone or downloaded zip.
+
+Use `npm install` when intentionally updating dependencies.
+
+Do not run `npm audit fix --force` as part of normal setup. It can change major dependency versions and make the local install less predictable. Audit warnings are separate from the Node version required to start the app.
+
+Docker is not required for local development. The simplest supported path is installing a compatible Node.js LTS version and running the commands above.
+
+Stop development servers with `Ctrl+C` in the terminal where the command is running.
+
 ## What It Is
 
 This repository contains:
@@ -51,77 +134,42 @@ Main flow:
 Frontend -> Backend -> Pipeline/Services -> SQLite / Filesystem / External Tools
 ```
 
-## Getting Started
+## Development Commands
 
-### Prerequisites
-
-- Node.js LTS 22.x
-- npm, bundled with Node.js
-- Python, for media helper scripts
-- mozjpeg-compatible `cjpeg`, for image compression
-- `HandBrakeCLI`, for video compression
-
-If Node is not installed on Windows:
+Run both backend and frontend:
 
 ```powershell
-winget install OpenJS.NodeJS.LTS
+npm.cmd run dev
 ```
 
-### Install
+Run only the backend:
 
 ```powershell
-cd <project-root>
-npm install
+npm.cmd run dev:backend
 ```
 
-### Run backend
+Run only the frontend:
 
 ```powershell
-cd <project-root>
-npm run dev:backend
+npm.cmd run dev:web
 ```
-
-Backend URL: `http://localhost:4000/api/health`
-
-### Run frontend dashboard
-
-```powershell
-cd <project-root>
-npm run dev:web
-```
-
-Dashboard URL: `http://localhost:5173`
-
-### Run both with one command
-
-```powershell
-cd <project-root>
-npm run dev
-```
-
-Stop development servers with `Ctrl+C` in the terminal where the command is running.
-
-## Build And Test
 
 Build both apps:
 
 ```powershell
-cd <project-root>
-npm run build
+npm.cmd run build
 ```
 
 Run backend tests:
 
 ```powershell
-cd <project-root>
-npm test
+npm.cmd test
 ```
 
 Run frontend tests:
 
 ```powershell
-cd <project-root>
-npm run test --workspace apps/web
+npm.cmd run test --workspace apps/web
 ```
 
 Recommended quality gate before merging:
@@ -132,7 +180,7 @@ npm.cmd test
 npm.cmd run test --workspace apps/web
 ```
 
-On Windows PowerShell, use `npm.cmd` if script execution blocks `npm.ps1`.
+On macOS and Linux, use `npm` instead of `npm.cmd`.
 
 ## Security Model
 
