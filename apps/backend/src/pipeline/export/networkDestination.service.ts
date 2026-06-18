@@ -42,9 +42,13 @@ const toDestinationRecord = (row: {
   lastUsedAt: row.last_used_at
 });
 
-const assertWindows = () => {
-  if (os.platform() !== 'win32') {
-    throw new NetworkPathError('Network folder authentication and browsing are currently supported on Windows only.');
+type NetworkPlatform = NodeJS.Platform;
+
+const isWindowsPlatform = (platform: NetworkPlatform) => platform === 'win32';
+
+const assertWindows = (platform: NetworkPlatform = os.platform()) => {
+  if (!isWindowsPlatform(platform)) {
+    throw new NetworkPathError('Mount this SMB share with your operating system, then select the mounted folder in the app.');
   }
 };
 
@@ -70,6 +74,26 @@ export const parseUncPath = (value: string) => {
   };
 };
 
+export const parseMountedPath = (value: string) => {
+  const trimmed = value.trim();
+
+  if (!trimmed.startsWith('/')) {
+    throw new NetworkPathError('Use an absolute mounted folder path such as /Volumes/Photos or /mnt/photos.');
+  }
+
+  if (trimmed.includes('\0') || trimmed.split('/').some((segment) => segment === '.' || segment === '..')) {
+    throw new NetworkPathError('Mounted folder paths cannot contain relative path segments.');
+  }
+
+  const normalized = path.posix.normalize(trimmed);
+  return normalized === '/' ? normalized : normalized.replace(/\/+$/, '');
+};
+
+export const normalizeNetworkRootPath = (
+  value: string,
+  platform: NetworkPlatform = os.platform()
+) => isWindowsPlatform(platform) ? parseUncPath(value).normalized : parseMountedPath(value);
+
 const getConnectionTarget = (uncPath: string) => {
   const parsed = parseUncPath(uncPath);
   return parsed.share ? `\\\\${parsed.host}\\${parsed.share}` : `\\\\${parsed.host}\\IPC$`;
@@ -93,19 +117,60 @@ const getParentUncPath = (uncPath: string) => {
   return `\\\\${segments.slice(0, -1).join('\\')}`;
 };
 
-const isSameOrUnderRoot = (rootPath: string | undefined, candidatePath: string) => {
+export const isSameOrUnderNetworkRoot = (
+  rootPath: string | undefined,
+  candidatePath: string,
+  platform: NetworkPlatform = os.platform()
+) => {
   if (!rootPath?.trim()) {
     return true;
   }
 
-  const root = parseUncPath(rootPath).normalized.toLowerCase();
-  const candidate = parseUncPath(candidatePath).normalized.toLowerCase();
+  if (isWindowsPlatform(platform)) {
+    const root = parseUncPath(rootPath).normalized.toLowerCase();
+    const candidate = parseUncPath(candidatePath).normalized.toLowerCase();
+    return candidate === root || candidate.startsWith(`${root}\\`);
+  }
 
-  return candidate === root || candidate.startsWith(`${root}\\`);
+  const root = parseMountedPath(rootPath);
+  const candidate = parseMountedPath(candidatePath);
+  const relative = path.posix.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.posix.isAbsolute(relative));
 };
 
-const runWindowsCommand = async (command: string, args: string[]) => {
-  assertWindows();
+const assertMountedDirectoryUnderRoot = (rootPath: string, candidatePath: string) => {
+  try {
+    if (
+      !fs.existsSync(rootPath)
+      || !fs.statSync(rootPath).isDirectory()
+      || !fs.existsSync(candidatePath)
+      || !fs.statSync(candidatePath).isDirectory()
+    ) {
+      throw new NetworkPathError('Mounted folder is not available. Reconnect it with your operating system and try again.');
+    }
+  } catch (error) {
+    if (error instanceof NetworkPathError) {
+      throw error;
+    }
+
+    throw new NetworkPathError('Mounted folder is not available. Reconnect it with your operating system and try again.');
+  }
+
+  const realRoot = fs.realpathSync(rootPath);
+  const realCandidate = fs.realpathSync(candidatePath);
+  const relative = path.relative(realRoot, realCandidate);
+
+  if (relative !== '' && (relative.startsWith('..') || path.isAbsolute(relative))) {
+    throw new NetworkPathError('Path must stay under the selected saved destination root.');
+  }
+};
+
+const runWindowsCommand = async (
+  command: string,
+  args: string[],
+  platform: NetworkPlatform = os.platform()
+) => {
+  assertWindows(platform);
 
   return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -132,7 +197,11 @@ const runWindowsCommand = async (command: string, args: string[]) => {
   });
 };
 
-export const authenticateNetworkPath = async (request: NetworkAuthRequest) => {
+export const authenticateNetworkPath = async (
+  request: NetworkAuthRequest,
+  platform: NetworkPlatform = os.platform()
+) => {
+  assertWindows(platform);
   const username = request.credentials.username?.trim();
   const password = request.credentials.password ?? '';
 
@@ -143,7 +212,7 @@ export const authenticateNetworkPath = async (request: NetworkAuthRequest) => {
   const target = getConnectionTarget(request.path);
   const persistence = request.credentials.rememberInWindows ? '/persistent:yes' : '/persistent:no';
 
-  await runWindowsCommand('net.exe', ['use', target, password, `/user:${username}`, persistence]);
+  await runWindowsCommand('net.exe', ['use', target, password, `/user:${username}`, persistence], platform);
 
   return {
     ok: true,
@@ -153,9 +222,13 @@ export const authenticateNetworkPath = async (request: NetworkAuthRequest) => {
   };
 };
 
-const maybeAuthenticate = async (networkPath: string, credentials?: NetworkCredentials) => {
+const maybeAuthenticate = async (
+  networkPath: string,
+  credentials: NetworkCredentials | undefined,
+  platform: NetworkPlatform
+) => {
   if (credentials?.username?.trim() || credentials?.password) {
-    await authenticateNetworkPath({ path: networkPath, credentials });
+    await authenticateNetworkPath({ path: networkPath, credentials }, platform);
   }
 };
 
@@ -196,17 +269,50 @@ const parseNetViewShares = (stdout: string, host: string) => {
   return entries;
 };
 
-export const browseNetworkPath = async (request: NetworkBrowseRequest): Promise<NetworkBrowseResult> => {
+export const browseNetworkPath = async (
+  request: NetworkBrowseRequest,
+  platform: NetworkPlatform = os.platform()
+): Promise<NetworkBrowseResult> => {
+  if (!isWindowsPlatform(platform)) {
+    const mountedPath = parseMountedPath(request.path);
+
+    if (!isSameOrUnderNetworkRoot(request.rootPath, mountedPath, platform)) {
+      throw new NetworkPathError('Browse path must stay under the selected saved destination root.');
+    }
+
+    const rootPath = request.rootPath ? parseMountedPath(request.rootPath) : mountedPath;
+    assertMountedDirectoryUnderRoot(rootPath, mountedPath);
+    const entries = fs
+      .readdirSync(mountedPath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({
+        name: entry.name,
+        path: path.posix.join(mountedPath, entry.name),
+        kind: 'directory' as const
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const parentCandidate = path.posix.dirname(mountedPath);
+
+    return {
+      path: mountedPath,
+      parentPath: mountedPath === rootPath || !isSameOrUnderNetworkRoot(rootPath, parentCandidate, platform)
+        ? null
+        : parentCandidate,
+      entries,
+      canCreateFolder: true
+    };
+  }
+
   const parsed = parseUncPath(request.path);
 
-  if (!isSameOrUnderRoot(request.rootPath, parsed.normalized)) {
+  if (!isSameOrUnderNetworkRoot(request.rootPath, parsed.normalized, platform)) {
     throw new NetworkPathError('Browse path must stay under the selected saved destination root.');
   }
 
-  await maybeAuthenticate(parsed.normalized, request.credentials);
+  await maybeAuthenticate(parsed.normalized, request.credentials, platform);
 
   if (!parsed.share) {
-    const { stdout } = await runWindowsCommand('net.exe', ['view', `\\\\${parsed.host}`]);
+    const { stdout } = await runWindowsCommand('net.exe', ['view', `\\\\${parsed.host}`], platform);
 
     return {
       path: parsed.normalized,
@@ -234,23 +340,46 @@ export const browseNetworkPath = async (request: NetworkBrowseRequest): Promise<
   };
 };
 
-export const createNetworkFolder = async (request: NetworkCreateFolderRequest) => {
-  const parsed = parseUncPath(request.parentPath);
+export const createNetworkFolder = async (
+  request: NetworkCreateFolderRequest,
+  platform: NetworkPlatform = os.platform()
+) => {
   const folderName = request.folderName.trim();
+
+  if (!/^[^\\/:*?"<>|]+$/.test(folderName)) {
+    throw new NetworkPathError('Folder name contains characters that are not allowed in a shared folder.');
+  }
+
+  if (!isWindowsPlatform(platform)) {
+    const parentPath = parseMountedPath(request.parentPath);
+
+    if (!isSameOrUnderNetworkRoot(request.rootPath, parentPath, platform)) {
+      throw new NetworkPathError('Folder must stay under the selected saved destination root.');
+    }
+
+    const rootPath = request.rootPath ? parseMountedPath(request.rootPath) : parentPath;
+    assertMountedDirectoryUnderRoot(rootPath, parentPath);
+
+    const nextPath = path.posix.join(parentPath, folderName);
+    fs.mkdirSync(nextPath, { recursive: false });
+
+    return {
+      path: nextPath,
+      name: folderName
+    };
+  }
+
+  const parsed = parseUncPath(request.parentPath);
 
   if (!parsed.share) {
     throw new NetworkPathError('Choose a share before creating folders.');
   }
 
-  if (!/^[^\\/:*?"<>|]+$/.test(folderName)) {
-    throw new NetworkPathError('Folder name contains characters that are not allowed on Windows.');
-  }
-
-  if (!isSameOrUnderRoot(request.rootPath, parsed.normalized)) {
+  if (!isSameOrUnderNetworkRoot(request.rootPath, parsed.normalized, platform)) {
     throw new NetworkPathError('Folder must stay under the selected saved destination root.');
   }
 
-  await maybeAuthenticate(parsed.normalized, request.credentials);
+  await maybeAuthenticate(parsed.normalized, request.credentials, platform);
 
   const nextPath = path.join(parsed.normalized, folderName);
   fs.mkdirSync(nextPath, { recursive: false });
@@ -271,12 +400,26 @@ export const listNetworkDestinations = () => {
   return rows.map(toDestinationRecord);
 };
 
-export const saveNetworkDestination = (request: NetworkDestinationRequest) => {
+export const saveNetworkDestination = (
+  request: NetworkDestinationRequest,
+  platform: NetworkPlatform = os.platform()
+) => {
   runMigrations();
-  const rootPath = parseUncPath(request.rootPath).normalized;
+  const rootPath = normalizeNetworkRootPath(request.rootPath, platform);
+
+  if (!isWindowsPlatform(platform)) {
+    assertMountedDirectoryUnderRoot(rootPath, rootPath);
+
+    try {
+      fs.accessSync(rootPath, fs.constants.R_OK);
+    } catch {
+      throw new NetworkPathError('Mounted folder is not readable. Check its permissions and try again.');
+    }
+  }
+
   const timestamp = nowIso();
   const name = request.name?.trim() || rootPath;
-  const username = request.username?.trim() || null;
+  const username = isWindowsPlatform(platform) ? request.username?.trim() || null : null;
   const db = getDb();
 
   db.prepare(
@@ -304,13 +447,16 @@ export const deleteNetworkDestination = (id: string) => {
   return result.changes > 0;
 };
 
-export const markNetworkDestinationUsed = (rootPath: string) => {
+export const markNetworkDestinationUsed = (
+  rootPath: string,
+  platform: NetworkPlatform = os.platform()
+) => {
   runMigrations();
   const timestamp = nowIso();
   const db = getDb();
 
   try {
-    const normalized = parseUncPath(rootPath).normalized;
+    const normalized = normalizeNetworkRootPath(rootPath, platform);
     db.prepare('UPDATE network_destinations SET last_used_at = ?, updated_at = ? WHERE root_path = ?').run(timestamp, timestamp, normalized);
   } catch {
     // Ignore non-UNC paths here; request validation handles user-facing errors.
@@ -319,11 +465,14 @@ export const markNetworkDestinationUsed = (rootPath: string) => {
 
 export const getNetworkErrorMessage = (error: unknown) => {
   const detail = error instanceof Error ? error.message : 'Unknown network error.';
+  const mountedFolderUnavailable = /mounted folder is not available|ENOENT|not found/i.test(detail);
   const requiresAuthentication = /logon|credential|password|access is denied|acceso denegado|unknown|1326|1219|53/i.test(detail);
 
   return {
     ok: false,
-    message: requiresAuthentication
+    message: mountedFolderUnavailable
+      ? 'Mounted folder is not available. Reconnect it with your operating system and try again.'
+      : requiresAuthentication
       ? 'Authentication is required or expired for this network path.'
       : 'Network path is not reachable.',
     details: detail,

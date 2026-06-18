@@ -10,7 +10,7 @@ import {
   createNetworkFolderRequest,
   createExportJobRequest,
   deleteNetworkDestinationRequest,
-  isValidUncPath,
+  isValidNetworkPath,
   listExportJobsRequest,
   listNetworkDestinationsRequest,
   normalizeNetworkPathForComparison,
@@ -25,6 +25,8 @@ import {
   type ExportJobSnapshot,
   type ExportTargetTestResult
 } from '../services/export.service';
+import { pickDirectoryRequest } from '../services/system-picker.service';
+import { getRuntimePlatform, isWindowsPlatform } from '../services/tool-status.service';
 
 const itemStatusLabels = {
   pending: 'export.itemStatus.pending',
@@ -47,6 +49,8 @@ const formatBytes = (value: number) => {
 export const NetworkFolderExportPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const runtimePlatform = getRuntimePlatform();
+  const isWindows = isWindowsPlatform(runtimePlatform);
   const groupingSessionState = useGroupingSessionState();
   const exportJobState = useExportJobState('network-folder', {
     groupingSessionId: groupingSessionState.backendSessionId,
@@ -69,6 +73,7 @@ export const NetworkFolderExportPage = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [isSavingDestination, setIsSavingDestination] = useState(false);
+  const [isPickingMountedFolder, setIsPickingMountedFolder] = useState(false);
   const [isDeletingDestination, setIsDeletingDestination] = useState(false);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [isAddLocationOpen, setIsAddLocationOpen] = useState(false);
@@ -79,10 +84,10 @@ export const NetworkFolderExportPage = () => {
   const [newFolderName, setNewFolderName] = useState('');
 
   const sourceRoot = groupingSessionState.outputRootLabel ?? '';
-  const normalizedDestinationPath = normalizeNetworkPathForComparison(destinationPath);
+  const normalizedDestinationPath = normalizeNetworkPathForComparison(destinationPath, runtimePlatform);
   const matchingJob = jobs.find((snapshot) =>
     snapshot.job.targetPath
-    && normalizeNetworkPathForComparison(snapshot.job.targetPath) === normalizedDestinationPath
+    && normalizeNetworkPathForComparison(snapshot.job.targetPath, runtimePlatform) === normalizedDestinationPath
   ) ?? null;
   const runningJob = jobs.find((snapshot) => snapshot.job.status === 'running') ?? null;
   const canResumeMatchingJob = matchingJob?.job.status === 'paused' || matchingJob?.job.status === 'draft';
@@ -184,7 +189,7 @@ export const NetworkFolderExportPage = () => {
   const canBrowseNetworkFolder = Boolean(selectedRootPath || destinationPath.trim());
 
   const credentials = useMemo<NetworkCredentials | undefined>(() => {
-    if (!username.trim() || !password) {
+    if (!isWindows || !username.trim() || !password) {
       return undefined;
     }
 
@@ -193,7 +198,7 @@ export const NetworkFolderExportPage = () => {
       password,
       rememberInWindows
     };
-  }, [password, rememberInWindows, username]);
+  }, [isWindows, password, rememberInWindows, username]);
 
   const resetNetworkDestinationDraft = useCallback(() => {
     setSelectedDestinationId('');
@@ -280,8 +285,8 @@ export const NetworkFolderExportPage = () => {
       return;
     }
 
-    if (!isValidUncPath(rootPath)) {
-      setBackendError(t('export.network.invalidUncPath'));
+    if (!isValidNetworkPath(rootPath, runtimePlatform)) {
+      setBackendError(isWindows ? t('export.network.invalidUncPath') : t('export.network.invalidMountedPath'));
       setIsAddLocationOpen(true);
       return;
     }
@@ -292,7 +297,7 @@ export const NetworkFolderExportPage = () => {
       const saved = await saveNetworkDestinationRequest({
         name: saveName.trim() || undefined,
         rootPath,
-        username: username.trim() || undefined
+        username: isWindows ? username.trim() || undefined : undefined
       });
       await loadDestinations();
       setSelectedDestinationId(saved.id);
@@ -313,6 +318,30 @@ export const NetworkFolderExportPage = () => {
   const handleSaveDestinationSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     void handleSaveDestination();
+  };
+
+  const handlePickMountedFolder = async () => {
+    setIsPickingMountedFolder(true);
+
+    try {
+      const result = await pickDirectoryRequest({
+        title: t('export.network.mountedFolderPickerTitle'),
+        initialPath: saveRootPath
+      });
+
+      if (result.status === 'selected') {
+        setSaveRootPath(result.path);
+        setDestinationPath(result.path);
+        setTargetTest(null);
+        setBackendError(null);
+      } else if (result.status === 'unsupported') {
+        setBackendError(result.message);
+      }
+    } catch (error) {
+      setBackendError(error instanceof Error ? error.message : t('export.network.mountedFolderPickerError'));
+    } finally {
+      setIsPickingMountedFolder(false);
+    }
   };
 
   const handleDeleteDestination = async () => {
@@ -569,7 +598,13 @@ export const NetworkFolderExportPage = () => {
           {shouldShowAddLocation && <form className="network-subsection" onSubmit={handleSaveDestinationSubmit}>
             <div>
               <p className="network-subsection-title">{t('export.network.addLocationTitle')}</p>
-              <p className="page-summary-note">{t('export.network.addLocationNote')}</p>
+              <p className="page-summary-note">
+                {isWindows
+                  ? t('export.network.addLocationNote')
+                  : runtimePlatform === 'darwin'
+                    ? t('export.network.mountedLocationNoteMac')
+                    : t('export.network.mountedLocationNoteLinux')}
+              </p>
             </div>
 
             <div className="network-destination-grid">
@@ -585,19 +620,34 @@ export const NetworkFolderExportPage = () => {
               </label>
 
               <label className="folder-path-control">
-                <span>{t('export.network.rootPath')}</span>
+                <span>{isWindows ? t('export.network.rootPath') : t('export.network.mountedRootPath')}</span>
                 <input
                   className="folder-path-input"
                   value={saveRootPath}
                   onChange={(event) => setSaveRootPath(event.target.value)}
-                  placeholder={t('export.network.rootPathPlaceholder')}
+                  placeholder={isWindows
+                    ? t('export.network.rootPathPlaceholder')
+                    : runtimePlatform === 'darwin'
+                      ? t('export.network.mountedRootPathPlaceholderMac')
+                      : t('export.network.mountedRootPathPlaceholderLinux')}
                   type="text"
                 />
-                <small className="field-hint">{t('export.network.rootPathHint')}</small>
+                <small className="field-hint">
+                  {isWindows
+                    ? t('export.network.rootPathHint')
+                    : runtimePlatform === 'darwin'
+                      ? t('export.network.mountedRootPathHintMac')
+                      : t('export.network.mountedRootPathHintLinux')}
+                </small>
               </label>
             </div>
 
             <div className="network-export-tools">
+              {!isWindows && (
+                <button className="btn btn-secondary" type="button" onClick={() => void handlePickMountedFolder()} disabled={isPickingMountedFolder}>
+                  {isPickingMountedFolder ? t('export.network.selectingMountedFolder') : t('export.network.selectMountedFolder')}
+                </button>
+              )}
               <button className="btn btn-primary" type="submit" disabled={isSavingDestination}>
                 {isSavingDestination ? t('export.network.savingDestination') : t('export.network.saveDestination')}
               </button>
@@ -605,7 +655,7 @@ export const NetworkFolderExportPage = () => {
           </form>}
         </div>
 
-        {hasSelectedDestination && <form className="network-step" onSubmit={handleAuthenticateSubmit}>
+        {hasSelectedDestination && isWindows && <form className="network-step" onSubmit={handleAuthenticateSubmit}>
           <div>
             <p className="page-section-title">{t('export.network.accessStep')}</p>
             <p className="page-summary-note">{t('export.network.credentialsNote')}</p>
@@ -652,7 +702,7 @@ export const NetworkFolderExportPage = () => {
 
         {hasSelectedDestination && <div className="network-step network-export-folder">
           <div>
-            <p className="page-section-title">{t('export.network.folderStep')}</p>
+            <p className="page-section-title">{isWindows ? t('export.network.folderStep') : t('export.network.folderStepUnix')}</p>
             <p className="page-summary-note">{t('export.network.exportFolderNote')}</p>
           </div>
 
@@ -679,7 +729,11 @@ export const NetworkFolderExportPage = () => {
                   setDestinationPath(event.target.value);
                   setTargetTest(null);
                 }}
-                placeholder={t('export.network.destinationPathPlaceholder')}
+                placeholder={isWindows
+                  ? t('export.network.destinationPathPlaceholder')
+                  : runtimePlatform === 'darwin'
+                    ? t('export.network.mountedRootPathPlaceholderMac')
+                    : t('export.network.mountedRootPathPlaceholderLinux')}
                 type="text"
               />
             </label>

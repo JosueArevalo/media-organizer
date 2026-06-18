@@ -2,14 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CompressionSessionManifest } from './compressionJob.service.js';
+import { getPythonCommand } from './pythonCommandResolver.js';
 
 const currentFile = fileURLToPath(import.meta.url);
 const currentDir = path.dirname(currentFile);
 const repoRootDir = path.resolve(currentDir, '../../../../..');
 
 export const getCompressionScriptsDir = () => path.join(repoRootDir, 'scripts', 'media_tools');
-
-export const getPythonCommand = () => process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python';
 
 type ResumeItem = {
   source: string;

@@ -234,20 +234,97 @@ def iter_image_files(source_dir: Path):
                 yield file_path
 
 
-def run_cjpeg(encoder_command: str, quality: int, source_file: Path, output_file: Path):
-    temp_file = build_temp_output_path(output_file)
-    command = [
+def resolve_companion_command(command: str, companion_name: str) -> str:
+    command_path = Path(command)
+
+    if command_path.parent != Path('.') or command_path.is_absolute():
+        suffix = command_path.suffix
+        candidates = [
+            command_path.with_name(f'{companion_name}{suffix}'),
+            command_path.with_name(companion_name),
+            command_path.with_name(f'{companion_name}.exe'),
+        ]
+
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+
+    resolved = shutil.which(companion_name)
+
+    if resolved:
+        return resolved
+
+    if os.name == 'nt':
+        resolved_exe = shutil.which(f'{companion_name}.exe')
+
+        if resolved_exe:
+            return resolved_exe
+
+    raise ToolConfigurationError(f'{companion_name} was not found. Install the full MozJPEG tool suite or add {companion_name} to PATH.')
+
+
+def is_cjpeg_input_format_error(error: subprocess.CalledProcessError) -> bool:
+    output = f'{error.stdout or ""}\n{error.stderr or ""}'.lower()
+    return 'unrecognized input file format' in output or 'unsupported input file format' in output
+
+
+def build_cjpeg_command(encoder_command: str, quality: int, source_file: Path, output_file: Path) -> list[str]:
+    return [
         encoder_command,
         '-quality',
         str(quality),
         '-progressive',
         '-optimize',
         '-outfile',
-        str(temp_file),
+        str(output_file),
         str(source_file),
     ]
+
+
+def run_cjpeg_direct(encoder_command: str, quality: int, source_file: Path, output_file: Path) -> list[str]:
+    command = build_cjpeg_command(encoder_command, quality, source_file, output_file)
+    run_external_command(command)
+    return command
+
+
+def run_cjpeg_via_djpeg(encoder_command: str, quality: int, source_file: Path, output_file: Path) -> list[str]:
+    djpeg_command = resolve_companion_command(encoder_command, 'djpeg')
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.ppm')
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+    decode_command = [
+        djpeg_command,
+        '-ppm',
+        '-outfile',
+        str(temp_path),
+        str(source_file),
+    ]
+    encode_command = build_cjpeg_command(encoder_command, quality, temp_path, output_file)
+
     try:
-        run_external_command(command)
+        run_external_command(decode_command)
+        run_external_command(encode_command)
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return [*decode_command, '&&', *encode_command]
+
+
+def run_cjpeg(encoder_command: str, quality: int, source_file: Path, output_file: Path):
+    temp_file = build_temp_output_path(output_file)
+
+    try:
+        try:
+            command = run_cjpeg_direct(encoder_command, quality, source_file, temp_file)
+        except subprocess.CalledProcessError as error:
+            if not is_cjpeg_input_format_error(error):
+                raise
+
+            command = run_cjpeg_via_djpeg(encoder_command, quality, source_file, temp_file)
+
         replace_output(temp_file, output_file)
     finally:
         try:
@@ -412,6 +489,9 @@ def main() -> int:
             except FileNotFoundError:
                 status = 'failed'
                 error_message = f"Image encoder command not found: {args.encoder_command}"
+            except ToolConfigurationError as error:
+                status = 'failed'
+                error_message = str(error)
             except subprocess.CalledProcessError as error:
                 status = 'failed'
                 stderr = (error.stderr or '').strip()

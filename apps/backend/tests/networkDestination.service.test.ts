@@ -90,3 +90,70 @@ test('create folder validates that target remains under selected UNC root', asyn
     /must stay under/
   );
 });
+
+test('mounted paths normalize POSIX roots and reject relative traversal', async () => {
+  const {
+    isSameOrUnderNetworkRoot,
+    normalizeNetworkRootPath,
+    parseMountedPath
+  } = await import('../src/pipeline/export/networkDestination.service.js');
+
+  assert.equal(parseMountedPath('/Volumes/Photos/'), '/Volumes/Photos');
+  assert.equal(normalizeNetworkRootPath('/mnt/photos/', 'linux'), '/mnt/photos');
+  assert.equal(isSameOrUnderNetworkRoot('/Volumes/Photos', '/Volumes/Photos/2026', 'darwin'), true);
+  assert.equal(isSameOrUnderNetworkRoot('/Volumes/Photos', '/Volumes/Other', 'darwin'), false);
+  assert.throws(() => parseMountedPath('Volumes/Photos'), /absolute mounted folder path/);
+  assert.throws(() => parseMountedPath('/Volumes/Photos/../Other'), /relative path segments/);
+});
+
+test('Unix authentication directs users to their operating system without running Windows commands', async () => {
+  const { authenticateNetworkPath } = await import('../src/pipeline/export/networkDestination.service.js');
+
+  await assert.rejects(
+    authenticateNetworkPath({
+      path: '/Volumes/Photos',
+      credentials: { username: 'media', password: 'secret' }
+    }, 'darwin'),
+    /Mount this SMB share with your operating system/
+  );
+});
+
+test('mounted destinations can be saved, browsed, and extended on Unix', {
+  skip: process.platform === 'win32'
+}, async () => {
+  const mountedRoot = path.join(tempRoot, 'mounted-share');
+  fs.mkdirSync(path.join(mountedRoot, 'Existing'), { recursive: true });
+  const {
+    browseNetworkPath,
+    createNetworkFolder,
+    saveNetworkDestination
+  } = await import('../src/pipeline/export/networkDestination.service.js');
+
+  const saved = saveNetworkDestination({ name: 'Mounted NAS', rootPath: mountedRoot }, process.platform);
+  assert.equal(saved.rootPath, mountedRoot);
+  assert.equal(saved.username, null);
+
+  const browsed = await browseNetworkPath({ path: mountedRoot, rootPath: mountedRoot }, process.platform);
+  assert.deepEqual(browsed.entries.map((entry) => entry.name), ['Existing']);
+  assert.equal(browsed.parentPath, null);
+
+  const created = await createNetworkFolder({
+    parentPath: mountedRoot,
+    rootPath: mountedRoot,
+    folderName: 'Export'
+  }, process.platform);
+  assert.equal(fs.existsSync(created.path), true);
+});
+
+test('saving a disconnected mounted destination does not create it', {
+  skip: process.platform === 'win32'
+}, async () => {
+  const missingRoot = path.join(tempRoot, 'disconnected-share');
+  const { saveNetworkDestination } = await import('../src/pipeline/export/networkDestination.service.js');
+
+  assert.throws(
+    () => saveNetworkDestination({ rootPath: missingRoot }, process.platform),
+    /Mounted folder is not available/
+  );
+  assert.equal(fs.existsSync(missingRoot), false);
+});

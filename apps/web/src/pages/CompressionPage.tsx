@@ -36,6 +36,7 @@ import {
   type HandBrakePresetOption
 } from '../services/compression.service';
 import { scanSourceTreeRequest } from '../services/source-tree.service';
+import { getEffectiveToolCommand } from '../services/tool-status.service';
 import { isPreCompressionStepReadOnly } from '../services/workflow-locks';
 
 type ImagePresetId = CompressionImagePreset;
@@ -314,7 +315,7 @@ const isUnderExcludedAncestor = (path: string, scope: ScopeSets) => {
   return ancestorExcluded;
 };
 
-const extractCompressionErrorDetails = (payloadJson: string | null): { completedCount: number; failedCount: number; failedItems: Array<{ source: string; error?: string }> } => {
+const extractCompressionErrorDetails = (payloadJson: string | null): { completedCount: number; failedCount: number; failedItems: Array<{ source: string; error?: string }>; fatalError?: string } => {
   if (!payloadJson) {
     return { completedCount: 0, failedCount: 0, failedItems: [] };
   }
@@ -324,6 +325,7 @@ const extractCompressionErrorDetails = (payloadJson: string | null): { completed
       summary?: { completedItems: number; failedItems: number };
       image?: { items: Array<{ source: string; status: string; error?: string }> };
       video?: { items: Array<{ source: string; status: string; error?: string }> };
+      fatalError?: string;
     };
 
     const completedCount = payload.summary?.completedItems ?? 0;
@@ -347,11 +349,25 @@ const extractCompressionErrorDetails = (payloadJson: string | null): { completed
       }
     }
 
-    return { completedCount, failedCount, failedItems };
+    return {
+      completedCount,
+      failedCount,
+      failedItems,
+      ...(typeof payload.fatalError === 'string' ? { fatalError: payload.fatalError } : {})
+    };
   } catch (e) {
     return { completedCount: 0, failedCount: 0, failedItems: [] };
   }
 };
+
+const createFatalProgressItem = (message: string): CompressionProgressItem => ({
+  id: 'fatal-error',
+  sourcePath: 'Compression session',
+  displayPath: 'Compression session',
+  status: 'failed',
+  error: message,
+  operation: 'copy'
+});
 
 function isFileIncludedByScope(path: string, scope: ScopeSets) {
   const ancestorExcluded = isUnderExcludedAncestor(path, scope);
@@ -524,6 +540,7 @@ export const CompressionPage = () => {
     failedCompress: number;
     failedCopy: number;
     retainedOriginalBecauseLarger: number;
+    fatalError?: string;
   } | null>(null);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [logStatusFilter, setLogStatusFilter] = useState<CompressionLogStatusFilter>('all');
@@ -533,20 +550,25 @@ export const CompressionPage = () => {
   const pollSessionIdRef = useRef<string | null>(null);
 
   const syncProgressData = (progress: Awaited<ReturnType<typeof getCompressionProgressRequest>>) => {
+    const processedItems = progress.processedItems.length === 0 && progress.fatalError
+      ? [createFatalProgressItem(progress.fatalError)]
+      : progress.processedItems;
+
     setProgressData({
       status: progress.status as 'running' | 'paused' | 'completed' | 'failed' | 'cancelled',
       total: progress.total,
       completed: progress.completed,
       failed: progress.failed,
       currentlyProcessing: progress.currentlyProcessing,
-      processedItems: progress.processedItems,
+      processedItems,
       totalCompress: progress.totalCompress,
       totalCopy: progress.totalCopy,
       completedCompress: progress.completedCompress,
       completedCopy: progress.completedCopy,
       failedCompress: progress.failedCompress,
       failedCopy: progress.failedCopy,
-      retainedOriginalBecauseLarger: progress.retainedOriginalBecauseLarger
+      retainedOriginalBecauseLarger: progress.retainedOriginalBecauseLarger,
+      ...(progress.fatalError ? { fatalError: progress.fatalError } : {})
     });
   };
 
@@ -621,7 +643,7 @@ export const CompressionPage = () => {
 
   useEffect(() => {
     let isActive = true;
-    const configuredVideoCommand = encoderSettings.videoToolCommand.trim();
+    const configuredVideoCommand = getEffectiveToolCommand('video', encoderSettings);
 
     if (!configuredVideoCommand) {
       setVideoPresets([]);
@@ -664,7 +686,7 @@ export const CompressionPage = () => {
     return () => {
       isActive = false;
     };
-  }, [encoderSettings.videoToolCommand]);
+  }, [encoderSettings, t]);
 
   useEffect(() => {
     let isActive = true;
@@ -809,7 +831,9 @@ export const CompressionPage = () => {
 
         if (status === 'failed' || status === 'cancelled') {
           const errorDetails = extractCompressionErrorDetails(session.checkpoint?.payloadJson ?? null);
-          const message = errorDetails.failedCount > 0
+          const message = errorDetails.fatalError && errorDetails.failedItems.length === 0
+            ? errorDetails.fatalError
+            : errorDetails.failedCount > 0
             ? t('compression.failedItemsSummary', { completed: errorDetails.completedCount, failed: errorDetails.failedCount })
             : t('compression.sessionEnded', { status });
 
@@ -851,21 +875,7 @@ export const CompressionPage = () => {
           return;
         }
 
-        setProgressData({
-          status: progress.status as 'running' | 'paused' | 'completed' | 'failed' | 'cancelled',
-          total: progress.total,
-          completed: progress.completed,
-          failed: progress.failed,
-          currentlyProcessing: progress.currentlyProcessing,
-          processedItems: progress.processedItems,
-          totalCompress: progress.totalCompress,
-          totalCopy: progress.totalCopy,
-          completedCompress: progress.completedCompress,
-          completedCopy: progress.completedCopy,
-          failedCompress: progress.failedCompress,
-          failedCopy: progress.failedCopy,
-          retainedOriginalBecauseLarger: progress.retainedOriginalBecauseLarger
-        });
+        syncProgressData(progress);
       })
       .catch(() => {
         // Completed local snapshots can outlive backend cleanup; leave the page usable.
@@ -917,9 +927,13 @@ export const CompressionPage = () => {
   const needsMozJpeg = hasSelectedJpegImages || hasSelectedHeicImages;
   const needsImageMagick = hasSelectedHeicImages;
   const needsHandBrake = hasSelectedVideos;
-  const hasConfiguredMozJpeg = Boolean(encoderSettings.imageToolCommand.trim());
-  const hasConfiguredImageMagick = Boolean(encoderSettings.imageMagickCommand.trim());
-  const hasConfiguredHandBrake = Boolean(encoderSettings.videoToolCommand.trim());
+  const effectiveImageToolCommand = getEffectiveToolCommand('image', encoderSettings);
+  const effectiveImageMagickCommand = getEffectiveToolCommand('imagemagick', encoderSettings);
+  const effectiveExifToolCommand = getEffectiveToolCommand('exiftool', encoderSettings);
+  const effectiveVideoToolCommand = getEffectiveToolCommand('video', encoderSettings);
+  const hasConfiguredMozJpeg = Boolean(effectiveImageToolCommand);
+  const hasConfiguredImageMagick = Boolean(effectiveImageMagickCommand);
+  const hasConfiguredHandBrake = Boolean(effectiveVideoToolCommand);
   const hasAvailableVideoPresets = !needsHandBrake || videoPresets.length > 0;
   const hasRequiredTools =
     (!needsMozJpeg || hasConfiguredMozJpeg) &&
@@ -941,7 +955,7 @@ export const CompressionPage = () => {
     hasRequiredTools &&
     hasAvailableVideoPresets;
   const toolWarnings = [
-    hasSelectedHeicImages && !encoderSettings.exifToolCommand.trim()
+    hasSelectedHeicImages && !effectiveExifToolCommand
       ? t('compression.exifToolWarning')
       : null,
     hasCopyOnlyImages
@@ -1031,9 +1045,13 @@ export const CompressionPage = () => {
     }
 
     const latestEncoderSettings = await loadEncoderSettings();
-    const latestHasConfiguredMozJpeg = Boolean(latestEncoderSettings.imageToolCommand.trim());
-    const latestHasConfiguredImageMagick = Boolean(latestEncoderSettings.imageMagickCommand.trim());
-    const latestHasConfiguredHandBrake = Boolean(latestEncoderSettings.videoToolCommand.trim());
+    const latestImageToolCommand = getEffectiveToolCommand('image', latestEncoderSettings);
+    const latestImageMagickCommand = getEffectiveToolCommand('imagemagick', latestEncoderSettings);
+    const latestExifToolCommand = getEffectiveToolCommand('exiftool', latestEncoderSettings);
+    const latestVideoToolCommand = getEffectiveToolCommand('video', latestEncoderSettings);
+    const latestHasConfiguredMozJpeg = Boolean(latestImageToolCommand);
+    const latestHasConfiguredImageMagick = Boolean(latestImageMagickCommand);
+    const latestHasConfiguredHandBrake = Boolean(latestVideoToolCommand);
     const latestHasRequiredTools =
       (!needsMozJpeg || latestHasConfiguredMozJpeg) &&
       (!needsImageMagick || latestHasConfiguredImageMagick) &&
@@ -1073,10 +1091,10 @@ export const CompressionPage = () => {
         imageProfileLabel: selectedImageProfileLabel,
         videoPresetLabel: selectedVideoProfileLabel,
         videoOutputFormatMode,
-        imageToolCommand: latestEncoderSettings.imageToolCommand,
-        videoToolCommand: latestEncoderSettings.videoToolCommand,
-        imageMagickCommand: latestEncoderSettings.imageMagickCommand,
-        exifToolCommand: latestEncoderSettings.exifToolCommand,
+        imageToolCommand: latestImageToolCommand,
+        videoToolCommand: latestVideoToolCommand,
+        imageMagickCommand: latestImageMagickCommand,
+        exifToolCommand: latestExifToolCommand,
         selectionScope: loadSourceSelectionScope()
       });
 
@@ -1093,21 +1111,7 @@ export const CompressionPage = () => {
           // First, try to get progress
           const progress = await getCompressionProgressRequest(started.session.id);
           
-          setProgressData({
-            status: progress.status as 'running' | 'paused' | 'completed' | 'failed' | 'cancelled',
-            total: progress.total,
-            completed: progress.completed,
-            failed: progress.failed,
-            currentlyProcessing: progress.currentlyProcessing,
-            processedItems: progress.processedItems,
-            totalCompress: progress.totalCompress,
-            totalCopy: progress.totalCopy,
-            completedCompress: progress.completedCompress,
-            completedCopy: progress.completedCopy,
-            failedCompress: progress.failedCompress,
-            failedCopy: progress.failedCopy,
-            retainedOriginalBecauseLarger: progress.retainedOriginalBecauseLarger
-          });
+          syncProgressData(progress);
 
           const status = progress.status;
 
@@ -1129,7 +1133,9 @@ export const CompressionPage = () => {
             const errorDetails = extractCompressionErrorDetails(session.checkpoint?.payloadJson ?? null);
             let errorMessage = t('compression.sessionEnded', { status });
 
-            if (errorDetails.failedCount > 0) {
+            if ((errorDetails.fatalError || progress.fatalError) && errorDetails.failedItems.length === 0) {
+              errorMessage = errorDetails.fatalError ?? progress.fatalError ?? errorMessage;
+            } else if (errorDetails.failedCount > 0) {
               errorMessage = t('compression.failedItemsSummary', { completed: errorDetails.completedCount, failed: errorDetails.failedCount });
 
               if (errorDetails.failedItems.length > 0) {
@@ -1228,7 +1234,9 @@ export const CompressionPage = () => {
           if (status === 'failed' || status === 'cancelled') {
             const session = await getCompressionSessionRequest(sessionId);
             const errorDetails = extractCompressionErrorDetails(session.checkpoint?.payloadJson ?? null);
-            const errorMessage = errorDetails.failedCount > 0
+            const errorMessage = (errorDetails.fatalError || progress.fatalError) && errorDetails.failedItems.length === 0
+              ? errorDetails.fatalError ?? progress.fatalError ?? t('compression.sessionEnded', { status })
+              : errorDetails.failedCount > 0
               ? t('compression.failedItemsSummary', { completed: errorDetails.completedCount, failed: errorDetails.failedCount })
               : t('compression.sessionEnded', { status });
 

@@ -957,6 +957,7 @@ test('fatal compression resume errors preserve existing failed item counts', asy
 
   const progress = getCompressionProgress(started.session.id);
   assert.equal(progress?.failed, 2);
+  assert.equal(progress?.fatalError, 'spawn ENAMETOOLONG');
 
   const checkpointPayload = JSON.parse(getCompressionSession(started.session.id)?.checkpoint?.payloadJson ?? '{}');
   assert.equal(checkpointPayload.summary.failedItems, 2);

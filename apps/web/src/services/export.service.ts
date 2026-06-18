@@ -1,3 +1,5 @@
+import { getRuntimePlatform, type RuntimePlatform } from './tool-status.service';
+
 export type ExportTargetType = 'network-folder' | 'google-photos';
 
 export type ExportJobStatus = 'draft' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
@@ -202,8 +204,32 @@ export const isValidUncPath = (value: string) => {
   return trimmed.startsWith('\\\\') && segments.length >= 1 && segments.every((segment) => segment !== '.' && segment !== '..');
 };
 
-export const normalizeNetworkPathForComparison = (value: string) =>
-  value.trim().replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase();
+export const isValidNetworkPath = (
+  value: string,
+  platform: RuntimePlatform = getRuntimePlatform()
+) => {
+  if (platform === 'win32') {
+    return isValidUncPath(value);
+  }
+
+  const trimmed = value.trim();
+  return trimmed.startsWith('/')
+    && !trimmed.includes('\0')
+    && trimmed.split('/').every((segment) => segment !== '.' && segment !== '..');
+};
+
+export const normalizeNetworkPathForComparison = (
+  value: string,
+  platform: RuntimePlatform = getRuntimePlatform()
+) => {
+  const trimmed = value.trim();
+
+  if (platform === 'win32') {
+    return trimmed.replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase();
+  }
+
+  return trimmed === '/' ? trimmed : trimmed.replace(/\/+$/, '');
+};
 
 const readErrorBody = async (response: Response) => {
   const body = await response.text();

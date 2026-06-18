@@ -22,10 +22,17 @@ import {
 } from '../services/completion-notification.service';
 import { resetCompressionSession } from '../services/compression-job.store';
 import { pickFileRequest } from '../services/system-picker.service';
+import {
+  getEffectiveToolCommand,
+  isWindowsPlatform,
+  loadToolsStatusRequest,
+  type ExternalToolStatusSnapshot,
+  type ToolsStatusSnapshot,
+  type ToolStatus
+} from '../services/tool-status.service';
 import { useTranslation, type TranslationKey } from '../i18n';
 import '../styles/SettingsPage.css';
 
-type ToolStatus = 'ready' | 'missing' | 'unknown';
 type ToolKey = 'image' | 'video' | 'imagemagick' | 'exiftool';
 type BrowserPermissionState = NotificationPermission | 'unsupported';
 
@@ -125,6 +132,8 @@ const SettingsPage = () => {
     exiftool: 'unknown'
   });
 
+  const [toolStatusSnapshot, setToolStatusSnapshot] = useState<ToolsStatusSnapshot | null>(null);
+  const [isRefreshingTools, setIsRefreshingTools] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [toolPathMessage, setToolPathMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -143,8 +152,7 @@ const SettingsPage = () => {
     loadEncoderSettings().then((loaded) => {
       setSettings(loaded);
       setSavedSettings(loaded);
-      // Validate paths
-      validatePaths(loaded);
+      void refreshToolStatus(loaded);
     });
 
     loadFolderSelections().then((selections) => {
@@ -155,14 +163,37 @@ const SettingsPage = () => {
     setBrowserPermission(getBrowserNotificationPermission());
   }, []);
 
-  const validatePaths = async (nextSettings: EncoderSettingsSnapshot) => {
-    // In a real app, we'd validate against the filesystem
-    // For now, we show status based on whether paths are set
+  const refreshToolStatus = async (nextSettings: EncoderSettingsSnapshot = settings) => {
+    setIsRefreshingTools(true);
+
+    try {
+      const snapshot = await loadToolsStatusRequest(nextSettings);
+      setToolStatusSnapshot(snapshot);
+      setStatuses({
+        image: snapshot.tools.image.status,
+        video: snapshot.tools.video.status,
+        imagemagick: snapshot.tools.imagemagick.status,
+        exiftool: snapshot.tools.exiftool.status
+      });
+    } catch (error) {
+      setToolPathMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : t('settings.toolStatusFailed')
+      });
+    } finally {
+      setIsRefreshingTools(false);
+    }
+  };
+
+  const validatePaths = (nextSettings: EncoderSettingsSnapshot) => {
+    const fallbackStatus = (tool: ToolKey) =>
+      getEffectiveToolCommand(tool, nextSettings) ? 'unknown' as const : 'missing' as const;
+
     setStatuses({
-      image: nextSettings.imageToolCommand ? 'ready' : 'missing',
-      video: nextSettings.videoToolCommand ? 'ready' : 'missing',
-      imagemagick: nextSettings.imageMagickCommand ? 'ready' : 'missing',
-      exiftool: nextSettings.exifToolCommand ? 'ready' : 'missing'
+      image: fallbackStatus('image'),
+      video: fallbackStatus('video'),
+      imagemagick: fallbackStatus('imagemagick'),
+      exiftool: fallbackStatus('exiftool')
     });
   };
 
@@ -174,10 +205,51 @@ const SettingsPage = () => {
   };
 
   const getToolName = (tool: ToolKey) => {
+    const snapshot = toolStatusSnapshot?.tools[tool];
+
+    if (snapshot) {
+      return snapshot.effectiveCommand;
+    }
+
+    if (!isWindowsPlatform()) {
+      return getEffectiveToolCommand(tool, settings);
+    }
+
     if (tool === 'image') return 'cjpeg-static.exe';
     if (tool === 'video') return 'HandBrakeCLI.exe';
     if (tool === 'imagemagick') return 'magick.exe';
     return 'exiftool.exe';
+  };
+
+  const getToolLabelKey = (tool: ToolKey): TranslationKey => {
+    if (isWindowsPlatform()) {
+      if (tool === 'image') return 'settings.imagePathLabel';
+      if (tool === 'video') return 'settings.videoPathLabel';
+      if (tool === 'imagemagick') return 'settings.imageMagickPathLabel';
+      return 'settings.exifToolPathLabel';
+    }
+
+    if (tool === 'image') return 'settings.imageCommandLabel';
+    if (tool === 'video') return 'settings.videoCommandLabel';
+    if (tool === 'imagemagick') return 'settings.imageMagickCommandLabel';
+    return 'settings.exifToolCommandLabel';
+  };
+
+  const getToolPlaceholder = (tool: ToolKey) => {
+    if (!isWindowsPlatform()) {
+      return getEffectiveToolCommand(tool, {
+        imageToolCommand: '',
+        videoToolCommand: '',
+        imageMagickCommand: '',
+        exifToolCommand: '',
+        updatedAt: 0
+      });
+    }
+
+    if (tool === 'image') return 'C:\\Program Files\\mozjpeg\\cjpeg-static.exe';
+    if (tool === 'video') return 'C:\\Program Files\\HandBrake\\HandBrakeCLI.exe';
+    if (tool === 'imagemagick') return 'C:\\Program Files\\ImageMagick-7.1.1-Q16-HDRI\\magick.exe';
+    return 'C:\\Tools\\exiftool.exe';
   };
 
   const handlePathChange = (tool: ToolKey, value: string) => {
@@ -187,6 +259,7 @@ const SettingsPage = () => {
     };
     setSettings(newSettings);
     validatePaths(newSettings);
+    setToolStatusSnapshot(null);
   };
 
   const handleClearPath = (tool: ToolKey) => {
@@ -199,7 +272,6 @@ const SettingsPage = () => {
 
   const handleBrowse = async (tool: ToolKey) => {
     try {
-      const isWindows = navigator.platform.toLowerCase().includes('win');
       const currentPath = settings[getToolField(tool)];
       const result = await pickFileRequest({
         title:
@@ -211,7 +283,7 @@ const SettingsPage = () => {
                 ? t('settings.chooseImageMagickExecutable')
                 : t('settings.chooseExifToolExecutable'),
         initialPath: currentPath,
-        filters: isWindows
+        filters: isWindowsPlatform()
           ? [{ name: t('settings.executableFiles'), extensions: ['exe'] }]
           : undefined
       });
@@ -261,6 +333,13 @@ const SettingsPage = () => {
         type: 'success',
         text: t('settings.saved')
       });
+      void refreshToolStatus({
+        imageToolCommand: settings.imageToolCommand,
+        videoToolCommand: settings.videoToolCommand,
+        imageMagickCommand: settings.imageMagickCommand,
+        exifToolCommand: settings.exifToolCommand,
+        updatedAt: Date.now()
+      });
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error) {
       setSaveMessage({
@@ -284,11 +363,12 @@ const SettingsPage = () => {
     }
 
     const downloadLink = toolDownloadLinks[tool];
+    const snapshot = toolStatusSnapshot?.tools[tool];
 
     return (
       <a
         className="path-btn path-btn-download"
-        href={downloadLink.url}
+        href={snapshot?.installUrl ?? downloadLink.url}
         target="_blank"
         rel="noreferrer noopener"
         aria-label={t(downloadLink.ariaLabel)}
@@ -296,6 +376,48 @@ const SettingsPage = () => {
       >
         {t('settings.download')}
       </a>
+    );
+  };
+
+  const getToolStatusLabel = (status: ToolStatus) => {
+    if (status === 'ready') return t('settings.toolStatus.ready');
+    if (status === 'missing') return t('settings.toolStatus.missing');
+    return t('settings.toolStatus.unknown');
+  };
+
+  const renderToolStatus = (tool: ToolKey) => {
+    const status = statuses[tool];
+    const snapshot = toolStatusSnapshot?.tools[tool] as ExternalToolStatusSnapshot | undefined;
+
+    return (
+      <div className={`status status-${status}`}>
+        <span className="status-dot" />
+        <span>{getToolStatusLabel(status)}</span>
+        {snapshot?.resolvedPath ? (
+          <code className="status-path">{snapshot.resolvedPath}</code>
+        ) : snapshot ? (
+          <code className="status-path">{snapshot.effectiveCommand}</code>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderInstallHint = (tool: ToolKey) => {
+    const snapshot = toolStatusSnapshot?.tools[tool];
+
+    if (!snapshot || snapshot.status !== 'missing') {
+      return null;
+    }
+
+    return (
+      <div className="tool-install-hint">
+        {snapshot.installCommand ? (
+          <p>{t('settings.installCommand', { command: snapshot.installCommand })}</p>
+        ) : (
+          <p>{t('settings.installFromDownload')}</p>
+        )}
+        {snapshot.note ? <p>{snapshot.note}</p> : null}
+      </div>
     );
   };
 
@@ -480,9 +602,28 @@ const SettingsPage = () => {
 
       <div className="settings-content">
         <div className="settings-card settings-card-encoders">
-          <div className="card-title">{t('settings.encoderTools')}</div>
+          <div className="settings-card-heading">
+            <div>
+              <div className="card-title">{t('settings.encoderTools')}</div>
+              <div className="card-subtitle">
+                {t('settings.encoderSubtitle')}
+              </div>
+            </div>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => void refreshToolStatus()}
+              disabled={isRefreshingTools}
+            >
+              {isRefreshingTools ? t('settings.refreshingTools') : t('settings.refreshToolStatus')}
+            </button>
+          </div>
           <div className="card-subtitle">
-            {t('settings.encoderSubtitle')}
+            {toolStatusSnapshot?.python.status === 'missing'
+              ? t('settings.pythonMissing', { command: toolStatusSnapshot.python.command })
+              : toolStatusSnapshot?.python.resolvedPath
+                ? t('settings.pythonReady', { path: toolStatusSnapshot.python.resolvedPath })
+                : t('settings.toolStatusPrompt')}
           </div>
 
           <div className="settings-card-encoder-block">
@@ -490,14 +631,14 @@ const SettingsPage = () => {
             <div className="card-subtitle">{t('settings.imageSubtitle')}</div>
 
             <div className="form-group">
-              <label className="form-label">{t('settings.imagePathLabel')}</label>
+              <label className="form-label">{t(getToolLabelKey('image'))}</label>
               <div className="path-input-group">
                 <input
                   type="text"
                   className="path-input"
                   value={settings.imageToolCommand}
                   onChange={(e) => handlePathChange('image', e.target.value)}
-                  placeholder="C:\\Program Files\\mozjpeg\\cjpeg-static.exe"
+                  placeholder={getToolPlaceholder('image')}
                 />
                 <button
                   className="path-btn"
@@ -518,6 +659,8 @@ const SettingsPage = () => {
                   </button>
                 )}
               </div>
+              {renderToolStatus('image')}
+              {renderInstallHint('image')}
             </div>
           </div>
 
@@ -526,14 +669,14 @@ const SettingsPage = () => {
             <div className="card-subtitle">{t('settings.heicSubtitle')}</div>
 
             <div className="form-group">
-              <label className="form-label">{t('settings.imageMagickPathLabel')}</label>
+              <label className="form-label">{t(getToolLabelKey('imagemagick'))}</label>
               <div className="path-input-group">
                 <input
                   type="text"
                   className="path-input"
                   value={settings.imageMagickCommand}
                   onChange={(e) => handlePathChange('imagemagick', e.target.value)}
-                  placeholder="C:\\Program Files\\ImageMagick-7.1.1-Q16-HDRI\\magick.exe"
+                  placeholder={getToolPlaceholder('imagemagick')}
                 />
                 <button
                   className="path-btn"
@@ -554,6 +697,8 @@ const SettingsPage = () => {
                   </button>
                 )}
               </div>
+              {renderToolStatus('imagemagick')}
+              {renderInstallHint('imagemagick')}
             </div>
           </div>
 
@@ -562,14 +707,14 @@ const SettingsPage = () => {
             <div className="card-subtitle">{t('settings.metadataSubtitle')}</div>
 
             <div className="form-group">
-              <label className="form-label">{t('settings.exifToolPathLabel')}</label>
+              <label className="form-label">{t(getToolLabelKey('exiftool'))}</label>
               <div className="path-input-group">
                 <input
                   type="text"
                   className="path-input"
                   value={settings.exifToolCommand}
                   onChange={(e) => handlePathChange('exiftool', e.target.value)}
-                  placeholder="C:\\Tools\\exiftool.exe"
+                  placeholder={getToolPlaceholder('exiftool')}
                 />
                 <button
                   className="path-btn"
@@ -590,6 +735,8 @@ const SettingsPage = () => {
                   </button>
                 )}
               </div>
+              {renderToolStatus('exiftool')}
+              {renderInstallHint('exiftool')}
             </div>
           </div>
 
@@ -598,14 +745,14 @@ const SettingsPage = () => {
             <div className="card-subtitle">{t('settings.videoSubtitle')}</div>
 
             <div className="form-group">
-              <label className="form-label">{t('settings.videoPathLabel')}</label>
+              <label className="form-label">{t(getToolLabelKey('video'))}</label>
               <div className="path-input-group">
                 <input
                   type="text"
                   className="path-input"
                   value={settings.videoToolCommand}
                   onChange={(e) => handlePathChange('video', e.target.value)}
-                  placeholder="C:\\Program Files\\HandBrake\\HandBrakeCLI.exe"
+                  placeholder={getToolPlaceholder('video')}
                 />
                 <button
                   className="path-btn"
@@ -626,6 +773,8 @@ const SettingsPage = () => {
                   </button>
                 )}
               </div>
+              {renderToolStatus('video')}
+              {renderInstallHint('video')}
             </div>
           </div>
 
