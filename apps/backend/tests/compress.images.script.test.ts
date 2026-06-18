@@ -8,6 +8,7 @@ import { test } from 'node:test';
 type ScriptItem = {
   source: string;
   output: string;
+  command?: string[];
   status: 'completed' | 'failed';
   operation: 'compress' | 'copy';
   startedAt?: number;
@@ -88,6 +89,76 @@ printf '%s\\n' "$*" > "$EXIFTOOL_ARGS_LOG"
 `);
 
   return { magick, cjpeg, exiftool };
+};
+
+const createFakeMozJpegTools = (toolsDir: string) => {
+  const cjpeg = process.platform === 'win32'
+    ? writeFakeTool(toolsDir, 'cjpeg', `@echo off
+setlocal enabledelayedexpansion
+set "out="
+set "previous="
+set "last="
+for %%A in (%*) do (
+  if "!previous!"=="-outfile" set "out=%%~A"
+  set "previous=%%~A"
+  set "last=%%~A"
+)
+if /I "!last:~-4!"==".jpg" (
+  echo unrecognized input file format --- perhaps you need -targa 1>&2
+  exit /b 1
+)
+copy /Y "!last!" "!out!" >nul
+exit /b 0
+`)
+    : writeFakeTool(toolsDir, 'cjpeg', `#!/usr/bin/env sh
+out=""
+previous=""
+last=""
+for arg in "$@"; do
+  if [ "$previous" = "-outfile" ]; then
+    out="$arg"
+  fi
+  previous="$arg"
+  last="$arg"
+done
+case "$last" in
+  *.jpg|*.jpeg)
+    echo "unrecognized input file format --- perhaps you need -targa" >&2
+    exit 1
+    ;;
+esac
+cp "$last" "$out"
+`);
+
+  const djpeg = process.platform === 'win32'
+    ? writeFakeTool(toolsDir, 'djpeg', `@echo off
+setlocal enabledelayedexpansion
+set "out="
+set "previous="
+set "last="
+for %%A in (%*) do (
+  if "!previous!"=="-outfile" set "out=%%~A"
+  set "previous=%%~A"
+  set "last=%%~A"
+)
+copy /Y "!last!" "!out!" >nul
+exit /b 0
+`)
+    : writeFakeTool(toolsDir, 'djpeg', `#!/usr/bin/env sh
+out=""
+previous=""
+last=""
+for arg in "$@"; do
+  if [ "$previous" = "-outfile" ]; then
+    out="$arg"
+  fi
+  previous="$arg"
+  last="$arg"
+done
+cp "$last" "$out"
+`);
+
+  return { cjpeg, djpeg };
 };
 
 test('compress_images converts selected HEIC to JPG and copies PNG without compression', () => {
@@ -204,6 +275,54 @@ test('compress_images marks excluded selected-scope files as copy operations', (
   assert.equal(items.length, 2);
   assert.ok(items.some((item) => item.source.endsWith(path.join('keep', 'photo.jpg')) && item.operation === 'compress'));
   assert.ok(items.some((item) => item.source.endsWith(path.join('skip', 'excluded.jpg')) && item.operation === 'copy'));
+});
+
+test('compress_images decodes JPEG through djpeg when cjpeg rejects JPEG input', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-djpeg-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+
+  fs.writeFileSync(path.join(sourceDir, 'photo.jpg'), 'fake-jpg', 'utf8');
+
+  const tools = createFakeMozJpegTools(toolsDir);
+  const pythonCommand = process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python';
+  const result = spawnSync(
+    pythonCommand,
+    [
+      scriptPath,
+      '--source-dir',
+      sourceDir,
+      '--output-dir',
+      outputDir,
+      '--quality',
+      '80',
+      '--encoder-command',
+      tools.cjpeg,
+      '--selection-scope-json',
+      ''
+    ],
+    { encoding: 'utf8' }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+
+  const complete = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const item = complete?.items?.[0];
+
+  assert.equal(item?.status, 'completed');
+  assert.equal(item?.operation, 'compress');
+  assert.ok(item?.command?.some((value) => path.basename(value).startsWith('djpeg')));
+  assert.ok(fs.existsSync(path.join(outputDir, 'photo.jpg')));
+  assert.equal(fs.readFileSync(path.join(outputDir, 'photo.jpg'), 'utf8'), 'fake-jpg');
+  assert.ok(tools.djpeg);
 });
 
 test('compress_images skips unchanged copy-through outputs', () => {

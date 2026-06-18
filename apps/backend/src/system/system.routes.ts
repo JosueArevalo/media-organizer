@@ -9,6 +9,7 @@ import { readRequestJson, sendCaughtError, sendJson } from '../http/httpResponse
 import type { RouteHandler } from '../http/routeTypes.js';
 import { validateClearDestinationRequest } from './maintenance.service.js';
 import { isAllowedPickerOrigin, pickDirectory, pickFile, type SystemPickerFilter } from './systemPicker.service.js';
+import { getToolsStatus, type ToolStatusRequest } from './toolStatus.service.js';
 
 const isPickerFilter = (filter: unknown): filter is SystemPickerFilter => {
   if (!filter || typeof filter !== 'object') {
@@ -194,6 +195,19 @@ export const handleSystemRoutes: RouteHandler = ({ req, res, requestUrl }) => {
         });
       } catch (error) {
         sendCaughtError(res, error, 'Could not resolve command path.');
+      }
+    })();
+
+    return true;
+  }
+
+  if (requestUrl.pathname === '/api/system/tools/status' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as ToolStatusRequest | null;
+        sendJson(res, 200, getToolsStatus(body ?? {}));
+      } catch (error) {
+        sendCaughtError(res, error, 'Could not resolve tool status.');
       }
     })();
 

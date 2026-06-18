@@ -456,6 +456,7 @@ export interface CompressionProgressData {
   failedCompress: number;
   failedCopy: number;
   retainedOriginalBecauseLarger: number;
+  fatalError?: string;
 }
 
 const getSourceDisplayPath = (sourceDir: string | null, sourcePath: string) => {
@@ -500,6 +501,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
   let checkpointFailedCompressCount: number | null = null;
   let checkpointFailedCopyCount: number | null = null;
   let retainedOriginalBecauseLargerCount = 0;
+  let fatalError: string | undefined;
   let manifestSourceDir: string | null = null;
   let activeItems: Array<{ id: string; sourcePath: string; displayPath?: string; operation: 'compress' | 'copy'; startedAt?: number }> = [];
   let checkpointProcessedItems: CompressionProgressData['processedItems'] = [];
@@ -517,6 +519,7 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
       checkpointFailedCompressCount = parsed.summary?.failedCompressCount ?? null;
       checkpointFailedCopyCount = parsed.summary?.failedCopyCount ?? null;
       retainedOriginalBecauseLargerCount = parsed.summary?.retainedOriginalBecauseLargerCount ?? 0;
+      fatalError = typeof parsed.fatalError === 'string' ? parsed.fatalError : undefined;
       activeItems = Array.isArray(parsed.activeItems)
         ? parsed.activeItems
             .filter((item: { id?: unknown; sourcePath?: unknown; operation?: unknown }) =>
@@ -657,7 +660,8 @@ export const getCompressionProgress = (sessionId: string): CompressionProgressDa
     completedCopy: completedCopyCount,
     failedCompress: failedCompressCount,
     failedCopy: failedCopyCount,
-    retainedOriginalBecauseLarger: retainedOriginalBecauseLargerCount
+    retainedOriginalBecauseLarger: retainedOriginalBecauseLargerCount,
+    ...(fatalError ? { fatalError } : {})
   };
 };
 

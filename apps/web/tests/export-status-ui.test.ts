@@ -101,6 +101,17 @@ test('network export renders session job history with destination-specific contr
   assert.match(source, /t\('export\.progressTitle'\)\} \(\{job\.targetPath\}\)/);
 });
 
+test('network export keeps Windows authentication and adds mounted-folder flow for Unix', () => {
+  const source = fs.readFileSync(path.join(pagesRoot, 'NetworkFolderExportPage.tsx'), 'utf8');
+
+  assert.match(source, /isWindows && <form className="network-step" onSubmit=\{handleAuthenticateSubmit\}/);
+  assert.match(source, /handlePickMountedFolder/);
+  assert.match(source, /pickDirectoryRequest/);
+  assert.match(source, /export\.network\.mountedLocationNoteMac/);
+  assert.match(source, /export\.network\.mountedLocationNoteLinux/);
+  assert.match(source, /export\.network\.folderStepUnix/);
+});
+
 test('export completion notifications ignore paused jobs', () => {
   const source = fs.readFileSync(path.join(hooksRoot, 'useCompletionNotifications.ts'), 'utf8');
   const exportNotification = source.slice(source.indexOf('for (const exportJobState'));

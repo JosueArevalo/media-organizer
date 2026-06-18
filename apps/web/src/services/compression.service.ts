@@ -70,6 +70,7 @@ export type CompressionProgressApiResponse = {
   failedCompress: number;
   failedCopy: number;
   retainedOriginalBecauseLarger: number;
+  fatalError?: string;
 };
 
 export type ActiveCompressionSessionApiResponse = (CompressionSessionApiResponse & {

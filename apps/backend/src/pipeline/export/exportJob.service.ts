@@ -21,6 +21,7 @@ import {
   authenticateNetworkPath,
   getNetworkErrorMessage,
   markNetworkDestinationUsed,
+  parseMountedPath,
   parseUncPath
 } from './networkDestination.service.js';
 import {
@@ -114,7 +115,14 @@ const toCheckpointRecord = (row: {
 
 const normalizeExistingPath = (value: string) => path.resolve(value);
 
-export const normalizeNetworkDestinationPath = (value: string) => {
+export const normalizeNetworkDestinationPath = (
+  value: string,
+  platform: NodeJS.Platform = process.platform
+) => {
+  if (platform !== 'win32') {
+    return parseMountedPath(value);
+  }
+
   try {
     return parseUncPath(value).normalized;
   } catch {
@@ -122,8 +130,13 @@ export const normalizeNetworkDestinationPath = (value: string) => {
   }
 };
 
-export const normalizeNetworkDestinationPathForComparison = (value: string) =>
-  normalizeNetworkDestinationPath(value).replaceAll('/', '\\').toLocaleLowerCase();
+export const normalizeNetworkDestinationPathForComparison = (
+  value: string,
+  platform: NodeJS.Platform = process.platform
+) => {
+  const normalized = normalizeNetworkDestinationPath(value, platform);
+  return platform === 'win32' ? normalized.replaceAll('/', '\\').toLocaleLowerCase() : normalized;
+};
 
 const supportedGooglePhotosExtensions = new Set([
   '.3gp',
@@ -1068,7 +1081,12 @@ export const testExportTarget = async (target: ExportTarget, credentials?: Netwo
       await authenticateNetworkPath({ path: target.destinationPath, credentials });
     }
 
-    fs.mkdirSync(target.destinationPath, { recursive: true });
+    if (process.platform === 'win32') {
+      fs.mkdirSync(target.destinationPath, { recursive: true });
+    } else if (!fs.existsSync(target.destinationPath) || !fs.statSync(target.destinationPath).isDirectory()) {
+      throw new Error('Mounted folder is not available. Reconnect it with your operating system and try again.');
+    }
+
     fs.accessSync(target.destinationPath, fs.constants.R_OK | fs.constants.W_OK);
     markNetworkDestinationUsed(target.destinationPath);
 

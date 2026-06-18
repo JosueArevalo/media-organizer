@@ -176,8 +176,8 @@ test('network export jobs are listed per session, reject equivalent destinations
   });
   assert.deepEqual(jobs.map((job) => job.job.id), [second.job.id, first.job.id]);
   assert.equal(
-    normalizeNetworkDestinationPathForComparison('\\\\NAS\\Share\\Export09\\'),
-    normalizeNetworkDestinationPathForComparison('//nas/share/export09')
+    normalizeNetworkDestinationPathForComparison('\\\\NAS\\Share\\Export09\\', 'win32'),
+    normalizeNetworkDestinationPathForComparison('//nas/share/export09', 'win32')
   );
 
   getDb().prepare("UPDATE export_jobs SET status = 'running' WHERE id = ?").run(first.job.id);

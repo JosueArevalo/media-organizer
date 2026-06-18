@@ -52,6 +52,14 @@
   background: linear-gradient(180deg, var(--accent-light), var(--surface));
 }
 
+.settings-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
 .settings-card-encoder-block {
   padding: 0;
 }
@@ -197,12 +205,47 @@
   border-color: var(--warn-border);
 }
 
+.status-unknown {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  border-color: var(--line);
+}
+
 .status-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: currentColor;
   flex-shrink: 0;
+}
+
+.status-path {
+  color: inherit;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.tool-install-hint {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--warn-border);
+  border-radius: 4px;
+  background: var(--warn-bg);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.tool-install-hint p {
+  margin: 0;
+}
+
+.tool-install-hint p + p {
+  margin-top: 6px;
+  color: var(--text-muted);
+}
+
+.tool-install-hint code {
+  font-family: 'Courier New', monospace;
 }
 
 .message {
