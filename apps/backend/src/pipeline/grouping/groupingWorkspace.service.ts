@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import { getDb } from '../../state/db.js';
 import { runMigrations } from '../../state/migrations/runMigrations.js';
 import type { MediaType } from '../../state/dto/state.types.js';
@@ -18,6 +19,8 @@ import type {
   GroupingSourceFolderOptions,
   GroupingStrategy
 } from './grouping.types.js';
+
+sharp.cache({ files: 0 });
 
 type FolderKind = 'proposed' | 'manual' | 'template';
 
@@ -125,6 +128,8 @@ const PREVIEW_MAX_SIZE = '2400x2400';
 const PREVIEW_QUALITY = '85';
 const THUMBNAIL_MAX_SIZE = '360x360';
 const THUMBNAIL_QUALITY = '78';
+const THUMBNAIL_MAX_DIMENSION = 360;
+const thumbnailGenerationByPath = new Map<string, Promise<void>>();
 
 export class GroupingPreviewError extends Error {
   constructor(message: string) {
@@ -1948,6 +1953,60 @@ const generateHeicPreview = (imageMagickCommand: string, sourcePath: string, pre
   });
 };
 
+const generateWebSafeThumbnail = async (sourcePath: string, thumbnailPath: string) => {
+  const pendingGeneration = thumbnailGenerationByPath.get(thumbnailPath);
+
+  if (pendingGeneration) {
+    await pendingGeneration;
+    return;
+  }
+
+  const generation = (async () => {
+    fs.mkdirSync(path.dirname(thumbnailPath), { recursive: true });
+    const temporaryPath = `${thumbnailPath}.${randomUUID()}.tmp.jpg`;
+
+    try {
+      await sharp(sourcePath, { animated: false })
+        .rotate()
+        .toColourspace('srgb')
+        .resize({
+          width: THUMBNAIL_MAX_DIMENSION,
+          height: THUMBNAIL_MAX_DIMENSION,
+          fit: 'inside',
+          withoutEnlargement: true
+        })
+        .jpeg({ quality: Number(THUMBNAIL_QUALITY) })
+        .toFile(temporaryPath);
+
+      try {
+        await fs.promises.rename(temporaryPath, thumbnailPath);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+
+        if (code !== 'EEXIST' && code !== 'EPERM') {
+          throw error;
+        }
+
+        await fs.promises.rm(thumbnailPath, { force: true });
+        await fs.promises.rename(temporaryPath, thumbnailPath);
+      }
+    } catch (error) {
+      await fs.promises.rm(temporaryPath, { force: true });
+      throw new GroupingPreviewError(
+        error instanceof Error ? `Could not generate media thumbnail: ${error.message}` : 'Could not generate media thumbnail.'
+      );
+    }
+  })();
+
+  thumbnailGenerationByPath.set(thumbnailPath, generation);
+
+  try {
+    await generation;
+  } finally {
+    thumbnailGenerationByPath.delete(thumbnailPath);
+  }
+};
+
 const isPreviewFresh = (sourcePath: string, previewPath: string) => {
   if (!fs.existsSync(previewPath)) {
     return false;
@@ -2014,7 +2073,7 @@ export const getGroupingPreviewPath = (sessionId: string, itemId: string) => {
   };
 };
 
-export const getGroupingThumbnailPath = (sessionId: string, itemId: string) => {
+export const getGroupingThumbnailPath = async (sessionId: string, itemId: string) => {
   const workspace = getGroupingWorkspace(sessionId);
 
   if (!workspace) {
@@ -2048,16 +2107,20 @@ export const getGroupingThumbnailPath = (sessionId: string, itemId: string) => {
   }
 
   if (!isPreviewFresh(item.outputPath, thumbnailPath)) {
-    const compressionManifest = getCompressionManifest(workspace.compressionSessionId);
-    const imageMagickCommand = getImageMagickPreviewCommand(compressionManifest);
-    generateImageDerivative({
-      imageMagickCommand,
-      sourcePath: item.outputPath,
-      outputPath: thumbnailPath,
-      maxSize: THUMBNAIL_MAX_SIZE,
-      quality: THUMBNAIL_QUALITY,
-      verifyHeicSupport: HEIC_EXTENSIONS.has(extension)
-    });
+    if (WEB_SAFE_IMAGE_EXTENSIONS.has(extension)) {
+      await generateWebSafeThumbnail(item.outputPath, thumbnailPath);
+    } else {
+      const compressionManifest = getCompressionManifest(workspace.compressionSessionId);
+      const imageMagickCommand = getImageMagickPreviewCommand(compressionManifest);
+      generateImageDerivative({
+        imageMagickCommand,
+        sourcePath: item.outputPath,
+        outputPath: thumbnailPath,
+        maxSize: THUMBNAIL_MAX_SIZE,
+        quality: THUMBNAIL_QUALITY,
+        verifyHeicSupport: true
+      });
+    }
   }
 
   return {
