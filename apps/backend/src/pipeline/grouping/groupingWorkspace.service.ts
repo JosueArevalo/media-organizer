@@ -401,11 +401,27 @@ const getCompressionManifest = (compressionSessionId: string | null) => {
   }
 
   try {
-    const payload = JSON.parse(row.payload_json) as { manifest?: { imageMagickCommand?: string | null } };
+    const payload = JSON.parse(row.payload_json) as {
+      manifest?: {
+        imageMagickCommand?: string | null;
+        processingPolicy?: { heic?: 'convert' | 'copy' };
+      };
+    };
     return payload.manifest ?? null;
   } catch {
     return null;
   }
+};
+
+const getImageMagickPreviewCommand = (manifest: ReturnType<typeof getCompressionManifest>) => {
+  const configured = manifest?.imageMagickCommand?.trim();
+  if (configured) return configured;
+
+  if (manifest?.processingPolicy?.heic === 'copy') {
+    throw new GroupingPreviewError('HEIC preview unavailable because the original was copied without ImageMagick.');
+  }
+
+  return 'magick';
 };
 
 const getSessionRow = (sessionId: string) => {
@@ -1988,7 +2004,7 @@ export const getGroupingPreviewPath = (sessionId: string, itemId: string) => {
 
   if (!isPreviewFresh(item.outputPath, previewPath)) {
     const compressionManifest = getCompressionManifest(workspace.compressionSessionId);
-    const imageMagickCommand = compressionManifest?.imageMagickCommand?.trim() || 'magick';
+    const imageMagickCommand = getImageMagickPreviewCommand(compressionManifest);
     generateHeicPreview(imageMagickCommand, item.outputPath, previewPath);
   }
 
@@ -2033,7 +2049,7 @@ export const getGroupingThumbnailPath = (sessionId: string, itemId: string) => {
 
   if (!isPreviewFresh(item.outputPath, thumbnailPath)) {
     const compressionManifest = getCompressionManifest(workspace.compressionSessionId);
-    const imageMagickCommand = compressionManifest?.imageMagickCommand?.trim() || 'magick';
+    const imageMagickCommand = getImageMagickPreviewCommand(compressionManifest);
     generateImageDerivative({
       imageMagickCommand,
       sourcePath: item.outputPath,

@@ -58,6 +58,50 @@ beforeEach(() => {
   fs.mkdirSync(outputDir, { recursive: true });
 });
 
+test('compression route rejects explicit compression policies when required tools are missing', async () => {
+  const { response, responsePromise } = createResponse();
+  handleCompressionRoutes({
+    req: createJsonRequest({
+      sourceDir,
+      outputDir,
+      imageQuality: 80,
+      imageProfileLabel: 'Balanced',
+      videoPresetLabel: 'Fast 1080p30',
+      processingPolicy: { jpeg: 'compress', heic: 'copy', video: 'copy' }
+    }),
+    res: response,
+    requestUrl: new URL('http://localhost/api/compression/sessions')
+  });
+
+  const captured = await responsePromise;
+  assert.equal(captured.statusCode, 400);
+  assert.equal(JSON.parse(captured.body).status, 'tool_configuration_required');
+});
+
+test('compression route accepts an explicit copy-only policy with empty tool commands', async () => {
+  const { response, responsePromise } = createResponse();
+  handleCompressionRoutes({
+    req: createJsonRequest({
+      sourceDir,
+      outputDir,
+      imageQuality: 80,
+      imageProfileLabel: 'Balanced',
+      videoPresetLabel: 'Fast 1080p30',
+      processingPolicy: { jpeg: 'copy', heic: 'copy', video: 'copy' }
+    }),
+    res: response,
+    requestUrl: new URL('http://localhost/api/compression/sessions')
+  });
+
+  const captured = await responsePromise;
+  assert.equal(captured.statusCode, 201);
+  assert.deepEqual(JSON.parse(captured.body).manifest.processingPolicy, {
+    jpeg: 'copy',
+    heic: 'copy',
+    video: 'copy'
+  });
+});
+
 test('compression session route forwards optional HEIC tool commands into the manifest', async () => {
   const { response, responsePromise } = createResponse();
   const handled = handleCompressionRoutes({

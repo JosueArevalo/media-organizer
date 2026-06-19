@@ -532,6 +532,35 @@ test('executeCompressionSession completes copy-only sessions when all media is e
   assert.deepEqual(decisionRows.map((row) => row.selected_for_compression), [0, 0]);
 });
 
+test('explicit copy processing policy persists copy operations and progress counts', async () => {
+  const { startCompressionSession, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js');
+  const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js');
+  const scopedSourceDir = path.join(tempRoot, 'policy-copy-source');
+  const scopedOutputDir = path.join(tempRoot, 'policy-copy-output');
+  fs.mkdirSync(scopedSourceDir, { recursive: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+  fs.writeFileSync(path.join(scopedSourceDir, 'photo.jpg'), 'fake-jpg', 'utf8');
+  fs.writeFileSync(path.join(scopedSourceDir, 'clip.mov'), 'fake-video', 'utf8');
+
+  const started = startCompressionSession({
+    sourceDir: scopedSourceDir,
+    outputDir: scopedOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Fast 1080p30',
+    processingPolicy: { jpeg: 'copy', heic: 'copy', video: 'copy' }
+  });
+  await executeCompressionSession(started.session.id);
+
+  const progress = getCompressionProgress(started.session.id);
+  assert.equal(progress?.status, 'completed');
+  assert.equal(progress?.total, 2);
+  assert.equal(progress?.totalCompress, 0);
+  assert.equal(progress?.totalCopy, 2);
+  assert.equal(progress?.completedCopy, 2);
+  assert.ok(progress?.processedItems.every((item) => item.operation === 'copy'));
+});
+
 test('compression progress reports the actively processing video and clears it after completion', async () => {
   const { startCompressionSession, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js');
   const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js');

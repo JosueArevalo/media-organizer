@@ -10,6 +10,11 @@ export type CompressionSessionRequest = {
   videoToolCommand?: string;
   imageMagickCommand?: string;
   exifToolCommand?: string;
+  processingPolicy?: {
+    jpeg: 'compress' | 'copy';
+    heic: 'convert' | 'copy';
+    video: 'compress' | 'copy';
+  };
   selectionScope?: {
     excludedDirectories: string[];
     excludedFiles: string[];

@@ -19,7 +19,7 @@ test('resolveToolCommand resolves absolute files and commands from PATH', () => 
   assert.ok(resolveToolCommand('node'));
 });
 
-test('getToolsStatus uses Unix command defaults and Windows executable defaults', () => {
+test('getToolsStatus uses Unix command defaults and keeps empty Windows tools unconfigured', () => {
   const unixStatus = getToolsStatus({}, 'darwin');
   assert.equal(unixStatus.tools.image.effectiveCommand, 'cjpeg');
   assert.equal(unixStatus.tools.imagemagick.effectiveCommand, 'magick');
@@ -28,7 +28,10 @@ test('getToolsStatus uses Unix command defaults and Windows executable defaults'
   assert.equal(unixStatus.tools.image.installCommand, 'brew install mozjpeg');
 
   const windowsStatus = getToolsStatus({}, 'win32');
-  assert.equal(windowsStatus.tools.image.effectiveCommand, 'cjpeg-static.exe');
-  assert.equal(windowsStatus.tools.video.effectiveCommand, 'HandBrakeCLI.exe');
+  for (const tool of Object.values(windowsStatus.tools)) {
+    assert.equal(tool.effectiveCommand, '');
+    assert.equal(tool.resolvedPath, null);
+    assert.equal(tool.status, 'missing');
+  }
   assert.equal(windowsStatus.tools.image.installCommand, null);
 });

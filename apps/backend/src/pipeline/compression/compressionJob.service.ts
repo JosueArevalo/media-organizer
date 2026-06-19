@@ -16,6 +16,7 @@ import {
   buildCompressionVideosOutputDir
 } from './compressionJob.paths.js';
 import { resolveToolCommand } from './toolCommandResolver.js';
+import { resolvePythonRuntime } from './pythonCommandResolver.js';
 import { clearCompressionPauseRequest, requestCompressionProcessPause } from './compressionProcessRegistry.js';
 import {
   closeCompressionTimingSegment,
@@ -26,6 +27,20 @@ import {
   type CompressionTiming,
   type CompressionTimingReason
 } from './compressionTiming.js';
+
+export type CompressionProcessingPolicy = {
+  jpeg: 'compress' | 'copy';
+  heic: 'convert' | 'copy';
+  video: 'compress' | 'copy';
+};
+
+export const DEFAULT_COMPRESSION_PROCESSING_POLICY: CompressionProcessingPolicy = {
+  jpeg: 'compress',
+  heic: 'convert',
+  video: 'compress'
+};
+
+export class CompressionToolConfigurationError extends Error {}
 
 export type CompressionSessionRequest = {
   name?: string;
@@ -39,6 +54,7 @@ export type CompressionSessionRequest = {
   videoToolCommand?: string;
   imageMagickCommand?: string;
   exifToolCommand?: string;
+  processingPolicy?: Partial<CompressionProcessingPolicy>;
   selectionScope?: {
     excludedDirectories: string[];
     excludedFiles: string[];
@@ -63,6 +79,7 @@ export type CompressionSessionManifest = {
   videoToolCommand: string;
   imageMagickCommand: string;
   exifToolCommand: string;
+  processingPolicy: CompressionProcessingPolicy;
   selectionScope: {
     excludedDirectories: string[];
     excludedFiles: string[];
@@ -236,15 +253,42 @@ const closePayloadTiming = (
 export const startCompressionSession = (request: CompressionSessionRequest): CompressionSessionLaunchResult => {
   runMigrations();
 
+  const processingPolicy: CompressionProcessingPolicy = {
+    ...DEFAULT_COMPRESSION_PROCESSING_POLICY,
+    ...request.processingPolicy
+  };
+  const hasExplicitProcessingPolicy = Boolean(request.processingPolicy);
+
+  if (resolvePythonRuntime().status !== 'ready') {
+    throw new CompressionToolConfigurationError('Python runtime is required to process or copy media.');
+  }
+
+  const configuredImageCommand = request.imageToolCommand?.trim() ?? '';
+  const configuredVideoCommand = request.videoToolCommand?.trim() ?? '';
+  const configuredImageMagickCommand = request.imageMagickCommand?.trim() ?? '';
+  const requiresMozJpeg = processingPolicy.jpeg === 'compress' || processingPolicy.heic === 'convert';
+
+  if (hasExplicitProcessingPolicy && requiresMozJpeg && !resolveToolCommand(configuredImageCommand)) {
+    throw new CompressionToolConfigurationError('MozJPEG is required by the selected processing policy.');
+  }
+
+  if (hasExplicitProcessingPolicy && processingPolicy.heic === 'convert' && !resolveToolCommand(configuredImageMagickCommand)) {
+    throw new CompressionToolConfigurationError('ImageMagick is required to convert HEIC/HEIF media.');
+  }
+
+  if (hasExplicitProcessingPolicy && processingPolicy.video === 'compress' && !resolveToolCommand(configuredVideoCommand)) {
+    throw new CompressionToolConfigurationError('HandBrakeCLI is required by the selected processing policy.');
+  }
+
   const sessionId = randomUUID();
   const timestamp = nowIso();
   const outputRoot = buildCompressionSessionOutputRoot(request.outputDir);
   const imageOutputDir = buildCompressionImagesOutputDir(outputRoot);
   const videoOutputDir = buildCompressionVideosOutputDir(outputRoot);
   const manifestPath = buildCompressionSessionManifestPath(outputRoot);
-  const imageCommandFromRequest = request.imageToolCommand?.trim() || 'cjpeg';
-  const videoCommandFromRequest = request.videoToolCommand?.trim() || 'HandBrakeCLI';
-  const imageMagickCommandFromRequest = request.imageMagickCommand?.trim() || 'magick';
+  const imageCommandFromRequest = configuredImageCommand || (hasExplicitProcessingPolicy ? '' : 'cjpeg');
+  const videoCommandFromRequest = configuredVideoCommand || (hasExplicitProcessingPolicy ? '' : 'HandBrakeCLI');
+  const imageMagickCommandFromRequest = configuredImageMagickCommand || (hasExplicitProcessingPolicy ? '' : 'magick');
   const exifToolCommandFromRequest = request.exifToolCommand?.trim() || '';
   const resolvedImageCommand = resolveToolCommand(imageCommandFromRequest) ?? imageCommandFromRequest;
   const resolvedVideoCommand = resolveToolCommand(videoCommandFromRequest) ?? videoCommandFromRequest;
@@ -274,6 +318,7 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
     videoToolCommand: resolvedVideoCommand,
     imageMagickCommand: resolvedImageMagickCommand,
     exifToolCommand: resolvedExifToolCommand,
+    processingPolicy,
     selectionScope,
     createdAt: timestamp
   };

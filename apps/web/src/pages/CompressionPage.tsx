@@ -36,8 +36,10 @@ import {
   type HandBrakePresetOption
 } from '../services/compression.service';
 import { scanSourceTreeRequest } from '../services/source-tree.service';
-import { getEffectiveToolCommand } from '../services/tool-status.service';
+import { loadToolsStatusRequest } from '../services/tool-status.service';
 import { isPreCompressionStepReadOnly } from '../services/workflow-locks';
+import { useToolPreflight } from '../hooks/useToolPreflight';
+import { resolveMediaProcessingPolicy } from '../services/media-processing-policy.service';
 
 type ImagePresetId = CompressionImagePreset;
 
@@ -506,6 +508,7 @@ export const CompressionPage = () => {
   const location = useLocation();
   const { sourceSelection, destinationSelection, isLoading: areFolderSelectionsLoading } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
+  const toolPreflight = useToolPreflight();
   const isWorkflowReadOnly = isPreCompressionStepReadOnly(compressionSessionState);
   const savedCompressionSettings = useMemo(() => loadCompressionSettings(), []);
   const [imagePreset, setImagePreset] = useState<ImagePresetId>(savedCompressionSettings.imagePreset);
@@ -518,14 +521,10 @@ export const CompressionPage = () => {
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isStartingCompression, setIsStartingCompression] = useState(false);
   const [isPausingCompression, setIsPausingCompression] = useState(false);
-  const [isEncoderSettingsLoading, setIsEncoderSettingsLoading] = useState(true);
-  const [encoderSettings, setEncoderSettings] = useState<EncoderSettingsSnapshot>({
-    imageToolCommand: '',
-    videoToolCommand: '',
-    imageMagickCommand: '',
-    exifToolCommand: '',
-    updatedAt: 0
-  });
+  const encoderSettings: EncoderSettingsSnapshot = toolPreflight.settings;
+  const [jpegCopyAccepted, setJpegCopyAccepted] = useState(false);
+  const [heicCopyAccepted, setHeicCopyAccepted] = useState(false);
+  const [videoCopyAccepted, setVideoCopyAccepted] = useState(false);
   const [progressData, setProgressData] = useState<{
     status: 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
     total: number;
@@ -623,27 +622,8 @@ export const CompressionPage = () => {
 
   useEffect(() => {
     let isActive = true;
-
-    loadEncoderSettings()
-      .then((settings) => {
-        if (isActive) {
-          setEncoderSettings(settings);
-        }
-      })
-      .finally(() => {
-        if (isActive) {
-          setIsEncoderSettingsLoading(false);
-        }
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let isActive = true;
-    const configuredVideoCommand = getEffectiveToolCommand('video', encoderSettings);
+    const videoTool = toolPreflight.snapshot?.tools.video;
+    const configuredVideoCommand = videoTool?.status === 'ready' ? videoTool.effectiveCommand : '';
 
     if (!configuredVideoCommand) {
       setVideoPresets([]);
@@ -686,7 +666,7 @@ export const CompressionPage = () => {
     return () => {
       isActive = false;
     };
-  }, [encoderSettings, t]);
+  }, [toolPreflight.snapshot, t]);
 
   useEffect(() => {
     let isActive = true;
@@ -919,31 +899,42 @@ export const CompressionPage = () => {
   const estimatedTotalMediaCount = selectedStats.imageCount + selectedStats.videoCount;
   const estimatedCopyMediaCount = selectedStats.copyImageCount + selectedStats.copyVideoCount;
   const estimatedProcessableMediaCount = estimatedTotalMediaCount + estimatedCopyMediaCount;
-  const isCopyOnlySession = estimatedProcessableMediaCount > 0 && estimatedTotalMediaCount === 0;
   const hasSelectedJpegImages = selectedStats.jpegImageCount > 0;
   const hasSelectedHeicImages = selectedStats.heicImageCount > 0;
   const hasCopyOnlyImages = selectedStats.copyOnlyImageCount > 0;
   const hasSelectedVideos = selectedStats.videoCount > 0;
-  const needsMozJpeg = hasSelectedJpegImages || hasSelectedHeicImages;
-  const needsImageMagick = hasSelectedHeicImages;
   const needsHandBrake = hasSelectedVideos;
-  const effectiveImageToolCommand = getEffectiveToolCommand('image', encoderSettings);
-  const effectiveImageMagickCommand = getEffectiveToolCommand('imagemagick', encoderSettings);
-  const effectiveExifToolCommand = getEffectiveToolCommand('exiftool', encoderSettings);
-  const effectiveVideoToolCommand = getEffectiveToolCommand('video', encoderSettings);
-  const hasConfiguredMozJpeg = Boolean(effectiveImageToolCommand);
-  const hasConfiguredImageMagick = Boolean(effectiveImageMagickCommand);
-  const hasConfiguredHandBrake = Boolean(effectiveVideoToolCommand);
-  const hasAvailableVideoPresets = !needsHandBrake || videoPresets.length > 0;
-  const hasRequiredTools =
-    (!needsMozJpeg || hasConfiguredMozJpeg) &&
-    (!needsImageMagick || hasConfiguredImageMagick) &&
-    (!needsHandBrake || hasConfiguredHandBrake);
+  const toolsSnapshot = toolPreflight.snapshot;
+  const pythonReady = toolsSnapshot?.python.status === 'ready';
+  const hasConfiguredMozJpeg = toolsSnapshot?.tools.image.status === 'ready';
+  const hasConfiguredImageMagick = toolsSnapshot?.tools.imagemagick.status === 'ready';
+  const hasConfiguredExifTool = toolsSnapshot?.tools.exiftool.status === 'ready';
+  const hasConfiguredHandBrake = toolsSnapshot?.tools.video.status === 'ready';
+  const policyResolution = resolveMediaProcessingPolicy({
+    jpegCount: selectedStats.jpegImageCount,
+    heicCount: selectedStats.heicImageCount,
+    videoCount: selectedStats.videoCount,
+    mozJpegReady: hasConfiguredMozJpeg,
+    imageMagickReady: hasConfiguredImageMagick,
+    handBrakeReady: hasConfiguredHandBrake,
+    jpegCopyAccepted,
+    heicCopyAccepted,
+    videoCopyAccepted
+  });
+  const { jpegNeedsDecision, heicNeedsDecision, videoNeedsDecision } = policyResolution;
+  const processingPolicy = policyResolution.policy;
+  const policyCompressCount =
+    (processingPolicy.jpeg === 'compress' ? selectedStats.jpegImageCount : 0) +
+    (processingPolicy.heic === 'convert' ? selectedStats.heicImageCount : 0) +
+    (processingPolicy.video === 'compress' ? selectedStats.videoCount : 0);
+  const isCopyOnlySession = estimatedProcessableMediaCount > 0 && policyCompressCount === 0;
+  const hasResolvedFallbacks = policyResolution.fallbacksResolved;
+  const hasAvailableVideoPresets = processingPolicy.video === 'copy' || !needsHandBrake || videoPresets.length > 0;
   const hasSelectedFolders = Boolean(sourceSelection && destinationSelection);
   const hasAbsolutePaths = isLikelyAbsolutePath(sourcePath) && isLikelyAbsolutePath(destinationPath);
   const isCompressionSetupLoading =
     areFolderSelectionsLoading ||
-    isEncoderSettingsLoading ||
+    toolPreflight.status === 'loading' ||
     (needsHandBrake && videoPresetsState.status === 'loading') ||
     mediaStatsState.status === 'loading';
   const canStartRealCompression =
@@ -952,10 +943,12 @@ export const CompressionPage = () => {
     hasAbsolutePaths &&
     mediaStatsState.status === 'ready' &&
     estimatedProcessableMediaCount > 0 &&
-    hasRequiredTools &&
+    toolPreflight.status === 'ready' &&
+    pythonReady &&
+    hasResolvedFallbacks &&
     hasAvailableVideoPresets;
   const toolWarnings = [
-    hasSelectedHeicImages && !effectiveExifToolCommand
+    hasSelectedHeicImages && processingPolicy.heic === 'convert' && !hasConfiguredExifTool
       ? t('compression.exifToolWarning')
       : null,
     hasCopyOnlyImages
@@ -975,6 +968,14 @@ export const CompressionPage = () => {
       return t('compression.readingStats');
     }
 
+    if (toolPreflight.status === 'error') {
+      return t('compression.toolStatusUnknown');
+    }
+
+    if (!pythonReady) {
+      return t('compression.configurePython');
+    }
+
     if (estimatedProcessableMediaCount === 0) {
       return t('compression.noFiles');
     }
@@ -983,23 +984,15 @@ export const CompressionPage = () => {
       return t('compression.copyOnlyReady');
     }
 
-    if (needsMozJpeg && !hasConfiguredMozJpeg) {
-      return t('compression.configureMozJpeg');
-    }
-
-    if (needsImageMagick && !hasConfiguredImageMagick) {
-      return t('compression.configureImageMagick');
-    }
-
-    if (needsHandBrake && !hasConfiguredHandBrake) {
-      return t('compression.configureHandBrakeTool');
+    if (!hasResolvedFallbacks) {
+      return t('compression.resolveToolChoices');
     }
 
     if (!hasAbsolutePaths) {
       return t('compression.absolutePaths');
     }
 
-    if (needsHandBrake && !hasAvailableVideoPresets) {
+    if (processingPolicy.video === 'compress' && needsHandBrake && !hasAvailableVideoPresets) {
       return t('compression.loadPreset');
     }
 
@@ -1035,6 +1028,13 @@ export const CompressionPage = () => {
     return compressionSetupMessage ?? t('compression.idle');
   })();
   const compressionSessionWarningMessage = toolWarnings.join(' ');
+
+  useEffect(() => {
+    setJpegCopyAccepted(false);
+    setHeicCopyAccepted(false);
+    setVideoCopyAccepted(false);
+  }, [sourcePath, encoderSettings.updatedAt, selectedStats.jpegImageCount, selectedStats.heicImageCount, selectedStats.videoCount]);
+
   const handleStartCompression = async () => {
     if (isWorkflowReadOnly) {
       return;
@@ -1045,38 +1045,37 @@ export const CompressionPage = () => {
     }
 
     const latestEncoderSettings = await loadEncoderSettings();
-    const latestImageToolCommand = getEffectiveToolCommand('image', latestEncoderSettings);
-    const latestImageMagickCommand = getEffectiveToolCommand('imagemagick', latestEncoderSettings);
-    const latestExifToolCommand = getEffectiveToolCommand('exiftool', latestEncoderSettings);
-    const latestVideoToolCommand = getEffectiveToolCommand('video', latestEncoderSettings);
-    const latestHasConfiguredMozJpeg = Boolean(latestImageToolCommand);
-    const latestHasConfiguredImageMagick = Boolean(latestImageMagickCommand);
-    const latestHasConfiguredHandBrake = Boolean(latestVideoToolCommand);
-    const latestHasRequiredTools =
-      (!needsMozJpeg || latestHasConfiguredMozJpeg) &&
-      (!needsImageMagick || latestHasConfiguredImageMagick) &&
-      (!needsHandBrake || latestHasConfiguredHandBrake);
+    const latestSnapshot = await loadToolsStatusRequest(latestEncoderSettings).catch(() => null);
+    const latestMozJpegReady = latestSnapshot?.tools.image.status === 'ready';
+    const latestImageMagickReady = latestSnapshot?.tools.imagemagick.status === 'ready';
+    const latestHandBrakeReady = latestSnapshot?.tools.video.status === 'ready';
+    const latestResolution = resolveMediaProcessingPolicy({
+      jpegCount: selectedStats.jpegImageCount,
+      heicCount: selectedStats.heicImageCount,
+      videoCount: selectedStats.videoCount,
+      mozJpegReady: latestMozJpegReady,
+      imageMagickReady: latestImageMagickReady,
+      handBrakeReady: latestHandBrakeReady,
+      jpegCopyAccepted,
+      heicCopyAccepted,
+      videoCopyAccepted
+    });
+    const latestPolicy = latestResolution.policy;
+    const latestFallbacksResolved = latestResolution.fallbacksResolved;
 
-    setEncoderSettings(latestEncoderSettings);
-
-    if (!canStartRealCompression || !latestHasRequiredTools) {
-      setBackendError(
-        !latestHasRequiredTools
-          ? needsMozJpeg && !latestHasConfiguredMozJpeg
-            ? t('compression.configureMozJpeg')
-            : needsImageMagick && !latestHasConfiguredImageMagick
-              ? t('compression.configureImageMagick')
-              : needsHandBrake && !latestHasConfiguredHandBrake
-                ? t('compression.configureHandBrakeTool')
-                : t('compression.configureRequiredTools')
-          : !hasRequiredTools
-            ? compressionSetupMessage ?? t('compression.configureRequiredTools')
-          : needsHandBrake && !hasAvailableVideoPresets
-            ? t('compression.loadPreset')
-          : t('compression.realPathRequired')
-      );
+    if (!latestSnapshot || latestSnapshot.python.status !== 'ready' || !latestFallbacksResolved) {
+      setBackendError(latestSnapshot?.python.status === 'missing'
+        ? t('compression.configurePython')
+        : t('compression.resolveToolChoices'));
       return;
     }
+
+    const latestImageToolCommand = latestSnapshot.tools.image.effectiveCommand;
+    const latestImageMagickCommand = latestSnapshot.tools.imagemagick.effectiveCommand;
+    const latestExifToolCommand = latestSnapshot.tools.exiftool.status === 'ready'
+      ? latestSnapshot.tools.exiftool.effectiveCommand
+      : '';
+    const latestVideoToolCommand = latestSnapshot.tools.video.effectiveCommand;
 
     setBackendError(null);
     setIsStartingCompression(true);
@@ -1095,6 +1094,7 @@ export const CompressionPage = () => {
         videoToolCommand: latestVideoToolCommand,
         imageMagickCommand: latestImageMagickCommand,
         exifToolCommand: latestExifToolCommand,
+        processingPolicy: latestPolicy,
         selectionScope: loadSourceSelectionScope()
       });
 
@@ -1704,6 +1704,68 @@ export const CompressionPage = () => {
           </fieldset>
         </div>
       </div>
+
+      {(toolPreflight.status === 'error' || !pythonReady || jpegNeedsDecision || heicNeedsDecision || videoNeedsDecision) && (
+        <div className="page-card compression-tool-decisions">
+          <p className="page-section-title">{t('compression.toolDecisionsTitle')}</p>
+          {toolPreflight.status === 'error' && (
+            <div className="compression-tool-decision">
+              <p className="error">{t('compression.toolStatusUnknown')}</p>
+              <button className="btn btn-secondary" type="button" onClick={() => void toolPreflight.refresh()}>
+                {t('compression.retryToolStatus')}
+              </button>
+            </div>
+          )}
+          {toolPreflight.status === 'ready' && !pythonReady && (
+            <div className="compression-tool-decision">
+              <p className="error">{t('compression.configurePython')}</p>
+              <button className="btn btn-secondary" type="button" onClick={() => navigate('/settings', { state: { returnTo: '/compression' } })}>
+                {t('compression.openSettings')}
+              </button>
+            </div>
+          )}
+          {jpegNeedsDecision && (
+            <div className="compression-tool-decision">
+              <p>{t('compression.missingMozJpegChoice', { count: selectedStats.jpegImageCount })}</p>
+              <div className="action-row">
+                <button className="btn btn-secondary" type="button" onClick={() => navigate('/settings', { state: { returnTo: '/compression' } })}>
+                  {t('compression.openSettings')}
+                </button>
+                <button className="btn btn-primary" type="button" onClick={() => setJpegCopyAccepted(true)} disabled={jpegCopyAccepted}>
+                  {jpegCopyAccepted ? t('compression.copyChoiceAccepted') : t('compression.copyJpegOriginals')}
+                </button>
+              </div>
+            </div>
+          )}
+          {heicNeedsDecision && (
+            <div className="compression-tool-decision">
+              <p>{t('compression.missingHeicToolsChoice', { count: selectedStats.heicImageCount })}</p>
+              <p className="page-summary-note compression-warning">{t('compression.heicCopyPreviewWarning')}</p>
+              <div className="action-row">
+                <button className="btn btn-secondary" type="button" onClick={() => navigate('/settings', { state: { returnTo: '/compression' } })}>
+                  {t('compression.openSettings')}
+                </button>
+                <button className="btn btn-primary" type="button" onClick={() => setHeicCopyAccepted(true)} disabled={heicCopyAccepted}>
+                  {heicCopyAccepted ? t('compression.copyChoiceAccepted') : t('compression.copyHeicOriginals')}
+                </button>
+              </div>
+            </div>
+          )}
+          {videoNeedsDecision && (
+            <div className="compression-tool-decision">
+              <p>{t('compression.missingHandBrakeChoice', { count: selectedStats.videoCount })}</p>
+              <div className="action-row">
+                <button className="btn btn-secondary" type="button" onClick={() => navigate('/settings', { state: { returnTo: '/compression' } })}>
+                  {t('compression.openSettings')}
+                </button>
+                <button className="btn btn-primary" type="button" onClick={() => setVideoCopyAccepted(true)} disabled={videoCopyAccepted}>
+                  {videoCopyAccepted ? t('compression.copyChoiceAccepted') : t('compression.copyVideoOriginals')}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="page-card">
         <p className="page-summary-label">{t('compression.summary')}</p>

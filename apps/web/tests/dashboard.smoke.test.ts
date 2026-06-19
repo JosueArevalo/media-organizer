@@ -94,6 +94,7 @@ test('dashboard route loads and the client module compiles', async () => {
       '/src/pages/PreviewPage.tsx',
       '/src/pages/CompressionPage.tsx',
       '/src/pages/GroupingPage.tsx',
+      '/src/pages/SettingsPage.tsx',
       '/src/pages/ExportPage.tsx',
       '/src/pages/NetworkFolderExportPage.tsx',
       '/src/pages/GooglePhotosExportPage.tsx',

@@ -222,6 +222,35 @@ test('compress_images converts selected HEIC to JPG and copies PNG without compr
   assert.ok(items.filter((item) => path.basename(item.output).startsWith('photo') && item.output.endsWith('.jpg')).length >= 2);
 });
 
+test('compress_images copy policy preserves JPEG and HEIC originals without invoking tools', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-copy-policy-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'photo.jpg'), 'fake-jpg', 'utf8');
+  fs.writeFileSync(path.join(sourceDir, 'photo.heic'), 'fake-heic', 'utf8');
+
+  const result = spawnSync(process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python', [
+    scriptPath,
+    '--source-dir', sourceDir,
+    '--output-dir', outputDir,
+    '--quality', '80',
+    '--encoder-command', '__missing_cjpeg__',
+    '--imagemagick-command', '__missing_magick__',
+    '--jpeg-mode', 'copy',
+    '--heic-mode', 'copy'
+  ], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  const complete = result.stdout.split(/\r?\n/).filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  assert.equal(complete?.items?.length, 2);
+  assert.ok(complete?.items?.every((item) => item.status === 'completed' && item.operation === 'copy'));
+  assert.ok(fs.existsSync(path.join(outputDir, 'photo.jpg')));
+  assert.ok(fs.existsSync(path.join(outputDir, 'photo.heic')));
+});
+
 test('compress_images marks excluded selected-scope files as copy operations', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-script-scope-'));
   const sourceDir = path.join(tempRoot, 'source');

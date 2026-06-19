@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   loadEncoderSettings,
   saveEncoderSettings,
@@ -104,6 +105,12 @@ const toolDownloadLinks: Record<ToolKey, {
 
 const SettingsPage = () => {
   const { t } = useTranslation();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const requestedReturnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+  const returnTo = ['/dashboard', '/import', '/compression'].includes(requestedReturnTo ?? '')
+    ? requestedReturnTo as '/dashboard' | '/import' | '/compression'
+    : null;
   const [settings, setSettings] = useState<EncoderSettingsSnapshot>({
     imageToolCommand: '',
     videoToolCommand: '',
@@ -388,35 +395,29 @@ const SettingsPage = () => {
   const renderToolStatus = (tool: ToolKey) => {
     const status = statuses[tool];
     const snapshot = toolStatusSnapshot?.tools[tool] as ExternalToolStatusSnapshot | undefined;
+    const showInstallDetails = snapshot?.status === 'missing';
 
     return (
-      <div className={`status status-${status}`}>
-        <span className="status-dot" />
-        <span>{getToolStatusLabel(status)}</span>
-        {snapshot?.resolvedPath ? (
-          <code className="status-path">{snapshot.resolvedPath}</code>
-        ) : snapshot ? (
-          <code className="status-path">{snapshot.effectiveCommand}</code>
-        ) : null}
-      </div>
-    );
-  };
-
-  const renderInstallHint = (tool: ToolKey) => {
-    const snapshot = toolStatusSnapshot?.tools[tool];
-
-    if (!snapshot || snapshot.status !== 'missing') {
-      return null;
-    }
-
-    return (
-      <div className="tool-install-hint">
-        {snapshot.installCommand ? (
-          <p>{t('settings.installCommand', { command: snapshot.installCommand })}</p>
-        ) : (
-          <p>{t('settings.installFromDownload')}</p>
+      <div className={`status status-${status}${showInstallDetails ? ' status-with-details' : ''}`}>
+        <div className="status-summary">
+          <span className="status-dot" />
+          <span>{getToolStatusLabel(status)}</span>
+          {snapshot?.resolvedPath ? (
+            <code className="status-path">{snapshot.resolvedPath}</code>
+          ) : snapshot?.effectiveCommand ? (
+            <code className="status-path">{snapshot.effectiveCommand}</code>
+          ) : null}
+        </div>
+        {showInstallDetails && (
+          <div className="status-details">
+            <p>
+              {snapshot.installCommand
+                ? t('settings.installCommand', { command: snapshot.installCommand })
+                : t('settings.installFromDownload')}
+            </p>
+            {snapshot.note ? <p>{snapshot.note}</p> : null}
+          </div>
         )}
-        {snapshot.note ? <p>{snapshot.note}</p> : null}
       </div>
     );
   };
@@ -660,7 +661,6 @@ const SettingsPage = () => {
                 )}
               </div>
               {renderToolStatus('image')}
-              {renderInstallHint('image')}
             </div>
           </div>
 
@@ -698,7 +698,6 @@ const SettingsPage = () => {
                 )}
               </div>
               {renderToolStatus('imagemagick')}
-              {renderInstallHint('imagemagick')}
             </div>
           </div>
 
@@ -736,7 +735,6 @@ const SettingsPage = () => {
                 )}
               </div>
               {renderToolStatus('exiftool')}
-              {renderInstallHint('exiftool')}
             </div>
           </div>
 
@@ -774,7 +772,6 @@ const SettingsPage = () => {
                 )}
               </div>
               {renderToolStatus('video')}
-              {renderInstallHint('video')}
             </div>
           </div>
 
@@ -782,14 +779,21 @@ const SettingsPage = () => {
             <p className="encoder-actions-note">
               {hasPendingEncoderChanges ? t('settings.unsavedChanges') : t('settings.changesLocal')}
             </p>
-            <button
-              className="btn btn-primary"
-              onClick={handleSave}
-              disabled={isSaving || !hasPendingEncoderChanges}
-              type="button"
-            >
-              {isSaving ? t('settings.saving') : t('settings.saveEncoderPaths')}
-            </button>
+            <div className="action-row">
+              {returnTo && !hasPendingEncoderChanges && (
+                <button className="btn btn-secondary" type="button" onClick={() => navigate(returnTo)}>
+                  {t('settings.returnToFlow')}
+                </button>
+              )}
+              <button
+                className="btn btn-primary"
+                onClick={handleSave}
+                disabled={isSaving || !hasPendingEncoderChanges}
+                type="button"
+              >
+                {isSaving ? t('settings.saving') : t('settings.saveEncoderPaths')}
+              </button>
+            </div>
           </div>
         </div>
 

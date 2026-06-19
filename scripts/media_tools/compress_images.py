@@ -425,6 +425,8 @@ def main() -> int:
     parser.add_argument('--encoder-command', default='cjpeg')
     parser.add_argument('--imagemagick-command', default='magick')
     parser.add_argument('--exiftool-command', default='')
+    parser.add_argument('--jpeg-mode', choices=['compress', 'copy'], default='compress')
+    parser.add_argument('--heic-mode', choices=['convert', 'copy'], default='convert')
     parser.add_argument('--selection-scope-json', default='')
     parser.add_argument('--resume-skip-file', default='')
     parser.add_argument('--resume-skip-json', default='')
@@ -448,8 +450,16 @@ def main() -> int:
         if normalize_path(str(source_file)) in skipped_sources:
             continue
 
-        selected_for_compression = should_compress(source_file, scope)
+        selected_by_scope = should_compress(source_file, scope)
         extension = source_file.suffix.lower()
+        selected_for_compression = selected_by_scope and (
+            (extension in JPEG_EXTENSIONS and args.jpeg_mode == 'compress')
+            or (extension in HEIC_EXTENSIONS and args.heic_mode == 'convert')
+        )
+        forced_copy_by_policy = selected_by_scope and (
+            (extension in JPEG_EXTENSIONS and args.jpeg_mode == 'copy')
+            or (extension in HEIC_EXTENSIONS and args.heic_mode == 'copy')
+        )
         output_file = build_output_path(
             source_dir,
             output_dir,
@@ -481,8 +491,10 @@ def main() -> int:
             'item': start_item,
         })
 
-        if not selected_for_compression:
+        if not selected_by_scope or forced_copy_by_policy:
             skipped = copy_if_changed(source_file, output_file)
+            if forced_copy_by_policy:
+                warning_message = 'Original copied because compression or conversion was disabled for this session.'
         elif extension in JPEG_EXTENSIONS:
             try:
                 command = run_cjpeg(args.encoder_command, args.quality, source_file, output_file)

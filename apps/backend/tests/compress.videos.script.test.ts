@@ -67,6 +67,31 @@ cp "$2" "$4"
   return filePath;
 };
 
+test('compress_videos copy policy preserves the original container without invoking HandBrake', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-copy-policy-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'clip.mov'), 'fake-video', 'utf8');
+
+  const result = spawnSync(process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python', [
+    scriptPath,
+    '--source-dir', sourceDir,
+    '--output-dir', outputDir,
+    '--output-format-mode', 'mp4',
+    '--encoder-command', '__missing_handbrake__',
+    '--video-mode', 'copy'
+  ], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  const complete = result.stdout.split(/\r?\n/).filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  assert.equal(complete?.items?.[0]?.operation, 'copy');
+  assert.ok(fs.existsSync(path.join(outputDir, 'clip.mov')));
+  assert.equal(fs.existsSync(path.join(outputDir, 'clip.mp4')), false);
+});
+
 const writeQsvFallbackVideoTool = (toolsDir: string) => {
   const extension = process.platform === 'win32' ? '.cmd' : '.sh';
   const filePath = path.join(toolsDir, `handbrake-fallback${extension}`);
