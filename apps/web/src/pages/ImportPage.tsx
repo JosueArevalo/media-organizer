@@ -12,6 +12,8 @@ import {
   type ImportValidationCode
 } from '../services/import-validation.service';
 import { isPreCompressionStepReadOnly } from '../services/workflow-locks';
+import { useToolPreflight } from '../hooks/useToolPreflight';
+import { MediaToolsNotice } from '../components/MediaToolsNotice';
 
 const validationMessageKeys: Record<ImportValidationCode, TranslationKey> = {
   missing_paths: 'import.validation.missingPaths',
@@ -39,6 +41,7 @@ export const ImportPage = () => {
   const [isValidating, setIsValidating] = useState(false);
   const [isClearingDestination, setIsClearingDestination] = useState(false);
   const compressionSessionState = useCompressionSessionState();
+  const toolPreflight = useToolPreflight();
   const isWorkflowReadOnly = isPreCompressionStepReadOnly(compressionSessionState);
   const {
     sourceSelection,
@@ -315,6 +318,8 @@ export const ImportPage = () => {
           isReadOnly={isWorkflowReadOnly}
         />
       </div>
+
+      <MediaToolsNotice preflight={toolPreflight} returnTo="/import" />
 
       <div className="page-footer-actions">
         <div className="import-validation-status" aria-live="polite">

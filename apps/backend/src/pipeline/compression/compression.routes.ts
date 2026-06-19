@@ -7,7 +7,9 @@ import {
   markCompressionSessionFailed,
   pauseCompressionSession,
   startCompressionSessionResume,
-  startCompressionSession
+  startCompressionSession,
+  CompressionToolConfigurationError,
+  type CompressionProcessingPolicy
 } from './compressionJob.service.js';
 import { executeCompressionSession } from './compressionJob.runner.js';
 
@@ -28,6 +30,7 @@ export const handleCompressionRoutes: RouteHandler = ({ req, res, requestUrl }) 
               videoToolCommand?: string;
               imageMagickCommand?: string;
               exifToolCommand?: string;
+              processingPolicy?: Partial<CompressionProcessingPolicy>;
               selectionScope?: {
                 excludedDirectories: string[];
                 excludedFiles: string[];
@@ -55,6 +58,7 @@ export const handleCompressionRoutes: RouteHandler = ({ req, res, requestUrl }) 
           videoToolCommand: body.videoToolCommand,
           imageMagickCommand: body.imageMagickCommand,
           exifToolCommand: body.exifToolCommand,
+          processingPolicy: body.processingPolicy,
           selectionScope: body.selectionScope ?? undefined
         });
 
@@ -65,6 +69,10 @@ export const handleCompressionRoutes: RouteHandler = ({ req, res, requestUrl }) 
 
         sendJson(res, 201, result);
       } catch (error) {
+        if (error instanceof CompressionToolConfigurationError) {
+          sendJson(res, 400, { status: 'tool_configuration_required', message: error.message });
+          return;
+        }
         sendCaughtError(res, error, 'Failed to start compression session.');
       }
     })();

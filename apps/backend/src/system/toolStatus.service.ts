@@ -44,7 +44,6 @@ const toolDefinitions: Record<ExternalToolKey, {
   label: string;
   field: keyof ToolStatusRequest;
   defaultCommand: string;
-  windowsDefaultCommand: string;
   installFormula: string;
   installUrl: string;
   note?: string;
@@ -53,7 +52,6 @@ const toolDefinitions: Record<ExternalToolKey, {
     label: 'MozJPEG cjpeg',
     field: 'imageToolCommand',
     defaultCommand: 'cjpeg',
-    windowsDefaultCommand: 'cjpeg-static.exe',
     installFormula: 'mozjpeg',
     installUrl: 'https://formulae.brew.sh/formula/mozjpeg',
     note: 'Homebrew installs mozjpeg as keg-only. If cjpeg is not on PATH, use the full path under your Homebrew prefix, such as /opt/homebrew/opt/mozjpeg/bin/cjpeg.'
@@ -62,7 +60,6 @@ const toolDefinitions: Record<ExternalToolKey, {
     label: 'ImageMagick',
     field: 'imageMagickCommand',
     defaultCommand: 'magick',
-    windowsDefaultCommand: 'magick.exe',
     installFormula: 'imagemagick',
     installUrl: 'https://formulae.brew.sh/formula/imagemagick'
   },
@@ -70,7 +67,6 @@ const toolDefinitions: Record<ExternalToolKey, {
     label: 'ExifTool',
     field: 'exifToolCommand',
     defaultCommand: 'exiftool',
-    windowsDefaultCommand: 'exiftool.exe',
     installFormula: 'exiftool',
     installUrl: 'https://formulae.brew.sh/formula/exiftool'
   },
@@ -78,7 +74,6 @@ const toolDefinitions: Record<ExternalToolKey, {
     label: 'HandBrake CLI',
     field: 'videoToolCommand',
     defaultCommand: 'HandBrakeCLI',
-    windowsDefaultCommand: 'HandBrakeCLI.exe',
     installFormula: 'handbrake',
     installUrl: 'https://formulae.brew.sh/formula/handbrake'
   }
@@ -92,7 +87,7 @@ const getEffectiveCommand = (request: ToolStatusRequest, key: ExternalToolKey, p
     return configured;
   }
 
-  return isUnixPlatform(platform) ? definition.defaultCommand : definition.windowsDefaultCommand;
+  return isUnixPlatform(platform) ? definition.defaultCommand : '';
 };
 
 export const getToolsStatus = (

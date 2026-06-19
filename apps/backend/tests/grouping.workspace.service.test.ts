@@ -110,7 +110,11 @@ const seedCompressionSession = (relativePaths: string[]) => {
   return { compressionSessionId, items };
 };
 
-const seedCompressionManifest = (compressionSessionId: string, imageMagickCommand: string) => {
+const seedCompressionManifest = (
+  compressionSessionId: string,
+  imageMagickCommand: string,
+  processingPolicy?: { heic: 'convert' | 'copy' }
+) => {
   const db = getDb();
   const now = new Date().toISOString();
 
@@ -128,7 +132,8 @@ const seedCompressionManifest = (compressionSessionId: string, imageMagickComman
     JSON.stringify({
       outputRoot: outputDir,
       manifest: {
-        imageMagickCommand
+        imageMagickCommand,
+        processingPolicy
       }
     }),
     now
@@ -310,6 +315,21 @@ test('getGroupingThumbnailPath reports ImageMagick errors', async () => {
   assert.throws(
     () => getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
     (error) => error instanceof GroupingPreviewError && /HEIC\/HEIF support/.test(error.message)
+  );
+});
+
+test('copied HEIC reports unavailable preview without resolving an implicit ImageMagick command', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['photo.heic']);
+  seedCompressionManifest(compressionSessionId, '', { heic: 'copy' });
+
+  const { createGroupingWorkspace, getGroupingThumbnailPath, GroupingPreviewError } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js'
+  );
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+
+  assert.throws(
+    () => getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
+    (error) => error instanceof GroupingPreviewError && /copied without ImageMagick/.test(error.message)
   );
 });
 

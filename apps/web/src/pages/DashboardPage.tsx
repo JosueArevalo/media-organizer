@@ -7,7 +7,8 @@ import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useBackendHealth } from '../hooks/useBackendHealth';
 import { useTranslation, type TranslationKey } from '../i18n';
 import { resetRuntimeStateWithBackend } from '../services/app-maintenance.store';
-import { loadEncoderSettings } from '../services/encoder-settings.store';
+import { useToolPreflight } from '../hooks/useToolPreflight';
+import { MediaToolsNotice } from '../components/MediaToolsNotice';
 import {
   deleteDashboardExecution,
   getBackendHealth,
@@ -306,7 +307,7 @@ export const DashboardPage = () => {
   const [expandedExecutionId, setExpandedExecutionId] = useState<string | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const [isStartingNewSession, setIsStartingNewSession] = useState(false);
-  const [hasConfiguredEncoders, setHasConfiguredEncoders] = useState(true);
+  const toolPreflight = useToolPreflight();
 
   const refreshDashboard = async () => {
     const [nextSummary, nextExecutions] = await Promise.all([
@@ -329,11 +330,6 @@ export const DashboardPage = () => {
         if (!isActive) return;
         setDashboardError(error instanceof Error ? error.message : t('dashboard.loadError'));
       });
-
-    loadEncoderSettings().then((settings) => {
-      if (!isActive) return;
-      setHasConfiguredEncoders(Boolean(settings.imageToolCommand.trim() && settings.videoToolCommand.trim()));
-    });
 
     return () => {
       isActive = false;
@@ -451,14 +447,6 @@ export const DashboardPage = () => {
       };
     }
 
-    if (!hasConfiguredEncoders) {
-      return {
-        title: t('dashboard.workflow.configureToolsTitle'),
-        description: t('dashboard.workflow.configureToolsDescription'),
-        action: { to: '/settings', label: t('dashboard.action.configureTools') }
-      };
-    }
-
     return {
       title: t('dashboard.workflow.readyTitle'),
       description: t('dashboard.workflow.readyDescription'),
@@ -474,14 +462,6 @@ export const DashboardPage = () => {
         id: 'backend-offline',
         level: 'error',
         message: t('dashboard.alert.backendOffline')
-      });
-    }
-
-    if (!hasConfiguredEncoders && sourceSelection && destinationSelection && compressionSessionState.status === 'idle') {
-      alerts.push({
-        id: 'encoders-missing',
-        level: 'warning',
-        message: t('dashboard.alert.encodersMissing')
       });
     }
 
@@ -518,7 +498,6 @@ export const DashboardPage = () => {
     exportJobState.status,
     groupingSessionState.errorMessage,
     groupingSessionState.status,
-    hasConfiguredEncoders,
     healthError,
     sourceSelection,
     t
@@ -602,6 +581,8 @@ export const DashboardPage = () => {
           )}
         </div>
       </section>
+
+      <MediaToolsNotice preflight={toolPreflight} returnTo="/dashboard" />
 
       {dashboardError && <p className="error">{dashboardError}</p>}
 

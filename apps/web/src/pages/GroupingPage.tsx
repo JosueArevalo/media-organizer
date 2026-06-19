@@ -1306,6 +1306,7 @@ export const GroupingPage = () => {
       ? buildGroupingPreviewUrl(workspace.sessionId, previewItem.id)
       : buildGroupingMediaUrl(workspace.sessionId, previewItem.id)
     : null;
+  const hasCopiedHeic = Boolean(workspace?.items.some((item) => /\.(heic|heif)$/i.test(item.fileName)));
 
   return (
     <div className={`grouping-workspace page-stack ${!canMutateGrouping ? 'is-read-only' : ''}`}>
@@ -1367,6 +1368,9 @@ export const GroupingPage = () => {
 
       {!canMutateGrouping && (
         <p className="page-summary-note compression-warning">{t('grouping.exportActiveReadOnlyNotice')}</p>
+      )}
+      {hasCopiedHeic && (
+        <p className="page-summary-note compression-warning">{t('grouping.heicPreviewLimited')}</p>
       )}
 
       {isWaitingForWorkspacePrerequisites && !workspace && !backendError && (

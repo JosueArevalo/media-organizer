@@ -55,6 +55,10 @@ export const buildImageCompressionCommand = (manifest: CompressionSessionManifes
     manifest.imageMagickCommand,
     '--exiftool-command',
     manifest.exifToolCommand,
+    '--jpeg-mode',
+    manifest.processingPolicy?.jpeg ?? 'compress',
+    '--heic-mode',
+    manifest.processingPolicy?.heic ?? 'convert',
     '--selection-scope-json',
     JSON.stringify(manifest.selectionScope)
   ], manifest, 'images', resumeItems)
@@ -74,6 +78,8 @@ export const buildVideoCompressionCommand = (manifest: CompressionSessionManifes
     manifest.videoOutputFormatMode,
     '--encoder-command',
     manifest.videoToolCommand,
+    '--video-mode',
+    manifest.processingPolicy?.video ?? 'compress',
     '--selection-scope-json',
     JSON.stringify(manifest.selectionScope)
   ], manifest, 'videos', resumeItems)

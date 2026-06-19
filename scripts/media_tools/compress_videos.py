@@ -384,6 +384,7 @@ def main() -> int:
     parser.add_argument('--preset', default=DEFAULT_PRESET)
     parser.add_argument('--output-format-mode', choices=['preserve', 'mp4'], default='preserve')
     parser.add_argument('--encoder-command', default='HandBrakeCLI')
+    parser.add_argument('--video-mode', choices=['compress', 'copy'], default='compress')
     parser.add_argument('--selection-scope-json', default='')
     parser.add_argument('--resume-skip-file', default='')
     parser.add_argument('--resume-skip-json', default='')
@@ -392,8 +393,8 @@ def main() -> int:
     source_dir = Path(args.source_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
     scope = resolve_scope(source_dir, load_scope(args.selection_scope_json))
-    resolved_preset = resolve_preset(args.encoder_command, args.preset)
-    hw_decode = resolve_handbrake_hw_decode()
+    resolved_preset = resolve_preset(args.encoder_command, args.preset) if args.video_mode == 'compress' else args.preset
+    hw_decode = resolve_handbrake_hw_decode() if args.video_mode == 'compress' else None
     output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = []
@@ -404,13 +405,13 @@ def main() -> int:
         if normalize_path(str(source_file)) in skipped_sources:
             continue
 
-        operation = 'compress' if should_compress(source_file, scope) else 'copy'
+        operation = 'compress' if args.video_mode == 'compress' and should_compress(source_file, scope) else 'copy'
         output_file = build_output_path(source_dir, output_dir, source_file, args.output_format_mode, operation)
         output_file.parent.mkdir(parents=True, exist_ok=True)
         cleanup_stale_temp_outputs(output_file)
         command_output_file = build_temp_output_path(output_file) if operation == 'compress' else output_file
 
-        fallback_command = [
+        fallback_command = [] if operation == 'copy' else [
             args.encoder_command,
             '-i',
             str(source_file),

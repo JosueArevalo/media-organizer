@@ -193,6 +193,34 @@
   border: 1px solid;
 }
 
+.status-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.status-with-details {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.status-details {
+  padding-left: 14px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.status-details p {
+  margin: 0;
+}
+
+.status-details p + p {
+  margin-top: 5px;
+  color: var(--text-muted);
+}
+
 .status-ready {
   background: var(--accent-light);
   color: var(--accent-deep);
@@ -223,29 +251,6 @@
   color: inherit;
   font-size: 11px;
   overflow-wrap: anywhere;
-}
-
-.tool-install-hint {
-  margin-top: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--warn-border);
-  border-radius: 4px;
-  background: var(--warn-bg);
-  color: var(--text);
-  font-size: 12px;
-}
-
-.tool-install-hint p {
-  margin: 0;
-}
-
-.tool-install-hint p + p {
-  margin-top: 6px;
-  color: var(--text-muted);
-}
-
-.tool-install-hint code {
-  font-family: 'Courier New', monospace;
 }
 
 .message {

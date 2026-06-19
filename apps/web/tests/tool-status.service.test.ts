@@ -27,6 +27,8 @@ test('Windows keeps empty tool settings unconfigured', () => {
   assert.equal(isWindowsPlatform('win32'), true);
   assert.equal(isUnixPlatform('win32'), false);
   assert.equal(getEffectiveToolCommand('image', emptySettings, 'win32'), '');
+  assert.equal(getEffectiveToolCommand('imagemagick', emptySettings, 'win32'), '');
+  assert.equal(getEffectiveToolCommand('exiftool', emptySettings, 'win32'), '');
   assert.equal(getEffectiveToolCommand('video', emptySettings, 'win32'), '');
 });
 
