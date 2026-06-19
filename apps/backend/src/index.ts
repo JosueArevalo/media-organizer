@@ -258,7 +258,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
   reconcileInterruptedCompressionSessions();
   reconcileInterruptedExportJobs();
 
-  return createServer((req, res) => {
+  return createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     if (!isAllowedLocalOrigin(req.headers.origin) || !isAllowedLocalHost(req.headers.host)) {
       sendForbiddenLocalOnly(res);
@@ -732,7 +732,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
 
     if (req.method === 'GET' && subPath === 'items' && subId && tailPath === 'thumbnail') {
       try {
-        const media = getGroupingThumbnailPath(sessionId, subId);
+        const media = await getGroupingThumbnailPath(sessionId, subId);
 
         if (!media || !fs.existsSync(media.path)) {
           sendJson(res, 404, { status: 'not_found' });

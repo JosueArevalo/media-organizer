@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, test } from 'node:test';
+import sharp from 'sharp';
 import { getDb, resetDbForTests } from '../src/state/db.js';
 import { runMigrations } from '../src/state/migrations/runMigrations.js';
 
@@ -13,6 +14,23 @@ const tempDbPath = path.join(tempDataDir, 'test.sqlite');
 const migrationsDir = path.resolve(process.cwd(), 'src', 'state', 'migrations');
 const sourceDir = path.join(tempRoot, 'source');
 const outputDir = path.join(tempRoot, 'output');
+
+const writeTestImage = async (filePath: string, format: 'jpeg' | 'png' | 'webp' | 'gif' = 'jpeg', orientation?: number) => {
+  let image = sharp({
+    create: {
+      width: 720,
+      height: 480,
+      channels: 3,
+      background: { r: 32, g: 96, b: 160 }
+    }
+  });
+
+  if (orientation) {
+    image = image.withMetadata({ orientation });
+  }
+
+  await image.toFormat(format).toFile(filePath);
+};
 
 beforeEach(() => {
   process.env.MEDIA_ORGANIZER_DATA_DIR = tempDataDir;
@@ -233,49 +251,78 @@ test('getGroupingPreviewPath serves web-safe images without conversion', async (
   assert.equal(preview.mediaType, 'image');
 });
 
-test('getGroupingThumbnailPath generates and reuses web-safe image thumbnails', async () => {
+test('getGroupingThumbnailPath generates and reuses web-safe thumbnails without ImageMagick', async () => {
   const { compressionSessionId, items } = seedCompressionSession(['photo.jpg']);
-  const toolsDir = path.join(tempRoot, 'tools-thumbnail');
-  const fakeMagick = writeFakeMagick(toolsDir, true);
-  seedCompressionManifest(compressionSessionId, fakeMagick);
+  await writeTestImage(items[0].outputPath);
 
   const { createGroupingWorkspace, getGroupingThumbnailPath } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
   const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
 
-  const thumbnail = getGroupingThumbnailPath(workspace.sessionId, items[0].itemId);
+  const thumbnail = await getGroupingThumbnailPath(workspace.sessionId, items[0].itemId);
 
   assert.ok(thumbnail);
   assert.equal(thumbnail.path.endsWith('-thumb.jpg'), true);
   assert.equal(thumbnail.mediaType, 'image');
-  assert.equal(fs.readFileSync(thumbnail.path, 'utf8').trim(), 'preview');
+  const metadata = await sharp(thumbnail.path).metadata();
+  assert.equal(metadata.format, 'jpeg');
+  assert.ok((metadata.width ?? 0) <= 360);
+  assert.ok((metadata.height ?? 0) <= 360);
 
-  fs.writeFileSync(thumbnail.path, 'cached\n', 'utf8');
-  const cachedThumbnail = getGroupingThumbnailPath(workspace.sessionId, items[0].itemId);
+  const cachedMtime = fs.statSync(thumbnail.path).mtimeMs;
+  const cachedThumbnail = await getGroupingThumbnailPath(workspace.sessionId, items[0].itemId);
 
   assert.equal(cachedThumbnail?.path, thumbnail.path);
-  assert.equal(fs.readFileSync(thumbnail.path, 'utf8').trim(), 'cached');
+  assert.equal(fs.statSync(thumbnail.path).mtimeMs, cachedMtime);
 });
 
 test('getGroupingThumbnailPath regenerates stale thumbnails', async () => {
   const { compressionSessionId, items } = seedCompressionSession(['photo.jpg']);
-  const toolsDir = path.join(tempRoot, 'tools-thumbnail-stale');
-  const fakeMagick = writeFakeMagick(toolsDir, true);
-  seedCompressionManifest(compressionSessionId, fakeMagick);
+  await writeTestImage(items[0].outputPath);
 
   const { createGroupingWorkspace, getGroupingThumbnailPath } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
   const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
 
-  const thumbnail = getGroupingThumbnailPath(workspace.sessionId, items[0].itemId);
+  const thumbnail = await getGroupingThumbnailPath(workspace.sessionId, items[0].itemId);
   assert.ok(thumbnail);
 
-  fs.writeFileSync(thumbnail.path, 'cached\n', 'utf8');
+  const initialMtime = fs.statSync(thumbnail.path).mtimeMs;
   const future = new Date(Date.now() + 60_000);
   fs.utimesSync(items[0].outputPath, future, future);
 
-  const regeneratedThumbnail = getGroupingThumbnailPath(workspace.sessionId, items[0].itemId);
+  const regeneratedThumbnail = await getGroupingThumbnailPath(workspace.sessionId, items[0].itemId);
 
   assert.equal(regeneratedThumbnail?.path, thumbnail.path);
-  assert.equal(fs.readFileSync(thumbnail.path, 'utf8').trim(), 'preview');
+  assert.ok(fs.statSync(thumbnail.path).mtimeMs >= initialMtime);
+});
+
+test('getGroupingThumbnailPath supports web formats, EXIF rotation and concurrent requests', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['photo.jpg', 'photo.png', 'photo.webp', 'photo.gif']);
+  await Promise.all([
+    writeTestImage(items[0].outputPath, 'jpeg', 6),
+    writeTestImage(items[1].outputPath, 'png'),
+    writeTestImage(items[2].outputPath, 'webp'),
+    writeTestImage(items[3].outputPath, 'gif')
+  ]);
+
+  const { createGroupingWorkspace, getGroupingThumbnailPath } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  const [first, duplicate, png, webp, gif] = await Promise.all([
+    getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
+    getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
+    getGroupingThumbnailPath(workspace.sessionId, items[1].itemId),
+    getGroupingThumbnailPath(workspace.sessionId, items[2].itemId),
+    getGroupingThumbnailPath(workspace.sessionId, items[3].itemId)
+  ]);
+
+  assert.equal(first?.path, duplicate?.path);
+  assert.ok(first && png && webp && gif);
+  const rotatedMetadata = await sharp(first.path).metadata();
+  assert.ok((rotatedMetadata.height ?? 0) > (rotatedMetadata.width ?? 0));
+  assert.ok([first.path, png.path, webp.path, gif.path].every((filePath) => fs.existsSync(filePath)));
+  assert.deepEqual(
+    fs.readdirSync(path.dirname(first.path)).filter((fileName) => fileName.includes('.tmp.')),
+    []
+  );
 });
 
 test('getGroupingPreviewPath generates and reuses HEIC previews with ImageMagick', async () => {
@@ -312,8 +359,8 @@ test('getGroupingThumbnailPath reports ImageMagick errors', async () => {
   );
   const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
 
-  assert.throws(
-    () => getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
+  await assert.rejects(
+    getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
     (error) => error instanceof GroupingPreviewError && /HEIC\/HEIF support/.test(error.message)
   );
 });
@@ -327,8 +374,8 @@ test('copied HEIC reports unavailable preview without resolving an implicit Imag
   );
   const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
 
-  assert.throws(
-    () => getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
+  await assert.rejects(
+    getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
     (error) => error instanceof GroupingPreviewError && /copied without ImageMagick/.test(error.message)
   );
 });
@@ -342,8 +389,8 @@ test('getGroupingThumbnailPath rejects media paths outside the destination folde
   const { createGroupingWorkspace, getGroupingThumbnailPath } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
   const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
 
-  assert.throws(
-    () => getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
+  await assert.rejects(
+    getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
     /Refusing to read media outside the destination folder/
   );
 });

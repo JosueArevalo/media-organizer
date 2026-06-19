@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, test } from 'node:test';
+import sharp from 'sharp';
 import { MAX_JSON_BODY_BYTES } from '../src/http/localAccess.js';
 import { getDb, resetDbForTests } from '../src/state/db.js';
 import { createBackendServer } from '../src/index.js';
@@ -293,13 +294,20 @@ test('grouping thumbnail endpoint returns a cached JPEG preview', async () => {
   fs.mkdirSync(sourceDir, { recursive: true });
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const imageMagickCommand = writeFakeMagick(path.join(tempRoot, 'thumbnail-tools'));
   const compressionSessionId = seedCompressionSession({
     sourceDir,
     outputDir,
     relativePath: 'photo.jpg',
-    imageMagickCommand
+    imageMagickCommand: ''
   });
+  await sharp({
+    create: {
+      width: 720,
+      height: 480,
+      channels: 3,
+      background: { r: 32, g: 96, b: 160 }
+    }
+  }).jpeg().toFile(path.join(outputDir, 'photo.jpg'));
 
   const workspaceResponse = await request({
     method: 'POST',
@@ -321,7 +329,7 @@ test('grouping thumbnail endpoint returns a cached JPEG preview', async () => {
   assert.equal(thumbnailResponse.statusCode, 200);
   assert.equal(thumbnailResponse.headers['content-type'], 'image/jpeg');
   assert.equal(thumbnailResponse.headers['cache-control'], 'private, max-age=86400');
-  assert.equal(thumbnailResponse.body.trim(), 'preview');
+  assert.ok(Number(thumbnailResponse.headers['content-length']) > 0);
 });
 
 test('backend health offline reports are logged for local diagnostics', async () => {
