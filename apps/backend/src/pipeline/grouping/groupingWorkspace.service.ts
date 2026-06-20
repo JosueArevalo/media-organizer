@@ -162,7 +162,7 @@ const sanitizeFolderLabel = (label: string) => {
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const DEFAULT_DATE_OPTIONS: GroupingDateOptions = { singleDateHandling: 'year-unique' };
-const DEFAULT_SOURCE_FOLDER_OPTIONS: GroupingSourceFolderOptions = { mode: 'nearest-folder' };
+const DEFAULT_SOURCE_FOLDER_OPTIONS: GroupingSourceFolderOptions = { mode: 'relative-path' };
 
 const formatDateLabel = (date: Date) => {
   const year = date.getFullYear();
