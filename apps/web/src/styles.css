@@ -2839,10 +2839,27 @@ body {
 }
 
 .grouping-example-group {
-  border-left: 2px solid var(--line);
   display: grid;
   gap: 3px;
-  padding-left: 8px;
+}
+
+.grouping-example-group > ul {
+  border-left: 1px solid var(--line);
+  margin-left: 7px;
+  padding-left: 14px;
+}
+
+.grouping-example-group > ul > li {
+  position: relative;
+}
+
+.grouping-example-group > ul > li::before {
+  border-top: 1px solid var(--line);
+  content: '';
+  left: -14px;
+  position: absolute;
+  top: 0.65em;
+  width: 9px;
 }
 
 .grouping-example-group + .grouping-example-group {
@@ -2852,6 +2869,7 @@ body {
 .grouping-example-group small {
   color: var(--text-muted);
   font-size: 10px;
+  margin-left: 21px;
 }
 
 .grouping-example-arrow {

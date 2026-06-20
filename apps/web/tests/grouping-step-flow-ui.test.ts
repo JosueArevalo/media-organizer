@@ -107,3 +107,10 @@ test('grouping comparison controls align the recommended badge and center the ar
   assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) 64px minmax\(0, 1fr\);/);
   assert.match(styles, /\.grouping-example-arrow \{[\s\S]*justify-self: center;/);
 });
+
+test('grouping date result indents files below their destination folders', () => {
+  const styles = fs.readFileSync(stylesPath, 'utf8');
+
+  assert.match(styles, /\.grouping-example-group > ul \{[\s\S]*border-left: 1px solid var\(--line\);[\s\S]*padding-left: 14px;/);
+  assert.match(styles, /\.grouping-example-group > ul > li::before/);
+});
