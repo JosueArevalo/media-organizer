@@ -40,7 +40,7 @@ afterEach(() => {
   Reflect.deleteProperty(globalThis, 'window');
 });
 
-test('source selection scope persists exclusions, active preset, mode, and expanded directories', () => {
+test('source selection scope persists manual inclusions, exclusions, and expanded directories', () => {
   installBrowserStorage();
 
   saveSourceSelectionScope({
@@ -48,8 +48,6 @@ test('source selection scope persists exclusions, active preset, mode, and expan
     excludedFiles: ['Camera/IMG_001.jpg'],
     includedDirectories: ['Camera/Screenshots/Keep'],
     includedFiles: ['Camera/Screenshots/Keep/IMG_002.jpg'],
-    activePreset: 'custom',
-    mode: 'directories',
     expandedDirectories: ['Camera', 'Camera/Screenshots']
   });
 
@@ -59,27 +57,37 @@ test('source selection scope persists exclusions, active preset, mode, and expan
   assert.deepEqual(scope?.excludedFiles, ['Camera/IMG_001.jpg']);
   assert.deepEqual(scope?.includedDirectories, ['Camera/Screenshots/Keep']);
   assert.deepEqual(scope?.includedFiles, ['Camera/Screenshots/Keep/IMG_002.jpg']);
-  assert.equal(scope?.activePreset, 'custom');
-  assert.equal(scope?.mode, 'directories');
   assert.deepEqual(scope?.expandedDirectories, ['Camera', 'Camera/Screenshots']);
   assert.ok((scope?.updatedAt ?? 0) > 0);
 });
 
-test('source selection scope supports old snapshots without UI metadata', () => {
+test('saving a source selection scope replaces obsolete UI metadata', () => {
   installBrowserStorage();
   storage.set('media-organizer-source-scope', JSON.stringify({
     excludedDirectories: ['WhatsApp'],
     excludedFiles: [],
     includedDirectories: [],
     includedFiles: [],
+    activePreset: 'whatsapp',
+    mode: 'directories',
     updatedAt: 123
   }));
 
   const scope = loadSourceSelectionScope();
 
   assert.deepEqual(scope?.excludedDirectories, ['WhatsApp']);
-  assert.equal(scope?.activePreset, undefined);
-  assert.equal(scope?.mode, undefined);
   assert.equal(scope?.expandedDirectories, undefined);
   assert.equal(scope?.updatedAt, 123);
+
+  saveSourceSelectionScope({
+    excludedDirectories: scope?.excludedDirectories ?? [],
+    excludedFiles: scope?.excludedFiles ?? [],
+    includedDirectories: scope?.includedDirectories ?? [],
+    includedFiles: scope?.includedFiles ?? [],
+    expandedDirectories: scope?.expandedDirectories
+  });
+
+  const persisted = JSON.parse(storage.get('media-organizer-source-scope') ?? '{}') as Record<string, unknown>;
+  assert.equal('activePreset' in persisted, false);
+  assert.equal('mode' in persisted, false);
 });
