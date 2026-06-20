@@ -15,9 +15,6 @@ import { notifyCompletion } from '../services/completion-notification.service';
 import { scanSourceTreeRequest } from '../services/source-tree.service';
 import { isPreCompressionStepReadOnly } from '../services/workflow-locks';
 
-type SelectionMode = 'files' | 'directories';
-type ScopePreset = 'all' | 'whatsapp' | 'camera' | 'custom';
-
 type ScannedFile = {
   kind: 'file';
   name: string;
@@ -303,7 +300,6 @@ const flattenTree = (
   includedDirectories: Set<string>,
   includedFiles: Set<string>,
   expandedDirectories: Set<string>,
-  includeFiles: boolean,
   rows: TreeRow[] = [],
   ancestorExcluded = false
 ) => {
@@ -322,10 +318,6 @@ const flattenTree = (
 
     if (isExpanded) {
       for (const child of entry.children) {
-        if (child.kind === 'file' && !includeFiles) {
-          continue;
-        }
-
         flattenTree(
           child,
           excludedDirectories,
@@ -333,7 +325,6 @@ const flattenTree = (
           includedDirectories,
           includedFiles,
           expandedDirectories,
-          includeFiles,
           rows,
           directoryExcluded
         );
@@ -353,67 +344,6 @@ const flattenTree = (
   return rows;
 };
 
-const applyPreset = (root: ScannedDirectory, preset: ScopePreset) => {
-  const excludedDirectories = new Set<string>();
-  const excludedFiles = new Set<string>();
-  const includedDirectories = new Set<string>();
-  const includedFiles = new Set<string>();
-
-  if (preset === 'all') {
-    return { excludedDirectories, excludedFiles, includedDirectories, includedFiles };
-  }
-
-  const normalizedRoot = formatPath(root.path).toLowerCase();
-
-  const shouldExcludeByPath = (path: string) => {
-    const normalizedPath = formatPath(path).toLowerCase();
-
-    if (preset === 'whatsapp') {
-      return normalizedPath.includes('whatsapp') || normalizedPath.includes('screenshots');
-    }
-
-    if (preset === 'camera') {
-      return (
-        normalizedPath.includes('whatsapp') ||
-        normalizedPath.includes('screenshots') ||
-        normalizedPath.includes('download') ||
-        normalizedPath.includes('screen recording') ||
-        normalizedPath.includes('screen-recording') ||
-        normalizedPath.includes('edited')
-      );
-    }
-
-    return false;
-  };
-
-  const visit = (entry: SourceEntry, ancestorExcluded = false) => {
-    if (entry.kind === 'directory') {
-      const isExcluded = ancestorExcluded || shouldExcludeByPath(entry.path);
-
-      if (isExcluded && entry.path.toLowerCase() !== normalizedRoot) {
-        excludedDirectories.add(entry.path);
-      }
-
-      for (const child of entry.children) {
-        visit(child, isExcluded);
-      }
-
-      return;
-    }
-
-    if (ancestorExcluded || shouldExcludeByPath(entry.path)) {
-      excludedFiles.add(entry.path);
-    }
-  };
-
-  visit(root);
-  return { excludedDirectories, excludedFiles, includedDirectories, includedFiles };
-};
-
-const isSelectionMode = (value: unknown): value is SelectionMode => value === 'files' || value === 'directories';
-const isScopePreset = (value: unknown): value is ScopePreset =>
-  value === 'all' || value === 'whatsapp' || value === 'camera' || value === 'custom';
-
 export const SelectionPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -421,8 +351,6 @@ export const SelectionPage = () => {
   const compressionSessionState = useCompressionSessionState();
   const isWorkflowReadOnly = isPreCompressionStepReadOnly(compressionSessionState);
   const [scanState, setScanState] = useState<ScanState>({ status: 'idle', root: null, error: null });
-  const [mode, setMode] = useState<SelectionMode>('files');
-  const [activePreset, setActivePreset] = useState<ScopePreset>('all');
   const [excludedDirectories, setExcludedDirectories] = useState<Set<string>>(new Set());
   const [excludedFiles, setExcludedFiles] = useState<Set<string>>(new Set());
   const [includedDirectories, setIncludedDirectories] = useState<Set<string>>(new Set());
@@ -469,8 +397,6 @@ export const SelectionPage = () => {
         setIncludedDirectories(new Set(persistedScope?.includedDirectories ?? []));
         setIncludedFiles(new Set(persistedScope?.includedFiles ?? []));
         setExpandedDirectories(new Set([...(persistedScope?.expandedDirectories ?? []), tree.path]));
-        setActivePreset(isScopePreset(persistedScope?.activePreset) ? persistedScope.activePreset : 'all');
-        setMode(isSelectionMode(persistedScope?.mode) ? persistedScope.mode : 'files');
         void notifyCompletion('selectionLoaded', {
           title: t('notifications.selectionLoaded.title'),
           body: t('notifications.selectionLoaded.body', { count: tree.fileCount })
@@ -513,8 +439,7 @@ export const SelectionPage = () => {
       excludedFiles,
       includedDirectories,
       includedFiles,
-      expandedDirectories,
-      mode === 'files'
+      expandedDirectories
     );
   }, [
     scanState,
@@ -522,8 +447,7 @@ export const SelectionPage = () => {
     excludedFiles,
     includedDirectories,
     includedFiles,
-    expandedDirectories,
-    mode
+    expandedDirectories
   ]);
 
   useEffect(() => {
@@ -538,11 +462,9 @@ export const SelectionPage = () => {
       excludedFiles: sortPaths(excludedFiles),
       includedDirectories: sortPaths(includedDirectories),
       includedFiles: sortPaths(includedFiles),
-      activePreset,
-      mode,
       expandedDirectories: sortPaths(expandedDirectories)
     });
-  }, [isWorkflowReadOnly, scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles, activePreset, mode, expandedDirectories]);
+  }, [isWorkflowReadOnly, scanState, excludedDirectories, excludedFiles, includedDirectories, includedFiles, expandedDirectories]);
 
   const totalBytes = summary ? summary.includedBytes + summary.excludedBytes : 0;
   const totalFiles = summary ? summary.includedFiles + summary.excludedFiles : 0;
@@ -568,30 +490,10 @@ export const SelectionPage = () => {
     return t('selection.fileType.file');
   };
 
-  const handlePreset = (preset: ScopePreset) => {
-    if (isWorkflowReadOnly) {
-      return;
-    }
-
-    setActivePreset(preset);
-
-    if (scanState.status !== 'ready' || !scanState.root) {
-      return;
-    }
-
-    const nextSelection = applyPreset(scanState.root, preset);
-    setExcludedDirectories(nextSelection.excludedDirectories);
-    setExcludedFiles(nextSelection.excludedFiles);
-    setIncludedDirectories(nextSelection.includedDirectories);
-    setIncludedFiles(nextSelection.includedFiles);
-  };
-
   const toggleDirectory = (path: string, isExcluded: boolean, parentExcluded: boolean) => {
     if (isWorkflowReadOnly) {
       return;
     }
-
-    setActivePreset('custom');
 
     setExcludedDirectories((current) => {
       const next = new Set(current);
@@ -637,8 +539,6 @@ export const SelectionPage = () => {
       return;
     }
 
-    setActivePreset('custom');
-
     setExcludedFiles((current) => {
       const next = new Set(current);
 
@@ -672,100 +572,58 @@ export const SelectionPage = () => {
         {isWorkflowReadOnly && <p className="page-summary-note compression-warning">{t('workflow.readOnlyNotice')}</p>}
       </div>
 
-      <div className="selection-top-grid">
-        <article className="page-card elevated selection-hero-card">
-          <p className="page-section-title">{t('selection.sourceContext')}</p>
-          <div className="selection-hero-row">
-            <div>
-              <p className="selection-hero-label">{t('selection.sourceFolder')}</p>
-              <p className="selection-hero-value">{sourceSelection?.name ?? t('selection.notSelected')}</p>
-            </div>
-            <div>
-              <p className="selection-hero-label">{t('selection.destination')}</p>
-              <p className="selection-hero-value">{destinationSelection?.name ?? t('selection.notSelected')}</p>
-            </div>
+      <article className="page-card elevated selection-hero-card">
+        <p className="page-section-title">{t('selection.sourceContext')}</p>
+        <div className="selection-hero-row">
+          <div>
+            <p className="selection-hero-label">{t('selection.sourceFolder')}</p>
+            <p className="selection-hero-value">{sourceSelection?.name ?? t('selection.notSelected')}</p>
           </div>
-          <p className="page-summary-note">{t('selection.sourceScanNote')}</p>
-        </article>
-
-        <article className="page-card elevated selection-hero-card">
-          <p className="page-section-title">{t('selection.scopePresets')}</p>
-          <div className="page-pill-row">
-            <button
-              className={`selection-pill ${activePreset === 'all' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => handlePreset('all')}
-              disabled={isWorkflowReadOnly}
-            >
-              {t('selection.preset.keepEverything')}
-            </button>
-            <button
-              className={`selection-pill ${activePreset === 'whatsapp' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => handlePreset('whatsapp')}
-              disabled={isWorkflowReadOnly}
-            >
-              {t('selection.preset.excludeWhatsapp')}
-            </button>
-            <button
-              className={`selection-pill ${activePreset === 'camera' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => handlePreset('camera')}
-              disabled={isWorkflowReadOnly}
-            >
-              {t('selection.preset.cameraFocused')}
-            </button>
-            <button
-              className={`selection-pill ${activePreset === 'custom' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => {
-                if (!isWorkflowReadOnly) {
-                  setActivePreset('custom');
-                }
-              }}
-              disabled={isWorkflowReadOnly}
-            >
-              {t('selection.preset.custom')}
-            </button>
+          <div>
+            <p className="selection-hero-label">{t('selection.destination')}</p>
+            <p className="selection-hero-value">{destinationSelection?.name ?? t('selection.notSelected')}</p>
           </div>
-          <p className="page-summary-note">{t('selection.presetsNote')}</p>
-        </article>
-      </div>
+        </div>
+        <p className="page-summary-note">{t('selection.sourceScanNote')}</p>
+      </article>
 
-      <div className="selection-layout">
-        <section className="selection-main-column">
-          <div className="page-card selection-toolbar">
-            <div>
-              <p className="page-section-title">{t('selection.modeTitle')}</p>
-              <p className="page-summary-note">{t('selection.modeNote')}</p>
-            </div>
-            <div className="selection-mode-toggle" role="tablist" aria-label={t('selection.modeAria')}>
-              <button
-                className={`selection-mode-btn ${mode === 'files' ? 'is-active' : ''}`}
-                type="button"
-                onClick={() => setMode('files')}
-              >
-                {t('selection.files')}
-              </button>
-              <button
-                className={`selection-mode-btn ${mode === 'directories' ? 'is-active' : ''}`}
-                type="button"
-                onClick={() => setMode('directories')}
-              >
-                {t('selection.directories')}
-              </button>
+      <article className="page-card elevated selection-summary-card selection-status-card">
+        <div>
+          <p className="page-section-title">{t('selection.statusTitle')}</p>
+          <p className="page-summary-note">{t('selection.statusNote')}</p>
+        </div>
+
+        <div className="selection-summary-grid">
+          <div className="selection-ratio-card">
+            <p className="selection-hero-label">{t('selection.sizeRatio')}</p>
+            <p className="selection-ratio-value">
+              {formatBytes(selectedBytes)} / {formatBytes(totalBytes)}
+            </p>
+            <div className="selection-ratio-track" role="presentation">
+              <span className="selection-ratio-fill" style={{ width: `${Math.min(sizeRatio, 100)}%` }} />
             </div>
           </div>
 
-          <article className="page-card elevated selection-tree-card">
+          <div className="selection-ratio-card">
+            <p className="selection-hero-label">{t('selection.filesRatio')}</p>
+            <p className="selection-ratio-value">
+              {selectedFiles} / {totalFiles}
+            </p>
+            <div className="selection-ratio-track" role="presentation">
+              <span className="selection-ratio-fill" style={{ width: `${Math.min(fileRatio, 100)}%` }} />
+            </div>
+          </div>
+        </div>
+
+        {!summary && <p className="page-summary-note">{t('selection.scanToPopulate')}</p>}
+      </article>
+
+      <article className="page-card elevated selection-tree-card">
             <div className="selection-tree-header">
               <div>
                 <p className="page-section-title">{t('selection.sourceTree')}</p>
                 <p className="page-summary-note">
-                  {t('selection.showingTree', {
-                    mode: mode === 'files' ? t('selection.mode.filesAndDirectories') : t('selection.mode.directoriesOnly'),
-                    source: sourceSelection?.name ?? t('selection.selectedSource')
-                  })}
+                  {t('selection.showingTree', { source: sourceSelection?.name ?? t('selection.selectedSource') })}
                 </p>
               </div>
               <div className="selection-tree-key">
@@ -866,38 +724,7 @@ export const SelectionPage = () => {
                 })}
               </ul>
             )}
-          </article>
-        </section>
-
-        <aside className="selection-side-column">
-          <article className="page-card elevated selection-summary-card selection-status-card">
-            <p className="page-section-title">{t('selection.statusTitle')}</p>
-            <p className="page-summary-note">{t('selection.statusNote')}</p>
-
-            <div className="selection-ratio-card">
-              <p className="selection-hero-label">{t('selection.sizeRatio')}</p>
-              <p className="selection-ratio-value">
-                {formatBytes(selectedBytes)} / {formatBytes(totalBytes)}
-              </p>
-              <div className="selection-ratio-track" role="presentation">
-                <span className="selection-ratio-fill" style={{ width: `${Math.min(sizeRatio, 100)}%` }} />
-              </div>
-            </div>
-
-            <div className="selection-ratio-card">
-              <p className="selection-hero-label">{t('selection.filesRatio')}</p>
-              <p className="selection-ratio-value">
-                {selectedFiles} / {totalFiles}
-              </p>
-              <div className="selection-ratio-track" role="presentation">
-                <span className="selection-ratio-fill" style={{ width: `${Math.min(fileRatio, 100)}%` }} />
-              </div>
-            </div>
-
-            {!summary && <p className="page-summary-note">{t('selection.scanToPopulate')}</p>}
-          </article>
-        </aside>
-      </div>
+      </article>
 
       <div className="page-footer-actions">
         <button className="btn btn-secondary" type="button" onClick={() => navigate('/import')}>
