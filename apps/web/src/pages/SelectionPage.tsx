@@ -619,18 +619,11 @@ export const SelectionPage = () => {
       </article>
 
       <article className="page-card elevated selection-tree-card">
-            <div className="selection-tree-header">
-              <div>
-                <p className="page-section-title">{t('selection.sourceTree')}</p>
-                <p className="page-summary-note">
-                  {t('selection.showingTree', { source: sourceSelection?.name ?? t('selection.selectedSource') })}
-                </p>
-              </div>
-              <div className="selection-tree-key">
-                <span className="page-chip">{t('selection.folder')}</span>
-                <span className="page-chip">{t('selection.file')}</span>
-                <span className="page-chip">{t('selection.size')}</span>
-              </div>
+            <div>
+              <p className="page-section-title">{t('selection.sourceTree')}</p>
+              <p className="page-summary-note">
+                {t('selection.showingTree', { source: sourceSelection?.name ?? t('selection.selectedSource') })}
+              </p>
             </div>
 
             {scanState.status === 'loading' && <p className="empty-note">{t('selection.scanning')}</p>}
@@ -717,7 +710,7 @@ export const SelectionPage = () => {
                       </label>
                       <div className="selection-tree-meta">
                         <span>{formatBytes(row.entry.sizeBytes)}</span>
-                        <span>{row.parentExcluded ? t('selection.excludedByParent') : t('selection.fileLevelToggle')}</span>
+                        {row.parentExcluded && <span>{t('selection.excludedByParent')}</span>}
                       </div>
                     </li>
                   );

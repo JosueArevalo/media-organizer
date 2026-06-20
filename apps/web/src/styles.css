@@ -1767,20 +1767,6 @@ body {
   gap: 16px;
 }
 
-.selection-tree-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.selection-tree-key {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
 .selection-tree-list {
   list-style: none;
   margin: 0;
@@ -2203,14 +2189,6 @@ body {
   .selection-stats-inline,
   .selection-summary-grid {
     grid-template-columns: 1fr;
-  }
-
-  .selection-tree-header {
-    flex-direction: column;
-  }
-
-  .selection-tree-key {
-    justify-content: flex-start;
   }
 
   .selection-row,
