@@ -143,7 +143,7 @@ export const startGroupingSession = (request: GroupingSessionRequest): GroupingS
     rules: request.rules ?? [],
     strategy: request.strategy ?? null,
     dateOptions: request.dateOptions ?? { singleDateHandling: 'year-unique' },
-    sourceFolderOptions: request.sourceFolderOptions ?? { mode: 'nearest-folder' },
+    sourceFolderOptions: request.sourceFolderOptions ?? { mode: 'relative-path' },
     autoRename: request.autoRename ?? true,
     createdAt: timestamp
   };
