@@ -442,27 +442,6 @@ body {
   padding: 20px;
 }
 
-.header-zen {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 20px 28px;
-  margin-bottom: 20px;
-  box-shadow: var(--soft-shadow);
-}
-
-:root:not([data-theme='dark']) .header-zen {
-  border-color: #e1e5eb;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
-}
-
-.header-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text);
-}
-
 .content-zen {
   flex: 1;
   border-radius: 20px;
@@ -2253,10 +2232,6 @@ body {
     padding: 12px;
   }
 
-  .header-zen {
-    padding: 14px 20px;
-    margin-bottom: 12px;
-  }
 }
 
 /* Compression progress UI */

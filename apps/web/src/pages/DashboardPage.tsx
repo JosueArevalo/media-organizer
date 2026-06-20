@@ -559,6 +559,10 @@ export const DashboardPage = () => {
 
   return (
     <div className="dashboard-grid dashboard-real">
+      <div className="page-header">
+        <h1 className="page-title">{t('dashboard.title')}</h1>
+      </div>
+
       <section className="panel panel-highlight dashboard-hero">
         <div>
           <p className="panel-kicker">{t('dashboard.status')}</p>

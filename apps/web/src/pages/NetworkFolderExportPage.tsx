@@ -537,7 +537,7 @@ export const NetworkFolderExportPage = () => {
     <div className="page-stack export-page">
       <div className="page-header export-page-header">
         <div>
-          <h2 className="page-title">{t('export.network.title')}</h2>
+          <h1 className="page-title">{t('export.network.title')}</h1>
           <p className="page-subtitle">{t('export.network.subtitle')}</p>
         </div>
         <button className="btn btn-secondary export-back-button" type="button" onClick={() => navigate('/export')}>

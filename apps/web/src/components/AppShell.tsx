@@ -99,15 +99,7 @@ const AppShell = () => {
     }
   }
 
-  const currentStep = workflowSteps.find((s) => location.pathname === s.path || location.pathname.startsWith(`${s.path}/`));
   const isDashboard = location.pathname === '/dashboard';
-  const headerTitles: Record<string, string> = {
-    import: t('shell.header.import'),
-    selection: t('shell.header.selection'),
-    compression: t('shell.header.compression'),
-    grouping: t('shell.header.grouping'),
-    export: t('shell.header.export')
-  };
 
   return (
     <div className="app-shell-zen">
@@ -188,13 +180,6 @@ const AppShell = () => {
       </aside>
 
       <div className="main-zen">
-        <header className="header-zen">
-          <div>
-            {currentStep && <p className="header-title">{headerTitles[currentStep.id] ?? `${currentStep.label} your media`}</p>}
-            {isDashboard && <p className="header-title">{t('shell.header.dashboard')}</p>}
-          </div>
-        </header>
-
         <main className="content-zen">
           <Outlet />
         </main>

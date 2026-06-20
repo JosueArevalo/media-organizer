@@ -20,13 +20,6 @@ export const en = {
   'serverStatus.checking': 'Server checking',
   'serverStatus.online': 'Server online',
   'serverStatus.offline': 'Server offline',
-  'shell.header.import': 'Prepare your source folders',
-  'shell.header.selection': 'Select what gets compressed',
-  'shell.header.compression': 'Tune compression settings and launch the session',
-  'shell.header.grouping': 'Review the final structure',
-  'shell.header.export': 'Export organized folders',
-  'shell.header.dashboard': 'Control panel',
-
   'workflow.import.label': 'Import',
   'workflow.import.description': 'Choose source & destination',
   'workflow.selection.label': 'Selection',
@@ -41,6 +34,7 @@ export const en = {
   'workflow.ariaLabel': 'Workflow steps',
   'workflow.readOnlyNotice': 'This session has already started. You can review these values, but start a new session to change them.',
 
+  'dashboard.title': 'Dashboard',
   'dashboard.status': 'Status',
   'dashboard.status.running': 'In progress',
   'dashboard.status.paused': 'Paused',

@@ -1124,7 +1124,7 @@ export const GooglePhotosExportPage = () => {
     <div className="page-stack export-page">
       <div className="page-header export-page-header">
         <div>
-          <h2 className="page-title">{t('export.googlePhotos.title')}</h2>
+          <h1 className="page-title">{t('export.googlePhotos.title')}</h1>
           <p className="page-subtitle">{t('export.googlePhotos.subtitle')}</p>
         </div>
         <button className="btn btn-secondary export-back-button" type="button" onClick={() => navigate('/export')}>

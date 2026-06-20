@@ -46,7 +46,7 @@ export const ExportPage = () => {
     <div className="page-stack export-page">
       <div className="page-header">
         <div>
-          <h2 className="page-title">{t('export.hub.title')}</h2>
+          <h1 className="page-title">{t('export.hub.title')}</h1>
           <p className="page-subtitle">{t('export.hub.subtitle')}</p>
         </div>
       </div>

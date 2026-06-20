@@ -1322,7 +1322,7 @@ export const CompressionPage = () => {
   return (
     <div className="page-stack">
       <div className="page-header">
-        <h2 className="page-title">{t('compression.title')}</h2>
+        <h1 className="page-title">{t('compression.title')}</h1>
         <p className="page-subtitle">{t('compression.subtitle')}</p>
         {isWorkflowReadOnly && <p className="page-summary-note compression-warning">{t('workflow.readOnlyNotice')}</p>}
       </div>

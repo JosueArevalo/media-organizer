@@ -1328,7 +1328,7 @@ export const GroupingPage = () => {
     <div className={`grouping-workspace page-stack ${!canMutateGrouping ? 'is-read-only' : ''}`}>
       <div className="page-header grouping-header">
         <div>
-          <h2 className="page-title">{t('grouping.title')}</h2>
+          <h1 className="page-title">{t('grouping.title')}</h1>
           <p className="page-subtitle">
             {workspace
               ? t('grouping.subtitle', { count: workspace.items.length, path: workspace.outputDir })

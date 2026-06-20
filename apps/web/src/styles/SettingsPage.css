@@ -1,37 +1,6 @@
-.settings-page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--bg-primary);
-}
-
-.settings-header {
-  padding: 20px 32px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-secondary);
-}
-
-:root:not([data-theme='dark']) .settings-header {
-  background: #f1f3f5;
-  border-bottom-color: #dfe4ec;
-}
-
-.settings-header h1 {
-  font-size: 24px;
-  margin-bottom: 4px;
-  color: var(--text);
-}
-
-.settings-header p {
-  font-size: 13px;
-  color: var(--text-muted);
-  margin: 0;
-}
-
 .settings-content {
-  flex: 1;
-  padding: 32px;
-  overflow-y: auto;
+  display: grid;
+  gap: 24px;
 }
 
 .settings-card {
@@ -39,7 +8,6 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 24px;
-  margin-bottom: 24px;
 }
 
 :root:not([data-theme='dark']) .settings-card {
