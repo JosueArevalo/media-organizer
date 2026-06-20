@@ -536,6 +536,25 @@ test('source folder strategy can include the readable relative folder path', asy
   assert.equal(proposed.items.filter((item) => item.targetGroupLabel === 'Album - Day 2').length, 1);
 });
 
+test('source folder strategy defaults new proposals to the readable relative path', async () => {
+  const { compressionSessionId } = seedCompressionSession([
+    'Mobile/DCIM/IMG_20250102_101010.jpg',
+    'Camera/DCIM/IMG_20250103_101010.jpg'
+  ]);
+  const { createGroupingWorkspace, reorganizeGroupingWorkspace } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  const proposed = reorganizeGroupingWorkspace(workspace.sessionId, {
+    strategy: 'source-folder',
+    preservedDirectories: [],
+    reorganizedDirectories: []
+  });
+
+  assert.ok(proposed);
+  assert.equal(proposed.sourceFolderOptions.mode, 'relative-path');
+  assert.deepEqual(proposed.folders.map((folder) => folder.label).sort(), ['Camera - DCIM', 'Mobile - DCIM']);
+});
+
 test('reorganizeGroupingWorkspace keeps marked directories out of date reorganization', async () => {
   const { compressionSessionId } = seedCompressionSession([
     'Camera A/DCIM/IMG_20250102_101010.jpg',

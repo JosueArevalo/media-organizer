@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { InfoTooltip } from '../components/InfoTooltip';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
@@ -179,7 +180,18 @@ const getSortedValues = (values: string[]) =>
   [...values].sort((left, right) => left.localeCompare(right));
 
 const DEFAULT_SINGLE_DATE_HANDLING: GroupingSingleDateHandling = 'year-unique';
-const DEFAULT_SOURCE_FOLDER_MODE: GroupingSourceFolderMode = 'nearest-folder';
+const DEFAULT_SOURCE_FOLDER_MODE: GroupingSourceFolderMode = 'relative-path';
+const DATE_EXAMPLE_FILES = [
+  'IMG_20120915_153738.jpg',
+  'IMG_20120915_162710.jpg',
+  'IMG_20120918_092158.jpg'
+] as const;
+const SINGLE_DATE_EXAMPLE_DESTINATIONS: Record<GroupingSingleDateHandling, string> = {
+  'daily-event': '2012.09.18 - Event',
+  'year-unique': '2012 - Unique',
+  'keep-original': 'Camera'
+};
+const SOURCE_FOLDER_EXAMPLE_FILE = 'IMG_20120915_153738.jpg';
 const GROUPING_GRID_INITIAL_LIMIT = 160;
 const GROUPING_GRID_INCREMENT = 160;
 const VERIFICATION_STATUS_KEYS: Record<ExecutionVerification['status'], TranslationKey> = {
@@ -464,7 +476,7 @@ export const GroupingPage = () => {
   const [isResetting, setIsResetting] = useState(false);
   const [isReorganizing, setIsReorganizing] = useState(false);
   const [view, setView] = useState<GroupingView>('setup');
-  const [selectedStrategy, setSelectedStrategy] = useState<GroupingStrategy | null>(null);
+  const [selectedStrategy, setSelectedStrategy] = useState<GroupingStrategy | null>('date');
   const [singleDateHandling, setSingleDateHandling] = useState<GroupingSingleDateHandling>(DEFAULT_SINGLE_DATE_HANDLING);
   const [sourceFolderMode, setSourceFolderMode] = useState<GroupingSourceFolderMode>(DEFAULT_SOURCE_FOLDER_MODE);
   const [preservedDirectories, setPreservedDirectories] = useState<Set<string>>(new Set());
@@ -556,7 +568,7 @@ export const GroupingPage = () => {
         }
 
         setWorkspace(nextWorkspace);
-        setSelectedStrategy(nextWorkspace.strategy);
+        setSelectedStrategy(nextWorkspace.strategy ?? 'date');
         setSingleDateHandling(nextWorkspace.dateOptions.singleDateHandling);
         setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
         setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
@@ -706,7 +718,7 @@ export const GroupingPage = () => {
     return flattenDirectoryTree(directoryTree, expandedDirectories, preservedDirectories, reorganizedDirectories);
   }, [directoryTree, expandedDirectories, preservedDirectories, reorganizedDirectories]);
 
-  const preservedCount = directoryRows.filter((row) => row.isPreserved).length;
+  const excludedDirectoryCount = preservedDirectories.size;
   const unassignedItemsCount =
     workspace?.items.filter((item) => !item.preservedStructure && !item.targetGroupLabel).length ?? 0;
   const hasGroupingProposal = Boolean(workspace && (workspace.folders.length > 0 || workspace.strategy));
@@ -761,7 +773,11 @@ export const GroupingPage = () => {
       return;
     }
 
-    setSelectedStrategy((current) => (current === strategy ? null : strategy));
+    if (strategy === 'source-folder') {
+      setSourceFolderMode('relative-path');
+    }
+
+    setSelectedStrategy(strategy);
   };
 
   const toggleDirectoryExpansion = (path: string) => {
@@ -821,7 +837,7 @@ export const GroupingPage = () => {
       });
 
       setWorkspace(nextWorkspace);
-      setSelectedStrategy(nextWorkspace.strategy);
+      setSelectedStrategy(nextWorkspace.strategy ?? 'date');
       setSingleDateHandling(nextWorkspace.dateOptions.singleDateHandling);
       setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
       setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
@@ -1442,70 +1458,142 @@ export const GroupingPage = () => {
               </div>
             </div>
 
-            <div className="grouping-rule-list">
+            <div className="grouping-strategy-selector" role="group" aria-label={t('grouping.strategySelectorLabel')}>
               <button
-                className={`grouping-rule-chip ${selectedStrategy === 'date' ? 'is-active' : ''}`}
+                className={`grouping-strategy-segment ${selectedStrategy === 'date' ? 'is-active' : ''}`}
                 type="button"
                 aria-pressed={selectedStrategy === 'date'}
                 onClick={() => selectStrategy('date')}
                 disabled={!canMutateGrouping}
               >
-                {t('grouping.strategy.date')}
+                <strong>{t('grouping.strategy.date')}</strong>
+                <span className="grouping-strategy-badge">{t('grouping.strategy.recommended')}</span>
               </button>
               <button
-                className={`grouping-rule-chip ${selectedStrategy === 'source-folder' ? 'is-active' : ''}`}
+                className={`grouping-strategy-segment ${selectedStrategy === 'source-folder' ? 'is-active' : ''}`}
                 type="button"
                 aria-pressed={selectedStrategy === 'source-folder'}
                 onClick={() => selectStrategy('source-folder')}
                 disabled={!canMutateGrouping}
               >
-                {t('grouping.strategy.sourceFolder')}
+                <strong>{t('grouping.strategy.sourceFolder')}</strong>
               </button>
             </div>
 
             {selectedStrategy === 'date' && (
-              <div className="grouping-strategy-options">
-                <p className="page-summary-note">{t('grouping.dateStrategyPattern')}</p>
-                <label className="grouping-option-field">
-                  <span>{t('grouping.singleDateHandling')}</span>
-                  <select
-                    value={singleDateHandling}
-                    onChange={(event) => setSingleDateHandling(event.target.value as GroupingSingleDateHandling)}
-                    disabled={!canMutateGrouping}
-                  >
-                    <option value="daily-event">{t('grouping.singleDate.dailyEvent')}</option>
-                    <option value="year-unique">{t('grouping.singleDate.yearUnique')}</option>
-                    <option value="keep-original">{t('grouping.singleDate.keepOriginal')}</option>
-                  </select>
-                </label>
+              <div className="grouping-strategy-panel">
+                <div className="grouping-strategy-config">
+                  <div className="grouping-config-label">
+                    <span>{t('grouping.dateMultipleFiles')}</span>
+                    <InfoTooltip label={t('grouping.moreInformation')}>
+                      <strong>{t('grouping.dateHelpTitle')}</strong>
+                      <span>{t('grouping.dateEventNote')}</span>
+                      <span>{t('grouping.noDateHandlingNote')}</span>
+                    </InfoTooltip>
+                  </div>
+                  <div className="grouping-fixed-rule">
+                    <span>{t('grouping.dateMultipleFilesResult')}</span>
+                    <code>YYYY.MM.dd - Event</code>
+                  </div>
+                  <label className="grouping-option-field">
+                    <span>{t('grouping.singleDateHandling')}</span>
+                    <select
+                      value={singleDateHandling}
+                      onChange={(event) => setSingleDateHandling(event.target.value as GroupingSingleDateHandling)}
+                      disabled={!canMutateGrouping}
+                    >
+                      <option value="daily-event">{t('grouping.singleDate.dailyEvent')}</option>
+                      <option value="year-unique">{t('grouping.singleDate.yearUnique')}</option>
+                      <option value="keep-original">{t('grouping.singleDate.keepOriginal')}</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="grouping-result-preview" aria-live="polite">
+                  <strong>{t('grouping.resultPreview')}</strong>
+                  <div className="grouping-example" aria-label={t('grouping.exampleLabel')}>
+                    <div className="grouping-example-side grouping-example-before">
+                      <span>{t('grouping.exampleBefore')}</span>
+                      <ul>
+                        {DATE_EXAMPLE_FILES.map((fileName) => <li key={fileName}><code>Camera/{fileName}</code></li>)}
+                      </ul>
+                    </div>
+                    <span className="grouping-example-arrow" aria-hidden="true">→</span>
+                    <div className="grouping-example-side grouping-example-after">
+                      <span>{t('grouping.exampleAfter')}</span>
+                      <div className="grouping-example-group">
+                        <code>2012.09.15 - Event/</code>
+                        <ul>
+                          {DATE_EXAMPLE_FILES.slice(0, 2).map((fileName) => <li key={fileName}><code>{fileName}</code></li>)}
+                        </ul>
+                      </div>
+                      <div className="grouping-example-group">
+                        <code>{SINGLE_DATE_EXAMPLE_DESTINATIONS[singleDateHandling]}/</code>
+                        <ul><li><code>{DATE_EXAMPLE_FILES[2]}</code></li></ul>
+                        {singleDateHandling === 'keep-original' && <small>{t('grouping.notMoved')}</small>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
             {selectedStrategy === 'source-folder' && (
-              <div className="grouping-strategy-options">
-                <p className="page-summary-note">{t('grouping.sourceFolderStrategyNote')}</p>
-                <label className="grouping-option-field">
-                  <span>{t('grouping.sourceFolderMode')}</span>
-                  <select
-                    value={sourceFolderMode}
-                    onChange={(event) => setSourceFolderMode(event.target.value as GroupingSourceFolderMode)}
-                    disabled={!canMutateGrouping}
-                  >
-                    <option value="nearest-folder">{t('grouping.sourceFolder.nearest')}</option>
-                    <option value="relative-path">{t('grouping.sourceFolder.relative')}</option>
-                  </select>
-                </label>
+              <div className="grouping-strategy-panel grouping-source-folder-panel">
+                <div className="grouping-strategy-config">
+                  <div className="grouping-config-label">
+                    <strong>{t('grouping.strategy.sourceFolderDescription')}</strong>
+                    <InfoTooltip label={t('grouping.moreInformation')}>
+                      <strong>{t('grouping.sourceFolderHelpTitle')}</strong>
+                      <span>{t('grouping.sourceFolderUsefulFor')}</span>
+                      <span>{t('grouping.sourceFolderDateAlternative')}</span>
+                      <span>{t('grouping.sourceFolderRootFiles')}</span>
+                    </InfoTooltip>
+                  </div>
+                  <p className="grouping-inline-warning">{t('grouping.sourceFolderFlattens')}</p>
+                </div>
+                <div className="grouping-result-preview">
+                  <strong>{t('grouping.resultPreview')}</strong>
+                  <div className="grouping-example" aria-label={t('grouping.exampleLabel')}>
+                    <div className="grouping-example-side grouping-example-before">
+                      <span>{t('grouping.exampleBefore')}</span>
+                      <code>Mobile/WhatsApp/2024/{SOURCE_FOLDER_EXAMPLE_FILE}</code>
+                    </div>
+                    <span className="grouping-example-arrow" aria-hidden="true">→</span>
+                    <div className="grouping-example-side grouping-example-after">
+                      <span>{t('grouping.exampleAfter')}</span>
+                      <code>Mobile - WhatsApp - 2024/{SOURCE_FOLDER_EXAMPLE_FILE}</code>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
-
-            <p className="page-summary-note">{selectedStrategy ? t('grouping.strategySelected') : t('grouping.noStrategySelected')}</p>
           </section>
 
-          <section className="page-card elevated grouping-setup-main">
-            <p className="page-section-title">{t('grouping.setupFolders')}</p>
-            <p className="page-summary-note">{t('grouping.setupFoldersNote')}</p>
-
-            <ul className="grouping-directory-list">
+          <details className="page-card elevated grouping-exclusions grouping-setup-main">
+            <summary>
+              <span className="grouping-exclusions-leading">
+                <span className="grouping-exclusions-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M3 7.5h7l2-2h9v13H3z" />
+                    <path d="m9 13 2 2 4-4" />
+                  </svg>
+                </span>
+                <span className="grouping-exclusions-title">
+                  <strong>{t('grouping.setupFolders')}</strong>
+                  <span>{t('grouping.exclusionsDescription')}</span>
+                </span>
+              </span>
+              <span className="grouping-exclusions-actions">
+                <span>{t('grouping.excludedCount', { count: excludedDirectoryCount })}</span>
+                <span className="grouping-exclusions-cta">{t('grouping.reviewFolders')}</span>
+                <svg className="grouping-exclusions-chevron" viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="m6 8 4 4 4-4" />
+                </svg>
+              </span>
+            </summary>
+            <div className="grouping-exclusions-content">
+              <p className="page-summary-note">{t('grouping.setupFoldersNote')}</p>
+              <ul className="grouping-directory-list">
               {directoryRows.map((row) => (
                 <li
                   className={`grouping-directory-row ${row.isPreserved ? 'is-preserved' : ''}`}
@@ -1555,17 +1643,9 @@ export const GroupingPage = () => {
                   </div>
                 </li>
               ))}
-            </ul>
-          </section>
-
-          <aside className="page-card elevated grouping-setup-side">
-            <p className="page-section-title">{t('grouping.setupSummary')}</p>
-            <p className="page-summary-note">{t('grouping.setupSummaryText', {
-              files: workspace.items.length,
-              preserved: preservedCount,
-              strategy: selectedStrategy ? 1 : 0
-            })}</p>
-          </aside>
+              </ul>
+            </div>
+          </details>
         </div>
       )}
 
