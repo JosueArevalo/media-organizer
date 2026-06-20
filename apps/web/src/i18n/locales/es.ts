@@ -22,13 +22,6 @@ export const es: TranslationDictionary = {
   'serverStatus.checking': 'Servidor comprobando',
   'serverStatus.online': 'Servidor conectado',
   'serverStatus.offline': 'Servidor caido',
-  'shell.header.import': 'Prepara tus carpetas de origen',
-  'shell.header.selection': 'Selecciona qué se comprimirá',
-  'shell.header.compression': 'Ajusta la compresión y lanza la sesión',
-  'shell.header.grouping': 'Revisa la estructura final',
-  'shell.header.export': 'Exporta las carpetas organizadas',
-  'shell.header.dashboard': 'Panel de control',
-
   'workflow.import.label': 'Importar',
   'workflow.import.description': 'Elige origen y destino',
   'workflow.selection.label': 'Selección',
@@ -43,6 +36,7 @@ export const es: TranslationDictionary = {
   'workflow.ariaLabel': 'Pasos del flujo',
   'workflow.readOnlyNotice': 'Esta sesion ya empezo. Puedes revisar estos valores, pero inicia una nueva sesion para cambiarlos.',
 
+  'dashboard.title': 'Panel',
   'dashboard.status': 'Estado',
   'dashboard.status.running': 'En progreso',
   'dashboard.status.paused': 'Pausado',

@@ -13,7 +13,7 @@ export const GoogleDriveExportPage = () => {
     <div className="page-stack export-page">
       <div className="page-header">
         <div>
-          <h2 className="page-title">{t('export.googleDrive.title')}</h2>
+          <h1 className="page-title">{t('export.googleDrive.title')}</h1>
           <p className="page-subtitle">{t('export.googleDrive.subtitle')}</p>
         </div>
         <button className="btn btn-secondary" type="button" onClick={() => navigate('/export')}>

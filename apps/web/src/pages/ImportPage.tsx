@@ -284,7 +284,7 @@ export const ImportPage = () => {
   return (
     <div className="page-stack">
       <div className="page-header">
-        <h2 className="page-title">{t('import.title')}</h2>
+        <h1 className="page-title">{t('import.title')}</h1>
         <p className="page-subtitle">{t('import.subtitle')}</p>
         {isWorkflowReadOnly && <p className="page-summary-note compression-warning">{t('workflow.readOnlyNotice')}</p>}
       </div>

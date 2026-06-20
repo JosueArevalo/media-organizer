@@ -595,10 +595,10 @@ const SettingsPage = () => {
   };
 
   return (
-    <div className="settings-page">
-      <div className="settings-header">
-        <h1>{t('settings.title')}</h1>
-        <p>{t('settings.subtitle')}</p>
+    <div className="page-stack settings-page">
+      <div className="page-header">
+        <h1 className="page-title">{t('settings.title')}</h1>
+        <p className="page-subtitle">{t('settings.subtitle')}</p>
       </div>
 
       <div className="settings-content">

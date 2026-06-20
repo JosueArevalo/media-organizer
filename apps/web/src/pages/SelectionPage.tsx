@@ -567,7 +567,7 @@ export const SelectionPage = () => {
   return (
     <div className="page-stack selection-page">
       <div className="page-header">
-        <h2 className="page-title">{t('selection.title')}</h2>
+        <h1 className="page-title">{t('selection.title')}</h1>
         <p className="page-subtitle">{t('selection.subtitle')}</p>
         {isWorkflowReadOnly && <p className="page-summary-note compression-warning">{t('workflow.readOnlyNotice')}</p>}
       </div>
