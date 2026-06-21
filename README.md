@@ -15,6 +15,7 @@
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-64748B?style=flat-square" alt="Windows, macOS, and Linux">
   <img src="https://img.shields.io/badge/local--first-your%20files%20stay%20yours-2F8F65?style=flat-square" alt="Local-first">
   <img src="https://img.shields.io/badge/status-active%20development-F59E0B?style=flat-square" alt="Under active development">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2F8F65?style=flat-square" alt="MIT License"></a>
 </p>
 
 <p align="center">
@@ -367,9 +368,23 @@ V1 is local-first and single-user:
 - [Quality, security, and dependency baseline](docs/QUALITY_BASELINE.md)
 - [Guidance for AI agents](AGENTS.md)
 - [Tool-agnostic AI context](AI_CONTEXT.md)
+- [Contributing guide](CONTRIBUTING.md)
+- [Citation metadata](CITATION.cff)
 
 ## 🚧 Project status
 
 Media Organizer is under active development. The current focus is a dependable local MVP with preview-driven workflows, explicit filesystem writes, resumable state, and practical cross-platform setup.
 
 There is currently no packaged release or Docker requirement: clone the repository, install a supported Node.js version, and run it locally.
+
+## 🤝 Contributing
+
+Contributions are welcome. Please read the [contributing guide](CONTRIBUTING.md) before opening a pull request. Contributions are accepted under the same MIT License as the project, without a copyright assignment or Contributor License Agreement.
+
+## 📄 License and citation
+
+Media Organizer is available under the [MIT License](LICENSE).
+
+Copyright (c) 2026 [Josue Arevalo](https://github.com/JosueArevalo).
+
+If Media Organizer supports academic or research work, please cite it using the repository's [citation metadata](CITATION.cff). GitHub can generate a formatted citation from this file through the repository's **Cite this repository** action.
