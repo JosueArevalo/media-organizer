@@ -1,5 +1,6 @@
 export const en = {
   'app.brand': 'Media Organizer',
+  'app.version.openReleases': 'Open available releases',
   'app.error.runtimeTitle': 'UI runtime failed',
   'app.error.runtimeBody': 'The application crashed while rendering. Check the browser console for the full stack trace.',
   'app.error.bootstrapTitle': 'UI bootstrap failed',

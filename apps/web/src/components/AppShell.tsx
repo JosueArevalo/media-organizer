@@ -8,6 +8,7 @@ import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useBackendHealth } from '../hooks/useBackendHealth';
 import { useTranslation } from '../i18n';
+import { useRuntimeInfo } from '../hooks/useRuntimeInfo';
 
 const workflowStepBlueprint = [
   {
@@ -49,6 +50,7 @@ const AppShell = () => {
   const { currentLanguage, languages, locale, setLocale, t } = useTranslation();
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const backendHealth = useBackendHealth();
+  const runtimeInfo = useRuntimeInfo();
   const isImportStepComplete = useImportStepCompletion();
   const { sourceSelection, destinationSelection } = useFolderSelections();
   const isSelectionComplete = isImportStepComplete && Boolean(sourceSelection && destinationSelection);
@@ -132,6 +134,17 @@ const AppShell = () => {
         </section>
 
         <div className="sidebar-footer">
+          {runtimeInfo && (
+            <a
+              className="runtime-version"
+              href="https://github.com/JosueArevalo/media-organizer/releases"
+              target="_blank"
+              rel="noreferrer"
+              title={t('app.version.openReleases')}
+            >
+              v{runtimeInfo.version}
+            </a>
+          )}
           <div className="language-selector">
             <button
               className="settings-btn language-btn"

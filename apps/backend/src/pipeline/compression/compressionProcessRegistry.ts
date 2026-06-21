@@ -17,6 +17,11 @@ const killProcessTree = (child: ChildProcess) => {
     killer.on('error', () => {
       child.kill();
     });
+    killer.on('close', (code) => {
+      if (code !== 0 && !child.killed) {
+        child.kill();
+      }
+    });
     return;
   }
 
@@ -48,6 +53,12 @@ export const requestCompressionProcessPause = (sessionId: string) => {
 
   if (child) {
     killProcessTree(child);
+  }
+};
+
+export const requestAllCompressionProcessesPause = () => {
+  for (const sessionId of activeCompressionProcesses.keys()) {
+    requestCompressionProcessPause(sessionId);
   }
 };
 

@@ -2,6 +2,7 @@ import type { TranslationDictionary } from '../types';
 
 export const es: TranslationDictionary = {
   'app.brand': 'Media Organizer',
+  'app.version.openReleases': 'Abrir versiones disponibles',
   'app.error.runtimeTitle': 'Error de ejecución de la interfaz',
   'app.error.runtimeBody': 'La aplicación falló al renderizar. Revisa la consola del navegador para ver el stack trace completo.',
   'app.error.bootstrapTitle': 'Error al iniciar la interfaz',

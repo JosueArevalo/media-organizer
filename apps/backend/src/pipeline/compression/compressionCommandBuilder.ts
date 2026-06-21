@@ -2,13 +2,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CompressionSessionManifest } from './compressionJob.service.js';
-import { getPythonCommand } from './pythonCommandResolver.js';
+import { getPackagedWorkerCommand, getPythonCommand } from './pythonCommandResolver.js';
 
 const currentFile = fileURLToPath(import.meta.url);
 const currentDir = path.dirname(currentFile);
 const repoRootDir = path.resolve(currentDir, '../../../../..');
 
 export const getCompressionScriptsDir = () => path.join(repoRootDir, 'scripts', 'media_tools');
+
+const buildProcessorCommand = (phase: 'images' | 'videos', scriptName: string, args: string[]) => {
+  const workerCommand = getPackagedWorkerCommand();
+
+  if (workerCommand) {
+    return { command: workerCommand, args: [phase, ...args] };
+  }
+
+  return {
+    command: getPythonCommand(),
+    args: [path.join(getCompressionScriptsDir(), scriptName), ...args]
+  };
+};
 
 type ResumeItem = {
   source: string;
@@ -39,10 +52,8 @@ const appendResumeArgs = (args: string[], manifest: CompressionSessionManifest, 
   ];
 };
 
-export const buildImageCompressionCommand = (manifest: CompressionSessionManifest, resumeItems?: ResumeItem[]) => ({
-  command: getPythonCommand(),
-  args: appendResumeArgs([
-    path.join(getCompressionScriptsDir(), 'compress_images.py'),
+export const buildImageCompressionCommand = (manifest: CompressionSessionManifest, resumeItems?: ResumeItem[]) =>
+  buildProcessorCommand('images', 'compress_images.py', appendResumeArgs([
     '--source-dir',
     manifest.sourceDir,
     '--output-dir',
@@ -61,13 +72,10 @@ export const buildImageCompressionCommand = (manifest: CompressionSessionManifes
     manifest.processingPolicy?.heic ?? 'convert',
     '--selection-scope-json',
     JSON.stringify(manifest.selectionScope)
-  ], manifest, 'images', resumeItems)
-});
+  ], manifest, 'images', resumeItems));
 
-export const buildVideoCompressionCommand = (manifest: CompressionSessionManifest, resumeItems?: ResumeItem[]) => ({
-  command: getPythonCommand(),
-  args: appendResumeArgs([
-    path.join(getCompressionScriptsDir(), 'compress_videos.py'),
+export const buildVideoCompressionCommand = (manifest: CompressionSessionManifest, resumeItems?: ResumeItem[]) =>
+  buildProcessorCommand('videos', 'compress_videos.py', appendResumeArgs([
     '--source-dir',
     manifest.sourceDir,
     '--output-dir',
@@ -82,5 +90,4 @@ export const buildVideoCompressionCommand = (manifest: CompressionSessionManifes
     manifest.processingPolicy?.video ?? 'compress',
     '--selection-scope-json',
     JSON.stringify(manifest.selectionScope)
-  ], manifest, 'videos', resumeItems)
-});
+  ], manifest, 'videos', resumeItems));

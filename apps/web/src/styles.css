@@ -358,9 +358,21 @@ body {
 /* Sidebar footer */
 .sidebar-footer {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding-top: 16px;
   border-top: 1px solid var(--line);
+}
+
+.runtime-version {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.runtime-version:hover {
+  color: var(--accent);
 }
 
 .language-selector {

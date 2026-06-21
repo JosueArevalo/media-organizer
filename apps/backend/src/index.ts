@@ -43,9 +43,11 @@ import { handleSystemRoutes } from './system/system.routes.js';
 import {
   getCorsHeaders,
   isAllowedLocalHost,
-  isAllowedLocalOrigin
+  isAllowedLocalOrigin,
+  isDesktopRequestAuthorized
 } from './http/localAccess.js';
 import { readRequestJson, sendCaughtError, sendEmpty, sendJson } from './http/httpResponses.js';
+import { getRuntimeInfo } from './runtime/runtimeInfo.js';
 
 const port = Number(process.env.PORT ?? 4000);
 const BACKEND_HEALTH_OFFLINE_REPORT_PATH = '/api/health/offline-report';
@@ -277,6 +279,11 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     return;
   }
 
+  if (!isDesktopRequestAuthorized(req.headers['x-media-organizer-token'])) {
+    sendJson(res, 401, { status: 'unauthorized' });
+    return;
+  }
+
   for (const [header, value] of Object.entries(getCorsHeaders(req.headers.origin))) {
     res.setHeader(header, value);
   }
@@ -304,6 +311,12 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
       dbPath: getDbPath(),
       appliedMigrations
     });
+    return;
+  }
+
+
+  if (requestUrl.pathname === '/api/system/runtime' && req.method === 'GET') {
+    sendJson(res, 200, getRuntimeInfo());
     return;
   }
 
@@ -819,7 +832,7 @@ if (isMainModule) {
     process.exit(1);
   });
 
-  server.listen(port, () => {
+  server.listen(port, '127.0.0.1', () => {
     console.log(`[backend] running at http://localhost:${port}`);
   });
 }
