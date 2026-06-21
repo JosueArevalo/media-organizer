@@ -40,21 +40,31 @@ const getInstallCommand = (platform: NodeJS.Platform, formula: string) => {
   return null;
 };
 
+const getMozJpegNote = (platform: NodeJS.Platform) => {
+  if (platform === 'linux') {
+    return 'Homebrew installs mozjpeg as keg-only. It is detected under the Linuxbrew prefix; the usual path is /home/linuxbrew/.linuxbrew/opt/mozjpeg/bin/cjpeg.';
+  }
+
+  if (platform === 'darwin') {
+    return 'Homebrew installs mozjpeg as keg-only. It is detected under the Homebrew prefix, usually /opt/homebrew on Apple Silicon or /usr/local on Intel Macs.';
+  }
+
+  return undefined;
+};
+
 const toolDefinitions: Record<ExternalToolKey, {
   label: string;
   field: keyof ToolStatusRequest;
   defaultCommand: string;
   installFormula: string;
   installUrl: string;
-  note?: string;
 }> = {
   image: {
     label: 'MozJPEG cjpeg',
     field: 'imageToolCommand',
     defaultCommand: 'cjpeg',
     installFormula: 'mozjpeg',
-    installUrl: 'https://formulae.brew.sh/formula/mozjpeg',
-    note: 'Homebrew installs mozjpeg as keg-only. If cjpeg is not on PATH, use the full path under your Homebrew prefix, such as /opt/homebrew/opt/mozjpeg/bin/cjpeg.'
+    installUrl: 'https://formulae.brew.sh/formula/mozjpeg'
   },
   imagemagick: {
     label: 'ImageMagick',
@@ -97,7 +107,7 @@ export const getToolsStatus = (
   const entries = (Object.keys(toolDefinitions) as ExternalToolKey[]).map((key) => {
     const definition = toolDefinitions[key];
     const effectiveCommand = getEffectiveCommand(request, key, platform);
-    const resolvedPath = resolveToolCommand(effectiveCommand);
+    const resolvedPath = resolveToolCommand(effectiveCommand, { platform });
 
     return [key, {
       key,
@@ -107,7 +117,7 @@ export const getToolsStatus = (
       status: resolvedPath ? 'ready' : 'missing',
       installCommand: getInstallCommand(platform, definition.installFormula),
       installUrl: definition.installUrl,
-      note: definition.note ?? null
+      note: key === 'image' ? getMozJpegNote(platform) ?? null : null
     } satisfies ExternalToolStatusSnapshot] as const;
   });
 
