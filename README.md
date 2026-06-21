@@ -1,223 +1,390 @@
-# Media Organizer
+<p align="center">
+  <img src="docs/assets/readme/media-organizer-hero.webp" alt="Photos and videos flowing through private local processing into an organized media library" width="100%">
+</p>
 
-Media Organizer is a local-first application for organizing, compressing and managing personal photos and videos.
+<h1 align="center">Media Organizer</h1>
 
-It is designed for large, periodic imports from mobile devices into a local workflow that stays under the user's control.
+<p align="center">
+  <strong>Bring order to your photo and video library — locally, safely, and at your pace.</strong>
+</p>
 
-## Quick Start
+<p align="center">
+  <img src="https://img.shields.io/badge/Node.js-22.13%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white" alt="Node.js 22.13 or newer">
+  <img src="https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5.8">
+  <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=0B1220" alt="React 18">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-64748B?style=flat-square" alt="Windows, macOS, and Linux">
+  <img src="https://img.shields.io/badge/local--first-your%20files%20stay%20yours-2F8F65?style=flat-square" alt="Local-first">
+  <img src="https://img.shields.io/badge/status-active%20development-F59E0B?style=flat-square" alt="Under active development">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2F8F65?style=flat-square" alt="MIT License"></a>
+</p>
 
-### Prerequisites
+<p align="center">
+  <a href="#-why-media-organizer">Why</a> ·
+  <a href="#-what-it-can-do">Features</a> ·
+  <a href="#-quick-start">Quick Start</a> ·
+  <a href="#-platform-setup">Platform Setup</a> ·
+  <a href="#-development">Development</a> ·
+  <a href="#-documentation">Documentation</a>
+</p>
 
-- Node.js `22.13.0` or newer. Node `22.22.3` or Node 24 LTS are recommended.
-- npm, bundled with Node.js.
-- Python, for media helper scripts.
-- mozjpeg-compatible `cjpeg`, for image compression.
-- `HandBrakeCLI`, for video compression.
+---
 
-The backend uses Node's built-in `node:sqlite` module. Node `22.9.0` is too old and will fail before the app starts.
+## 🌿 Why Media Organizer?
 
-Important: "Node 22" by itself is not specific enough. Check the full version with `node -v`; it must be `v22.13.0` or newer.
+Large phone exports tend to become a mix of photos, videos, screenshots, duplicates, unclear filenames, and half-finished backup folders. Media Organizer turns that manual cleanup into a preview-driven workflow that remains under your control.
 
-### macOS / Linux
+- **Local-first:** media is processed on your computer and is only uploaded when you explicitly choose a cloud export.
+- **Preview before action:** choose folders, review the detected media, and adjust the proposed organization before files change.
+- **Resume safely:** long-running compression and grouping jobs persist their state so you can pause and continue later.
+- **One guided flow:** import, select, compress, organize, and export from a single dashboard.
 
-Install Node.js `22.22.3` or Node 24 LTS from the official Node.js website, then run:
+> [!IMPORTANT]
+> Media Organizer is an early local MVP under active development. Keep an independent backup of important media and review every preview before applying filesystem changes.
+
+## ✨ What it can do
+
+| | Capability | What it gives you |
+|---|---|---|
+| 📥 | **Import and scan** | Select local source and destination folders and scan nested photo/video collections. |
+| 🔎 | **Review and select** | Preview detected media and decide what belongs in the processing scope. |
+| 🗜️ | **Compress** | Compress JPEG/HEIC images and videos with configurable quality and encoder settings. |
+| 🗂️ | **Organize** | Build and adjust folder groupings using dates and filename patterns before applying them. |
+| ⏯️ | **Pause and resume** | Continue long-running compression and grouping sessions without starting over. |
+| 📤 | **Export** | Copy organized output to local/network destinations or configure Google Photos export. |
+| 📊 | **Track results** | Review execution history, saved space, processing duration, and verification status. |
+
+### The workflow
+
+```text
+Import → Selection → Compression → Grouping → Export
+```
+
+Every filesystem-writing step is explicit. The dashboard keeps the proposed result visible before you apply it.
+
+## 🚀 Quick Start
+
+To launch the dashboard you only need **Git**, **Node.js**, and **npm**. Media-processing tools can be installed afterwards when you need compression, conversion, or metadata support.
+
+The repository is pinned to **Node.js `22.22.3`**. The supported minimum is `22.13.0`; Node 24 LTS is also supported.
 
 ```bash
+git clone https://github.com/JosueArevalo/media-organizer.git
 cd media-organizer
 node -v
 npm ci
+npm run setup:check
 npm run dev
 ```
 
-Dashboard: `http://localhost:5173`
+Open:
 
-Backend health check: `http://localhost:4000/api/health`
+- Dashboard: <http://localhost:5173>
+- Backend health check: <http://localhost:4000/api/health>
 
-If you already use a Node version manager such as `nvm`, `fnm`, `asdf`, or mise, the repository also includes `.nvmrc` and `.node-version` pinned to Node `22.22.3`.
+Stop both development servers with `Ctrl+C` in the terminal running them.
 
-`nvm` is not included with macOS or npm. If you want to use it, install it first:
+> [!NOTE]
+> The backend uses Node's built-in `node:sqlite` module. Node `22.9.0` is too old and will fail before the application starts. Always check the complete version with `node -v`.
+
+## 🧰 Platform Setup
+
+Choose the setup matching your operating system. These are tested paths, not the only possible ways to install the dependencies.
+
+<details>
+<summary><strong>🐧 Ubuntu — from a fresh installation</strong></summary>
+<br>
+
+Install the base packages used by Homebrew on Linux, plus Python for media-processing scripts:
+
+```bash
+sudo apt update
+sudo apt install build-essential procps curl file git python3
+```
+
+Install [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux):
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+At the end of the installer, run the `brew shellenv` commands it prints. On a standard Linuxbrew installation they are:
+
+```bash
+echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+```
+
+Install the optional media tools:
+
+```bash
+brew install mozjpeg imagemagick exiftool handbrake
+```
+
+Install the pinned Node version with [`nvm`](https://github.com/nvm-sh/nvm):
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm install
+nvm use
+```
+
+Then install and run the project:
+
+```bash
+git clone https://github.com/JosueArevalo/media-organizer.git
+cd media-organizer
+npm ci
+npm run setup:check
+npm run dev
+```
+
+Homebrew installs MozJPEG as keg-only. Media Organizer detects `cjpeg` under the Linuxbrew prefix, normally `/home/linuxbrew/.linuxbrew/opt/mozjpeg/bin/cjpeg`.
+
+</details>
+
+<details>
+<summary><strong>🍎 macOS</strong></summary>
+<br>
+
+Install [Homebrew](https://brew.sh/) if it is not already available, then install Python and the media tools:
+
+```bash
+brew install python mozjpeg imagemagick exiftool handbrake
+```
+
+Install [`nvm`](https://github.com/nvm-sh/nvm), then use the Node version committed in `.nvmrc`:
 
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | bash
 ```
 
-Then close and reopen the terminal.
+Close and reopen the terminal, then run:
 
-With `nvm`:
+```bash
+git clone https://github.com/JosueArevalo/media-organizer.git
+cd media-organizer
+nvm install
+nvm use
+npm ci
+npm run setup:check
+npm run dev
+```
+
+MozJPEG is keg-only on macOS too. The application checks the common Homebrew prefixes for both Apple Silicon and Intel Macs.
+
+</details>
+
+<details>
+<summary><strong>🪟 Windows PowerShell</strong></summary>
+<br>
+
+Install Node.js LTS and Git:
+
+```powershell
+winget install --id OpenJS.NodeJS.LTS -e
+winget install --id Git.Git -e
+```
+
+Install [Python 3](https://www.python.org/downloads/windows/), then clone and run the project from a new PowerShell window:
+
+```powershell
+git clone https://github.com/JosueArevalo/media-organizer.git
+cd media-organizer
+node -v
+npm.cmd ci
+npm.cmd run setup:check
+npm.cmd run dev
+```
+
+Windows media tools are configured by executable path from **Settings** in the dashboard:
+
+- [MozJPEG for Windows](https://github.com/garyzyg/mozjpeg-windows/releases) — select `cjpeg-static.exe`.
+- [ImageMagick](https://imagemagick.org/script/download.php#windows) — select `magick.exe`.
+- [ExifTool](https://exiftool.org/) — select `exiftool.exe`.
+- [HandBrake CLI](https://handbrake.fr/downloads2.php) — select `HandBrakeCLI.exe`.
+
+Use `npm.cmd` when PowerShell execution policy blocks the generated `npm.ps1` script.
+
+</details>
+
+## 🎛️ Media-processing tools
+
+The dashboard can start without these tools. Install the ones required by the media operations you intend to run, then open **Settings → Encoder Tools** to verify that each executable is detected.
+
+<details>
+<summary><strong>What each tool is used for</strong></summary>
+<br>
+
+| Tool | Used for | Default command on macOS/Linux |
+|---|---|---|
+| [Python 3](https://www.python.org/downloads/) | Running the media processing and copy helper scripts. | `python3`, then `python` |
+| [MozJPEG](https://formulae.brew.sh/formula/mozjpeg) | Compressing JPEG images. | `cjpeg` |
+| [ImageMagick](https://imagemagick.org/) | Decoding and converting HEIC images before compression. | `magick` |
+| [ExifTool](https://exiftool.org/) | Copying source metadata to processed images. | `exiftool` |
+| [HandBrake CLI](https://handbrake.fr/downloads2.php) | Compressing video files with a selected preset. | `HandBrakeCLI` |
+
+Missing encoders do not prevent you from opening the app, choosing folders, or reviewing media. Before a processing job starts, the UI reports unavailable tools and offers safe alternatives where supported.
+
+</details>
+
+## 🩺 Troubleshooting
+
+<details>
+<summary><strong>“Unsupported Node.js version” or the backend exits immediately</strong></summary>
+<br>
+
+Check the full version:
+
+```bash
+node -v
+npm run setup:check
+```
+
+It must be `v22.13.0` or newer. If you use `nvm`, the repository already contains `.nvmrc` and `.node-version` pinned to `22.22.3`:
 
 ```bash
 nvm install
 nvm use
-npm ci
-npm run dev
 ```
 
-### Windows PowerShell
+</details>
+
+<details>
+<summary><strong>A Homebrew tool is installed but reported as missing</strong></summary>
+<br>
+
+Confirm Homebrew is active in the current shell and inspect the executable:
+
+```bash
+eval "$(brew shellenv)"
+brew --prefix
+brew --prefix mozjpeg
+```
+
+Restart `npm run dev` after changing `PATH`. You can also save a specific executable path from the application Settings page.
+
+</details>
+
+<details>
+<summary><strong>PowerShell blocks npm.ps1</strong></summary>
+<br>
+
+Use the Windows command shim without changing your execution policy:
 
 ```powershell
-cd media-organizer
-node -v
 npm.cmd ci
 npm.cmd run dev
 ```
 
-Dashboard: `http://localhost:5173`
+</details>
 
-Backend health check: `http://localhost:4000/api/health`
+<details>
+<summary><strong>Dependency installation or audit warnings</strong></summary>
+<br>
 
-If Node is not installed on Windows:
+Use `npm ci` for a clean installation from the committed lockfile. Use `npm install` only when intentionally updating dependencies.
 
-```powershell
-winget install OpenJS.NodeJS.LTS
-```
+Do not run `npm audit fix --force` as part of normal setup. It can introduce major dependency changes unrelated to launching the application.
 
-On Windows PowerShell, use `npm.cmd` if script execution blocks `npm.ps1`.
+</details>
 
-### Install Notes
+## 🏗️ Architecture
 
-`npm` installs project dependencies after Node.js is already installed. It does not replace Node.js itself.
-
-Use `npm ci` for a clean install from the committed `package-lock.json`. This is the best option when validating the project from a fresh clone or downloaded zip.
-
-Use `npm install` when intentionally updating dependencies.
-
-Do not run `npm audit fix --force` as part of normal setup. It can change major dependency versions and make the local install less predictable. Audit warnings are separate from the Node version required to start the app.
-
-Docker is not required for local development. The simplest supported path is installing a compatible Node.js LTS version and running the commands above.
-
-Stop development servers with `Ctrl+C` in the terminal where the command is running.
-
-## What It Is
-
-This repository contains:
-
-- a local backend for filesystem orchestration and resumable processing jobs
-- a local dashboard for scanning, previewing and applying actions
-- a state contract for V1 persistence and resume behavior
-- shared documentation for product, architecture, quality and agent behavior
-
-The goal is to automate a manual and time-consuming process:
-
-- exporting media from a mobile phone
-- selecting source and destination folders locally
-- scanning mixed photo and video folders
-- reviewing a preview before applying changes
-- compressing images and videos
-- organizing files into structured folders
-- preparing content for backup
-
-## Current Capabilities
-
-- Select input and output folders from a local dashboard
-- Scan nested folders containing photos and videos
-- Preview media before applying changes
-- Persist resumable compression and grouping sessions
-- Compress images using mozjpeg-compatible tooling
-- Compress videos using HandBrake CLI
-- Propose folder grouping by date and filename patterns
-- Let the user adjust proposed groupings before applying them
-- Support dashboard execution history and maintenance actions
-- Keep V1 local, single-user and explicit around filesystem writes
-
-## Architecture Snapshot
-
-The project follows a modular monolith structure:
-
-- `apps/backend` -> local API, state, pipeline and filesystem orchestration
-- `apps/web` -> local React dashboard UI
-- `scripts/` -> helper scripts for media processing and verification
-- `docs/` -> product, architecture, state contract and quality guidance
-
-Main flow:
+Media Organizer is a TypeScript modular monolith with a deliberately simple flow:
 
 ```text
-Frontend -> Backend -> Pipeline/Services -> SQLite / Filesystem / External Tools
+React dashboard
+      ↓
+Local Node.js API
+      ↓
+Pipeline and services
+      ↓
+SQLite · Filesystem · External media tools
 ```
 
-## Development Commands
+| Area | Responsibility |
+|---|---|
+| `apps/web` | React dashboard, workflow UI, and API clients. |
+| `apps/backend` | Local API, persisted state, pipeline orchestration, and filesystem access. |
+| `scripts/` | Media-processing and verification helpers. |
+| `docs/` | Product, architecture, state contract, and quality guidance. |
 
-Run both backend and frontend:
+The core flow remains `Frontend → Backend → Pipeline → Filesystem / Tools`.
 
-```powershell
-npm.cmd run dev
-```
+## 🧑‍💻 Development
 
-Run only the backend:
+<details>
+<summary><strong>Common commands</strong></summary>
+<br>
 
-```powershell
-npm.cmd run dev:backend
-```
+```bash
+# Backend + frontend
+npm run dev
 
-Run only the frontend:
+# Individual applications
+npm run dev:backend
+npm run dev:web
 
-```powershell
-npm.cmd run dev:web
-```
+# Production builds
+npm run build
 
-Build both apps:
+# Backend tests
+npm test
 
-```powershell
-npm.cmd run build
-```
-
-Run backend tests:
-
-```powershell
-npm.cmd test
-```
-
-Run frontend tests:
-
-```powershell
-npm.cmd run test --workspace apps/web
+# Frontend tests
+npm run test --workspace apps/web
 ```
 
 Recommended quality gate before merging:
 
-```powershell
-npm.cmd run build
-npm.cmd test
-npm.cmd run test --workspace apps/web
+```bash
+npm run build
+npm test
+npm run test --workspace apps/web
 ```
 
-On macOS and Linux, use `npm` instead of `npm.cmd`.
+On Windows PowerShell, replace `npm` with `npm.cmd` if script execution is restricted.
 
-## Security Model
+</details>
 
-V1 is local-first and single-user.
+## 🔐 Security model
+
+V1 is local-first and single-user:
 
 - The backend is intended for localhost use, not LAN or internet exposure.
 - Browser origins and Host headers are restricted to localhost-style addresses.
 - CORS does not use a wildcard origin.
-- Request JSON bodies have a bounded size.
+- Request bodies have a bounded size.
 - Filesystem-mutating maintenance endpoints require explicit confirmation tokens.
-- Do not widen host/origin rules for LAN access without adding authentication or a local token.
+- LAN access should not be enabled without first adding authentication or a local access token.
 
-## Intended V1 Flow
+## 📚 Documentation
 
-1. Open the local dashboard.
-2. Select input and output folders.
-3. Create or resume a processing job.
-4. Scan and preview the media.
-5. Run compression or grouping steps.
-6. Pause or close safely at any time.
-7. Resume later and apply proposed changes.
+- [Product requirements](docs/PRD.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [V1 state and resume contract](docs/STATE_CONTRACT.md)
+- [Quality, security, and dependency baseline](docs/QUALITY_BASELINE.md)
+- [Guidance for AI agents](AGENTS.md)
+- [Tool-agnostic AI context](AI_CONTEXT.md)
+- [Contributing guide](CONTRIBUTING.md)
+- [Citation metadata](CITATION.cff)
 
-## Documentation
+## 🚧 Project status
 
-- `docs/PRD.md` -> Product requirements
-- `docs/ARCHITECTURE.md` -> Current system design
-- `docs/STATE_CONTRACT.md` -> V1 persistence contract
-- `docs/QUALITY_BASELINE.md` -> Current quality, security and dependency baseline
-- `AGENTS.md` -> Instructions for AI agents
-- `AI_CONTEXT.md` -> Operational, tool-agnostic guidance for automated assistants
+Media Organizer is under active development. The current focus is a dependable local MVP with preview-driven workflows, explicit filesystem writes, resumable state, and practical cross-platform setup.
 
-## Agent Skills
+There is currently no packaged release or Docker requirement: clone the repository, install a supported Node.js version, and run it locally.
 
-- `.github/skills/state-contract-implementation/SKILL.md` -> Workflow for implementing state and resume logic aligned with the V1 contract
+## 🤝 Contributing
 
-## Status
+Contributions are welcome. Please read the [contributing guide](CONTRIBUTING.md) before opening a pull request. Contributions are accepted under the same MIT License as the project, without a copyright assignment or Contributor License Agreement.
 
-This repository is under active development.
+## 📄 License and citation
 
-The focus is on learning, experimentation and building a solid local MVP with preview-driven workflows and resumable state.
+Media Organizer is available under the [MIT License](LICENSE).
+
+Copyright (c) 2026 [Josue Arevalo](https://github.com/JosueArevalo).
+
+If Media Organizer supports academic or research work, please cite it using the repository's [citation metadata](CITATION.cff). GitHub can generate a formatted citation from this file through the repository's **Cite this repository** action.

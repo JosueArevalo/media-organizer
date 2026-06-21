@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use Media Organizer in academic work, please cite it using this metadata."
+type: software
+title: "Media Organizer"
+authors:
+  - family-names: "Arevalo"
+    given-names: "Josue"
+version: 0.1.0
+repository-code: "https://github.com/JosueArevalo/media-organizer"
+license: MIT

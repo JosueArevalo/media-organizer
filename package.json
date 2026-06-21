@@ -2,6 +2,7 @@
   "name": "media-organizer",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "description": "Local-first media organizer monorepo",
   "workspaces": [
     "apps/backend",
