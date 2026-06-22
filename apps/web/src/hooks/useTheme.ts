@@ -43,3 +43,10 @@ export const useTheme = () => {
     toggleTheme
   };
 };
+
+export const initializeDocumentTheme = () => {
+  if (typeof document === 'undefined') return;
+  const theme = getInitialTheme();
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+};

@@ -32,6 +32,7 @@ import {
   type ToolStatus
 } from '../services/tool-status.service';
 import { useTranslation, type TranslationKey } from '../i18n';
+import { getDesktopBridge } from '../services/desktop-runtime.service';
 import '../styles/SettingsPage.css';
 
 type ToolKey = 'image' | 'video' | 'imagemagick' | 'exiftool';
@@ -154,6 +155,8 @@ const SettingsPage = () => {
   );
   const [browserPermission, setBrowserPermission] = useState<BrowserPermissionState>(() => getBrowserNotificationPermission());
   const [notificationMessage, setNotificationMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [diagnosticsMessage, setDiagnosticsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const desktopBridge = getDesktopBridge();
 
   useEffect(() => {
     loadEncoderSettings().then((loaded) => {
@@ -594,6 +597,20 @@ const SettingsPage = () => {
     }
   };
 
+  const handleOpenLogs = async () => {
+    if (!desktopBridge) return;
+    const result = await desktopBridge.openLogsFolder();
+    setDiagnosticsMessage(result.ok
+      ? { type: 'success', text: t('settings.diagnostics.opened') }
+      : { type: 'error', text: result.message ?? t('settings.diagnostics.openFailed') });
+  };
+
+  const handleCopyDiagnostics = async () => {
+    if (!desktopBridge) return;
+    await desktopBridge.copyDiagnostics();
+    setDiagnosticsMessage({ type: 'success', text: t('settings.diagnostics.copied') });
+  };
+
   return (
     <div className="page-stack settings-page">
       <div className="page-header">
@@ -602,6 +619,22 @@ const SettingsPage = () => {
       </div>
 
       <div className="settings-content">
+        {desktopBridge && (
+          <div className="settings-card">
+            <div className="card-title">{t('settings.diagnostics.title')}</div>
+            <div className="card-subtitle">{t('settings.diagnostics.subtitle')}</div>
+            <div className="notification-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => void handleOpenLogs()}>
+                {t('backendRecovery.openLogs')}
+              </button>
+              <button className="btn btn-secondary" type="button" onClick={() => void handleCopyDiagnostics()}>
+                {t('backendRecovery.copy')}
+              </button>
+            </div>
+            {diagnosticsMessage && <div className={`message message-${diagnosticsMessage.type}`}>{diagnosticsMessage.text}</div>}
+          </div>
+        )}
+
         <div className="settings-card settings-card-encoders">
           <div className="settings-card-heading">
             <div>

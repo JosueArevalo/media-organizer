@@ -2,17 +2,12 @@ appId: com.mediaorganizer.desktop
 productName: Media Organizer
 copyright: Copyright © 2026 Media Organizer contributors
 asar: true
+compression: normal
 npmRebuild: true
 files:
   - apps/desktop/dist/**/*
   - apps/desktop/assets/icon.png
-  - apps/backend/dist/**/*
   - package.json
-  - node_modules/sharp/**/*
-  - node_modules/@img/**/*
-asarUnpack:
-  - node_modules/sharp/**/*
-  - node_modules/@img/**/*
 extraResources:
   - from: THIRD_PARTY_NOTICES.md
     to: THIRD_PARTY_NOTICES.md
@@ -22,6 +17,18 @@ extraResources:
     to: migrations
     filter:
       - "*.sql"
+  - from: apps/backend/dist
+    to: backend/dist
+  - from: apps/backend/package.json
+    to: backend/package.json
+  - from: node_modules/sharp
+    to: backend/node_modules/sharp
+  - from: node_modules/@img
+    to: backend/node_modules/@img
+  - from: node_modules/detect-libc
+    to: backend/node_modules/detect-libc
+  - from: node_modules/semver
+    to: backend/node_modules/semver
   - from: build/worker/win-x64
     to: worker
 win:

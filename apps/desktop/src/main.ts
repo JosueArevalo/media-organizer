@@ -1,8 +1,10 @@
-import { fork, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, protocol, shell } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, shell, utilityProcess, type IpcMainInvokeEvent, type UtilityProcess } from 'electron';
+import { createBackendLifecycle, type BackendHandle, type BackendLifecycleSnapshot } from './backendLifecycle.js';
+import { readLogTail, redactDiagnostics } from './diagnostics.js';
+import { isTrustedDesktopUrl } from './ipcSecurity.js';
 import { createDesktopLogger } from './logging.js';
 import { OAuthCallbackBridge } from './oauthBridge.js';
 import { registerAppProtocol, unregisterAppProtocol } from './protocol.js';
@@ -21,9 +23,12 @@ protocol.registerSchemesAsPrivileged([{
 
 app.setName('Media Organizer');
 app.setAppUserModelId('com.mediaorganizer.desktop');
+if (process.env.MEDIA_ORGANIZER_SMOKE_REPORT) {
+  app.disableHardwareAcceleration();
+}
 
 let mainWindow: BrowserWindow | null = null;
-let backendProcess: ChildProcess | null = null;
+let backendLifecycle: ReturnType<typeof createBackendLifecycle> | null = null;
 let oauthBridge: OAuthCallbackBridge | null = null;
 let isQuitting = false;
 
@@ -32,15 +37,18 @@ if (!singleInstance) {
   app.quit();
 }
 
-const startBackend = (paths: ReturnType<typeof resolveDesktopRuntimePaths>, token: string, version: string) =>
-  new Promise<number>((resolve, reject) => {
+const launchBackend = (
+  paths: ReturnType<typeof resolveDesktopRuntimePaths>,
+  token: string,
+  version: string,
+  onProcess: (child: UtilityProcess) => void
+) =>
+  new Promise<BackendHandle>((resolve, reject) => {
     const workerPath = paths.workerPath && fs.existsSync(paths.workerPath) ? paths.workerPath : undefined;
-    const child = fork(paths.backendEntry, [], {
-      execPath: process.execPath,
-      cwd: app.getAppPath(),
+    const child = utilityProcess.fork(paths.backendEntry, [], {
+      cwd: paths.workingDirectory,
       env: {
         ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
         MEDIA_ORGANIZER_DESKTOP: '1',
         MEDIA_ORGANIZER_VERSION: version,
         MEDIA_ORGANIZER_DATA_DIR: paths.dataDir,
@@ -49,19 +57,50 @@ const startBackend = (paths: ReturnType<typeof resolveDesktopRuntimePaths>, toke
         GOOGLE_PHOTOS_REDIRECT_URI: 'http://localhost:4000/api/export/google-photos/oauth/callback',
         ...(workerPath ? { MEDIA_ORGANIZER_WORKER_PATH: workerPath } : {})
       },
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      serviceName: 'Media Organizer Backend'
     });
 
-    backendProcess = child;
+    onProcess(child);
     const timeout = setTimeout(() => reject(new Error('Backend startup timed out.')), 20_000);
-    child.once('error', reject);
-    child.once('exit', (code) => reject(new Error(`Backend exited during startup (${code ?? 'unknown'}).`)));
+    let ready = false;
+    let exitResult: { exitCode: number | null; reason?: string } | null = null;
+    const exitListeners = new Set<(exit: { exitCode: number | null; reason?: string }) => void>();
+    child.on('error', (type, location, report) => {
+      const error = new Error(`${type} in ${location}: ${report}`);
+      if (!ready) {
+        clearTimeout(timeout);
+        reject(error);
+      }
+    });
+    child.on('exit', (code) => {
+      exitResult = { exitCode: code, reason: 'exit' };
+      for (const listener of exitListeners) listener(exitResult);
+      if (!ready) {
+        clearTimeout(timeout);
+        reject(new Error(`Backend exited during startup (${code ?? 'unknown'}).`));
+      }
+    });
     child.on('message', (message: unknown) => {
       if (!message || typeof message !== 'object') return;
       const event = message as { type?: string; port?: number; message?: string };
       if (event.type === 'ready' && typeof event.port === 'number') {
         clearTimeout(timeout);
-        resolve(event.port);
+        ready = true;
+        resolve({
+          port: event.port,
+          pid: child.pid ?? null,
+          requestShutdown: () => child.postMessage({ type: 'shutdown' }),
+          kill: () => child.kill(),
+          onExit(listener) {
+            if (exitResult) {
+              queueMicrotask(() => listener(exitResult!));
+              return () => undefined;
+            }
+            exitListeners.add(listener);
+            return () => exitListeners.delete(listener);
+          }
+        });
       } else if (event.type === 'error') {
         clearTimeout(timeout);
         reject(new Error(event.message || 'Backend failed to start.'));
@@ -81,7 +120,8 @@ const createWindow = () => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      preload: path.join(app.getAppPath(), 'apps', 'desktop', 'dist', 'preload.cjs')
     }
   });
 
@@ -113,9 +153,7 @@ app.on('before-quit', () => {
   isQuitting = true;
   oauthBridge?.stop();
   unregisterAppProtocol();
-  if (backendProcess?.connected) backendProcess.send({ type: 'shutdown' });
-  const child = backendProcess;
-  setTimeout(() => child?.kill(), 5000).unref();
+  void backendLifecycle?.stop();
 });
 
 app.on('window-all-closed', () => {
@@ -126,23 +164,84 @@ void app.whenReady().then(async () => {
   const paths = resolveDesktopRuntimePaths(app);
   const logger = createDesktopLogger(paths.logsDir);
   app.once('will-quit', logger.close);
+  logger.write('desktop', `Media Organizer ${app.getVersion()} starting on ${process.platform}/${process.arch}.`);
+  process.on('uncaughtExceptionMonitor', (error, origin) => logger.write(`main:${origin}`, error.stack ?? error.message));
+  app.on('child-process-gone', (_event, details) => logger.write('electron:child-process-gone', JSON.stringify(details)));
+  app.on('render-process-gone', (_event, _contents, details) => logger.write('electron:render-process-gone', JSON.stringify(details)));
 
   try {
     const token = randomBytes(32).toString('hex');
-    const backendPort = await startBackend(paths, token, app.getVersion());
-    logger.pipe('backend:out', backendProcess?.stdout ?? null);
-    logger.pipe('backend:err', backendProcess?.stderr ?? null);
+    backendLifecycle = createBackendLifecycle({
+      launch: () => launchBackend(paths, token, app.getVersion(), (child) => {
+        logger.pipe('backend:out', child.stdout as NodeJS.ReadableStream | null);
+        logger.pipe('backend:err', child.stderr as NodeJS.ReadableStream | null);
+        child.on('error', (type, location, report) => logger.write('backend:fatal', `${type} in ${location}: ${report}`));
+      }),
+      log: (message) => logger.write('backend:lifecycle', message)
+    });
+    await backendLifecycle.start();
 
-    oauthBridge = new OAuthCallbackBridge(() => ({ port: backendPort, token }));
+    const requireTrustedIpc = (event: IpcMainInvokeEvent) => {
+      if (!event.senderFrame || !isTrustedDesktopUrl(event.senderFrame.url)) throw new Error('Desktop diagnostics are only available to the packaged application.');
+    };
+    const broadcastState = (state: BackendLifecycleSnapshot) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('desktop:backend-state-changed', state);
+    };
+    backendLifecycle.subscribe(broadcastState);
+    ipcMain.handle('desktop:backend-state', (event) => {
+      requireTrustedIpc(event);
+      return backendLifecycle!.getSnapshot();
+    });
+    ipcMain.handle('desktop:restart-backend', async (event) => {
+      requireTrustedIpc(event);
+      return await backendLifecycle!.restart();
+    });
+    ipcMain.handle('desktop:open-logs', async (event) => {
+      requireTrustedIpc(event);
+      const message = await shell.openPath(paths.logsDir);
+      return message ? { ok: false, message } : { ok: true };
+    });
+    ipcMain.handle('desktop:copy-diagnostics', (event) => {
+      requireTrustedIpc(event);
+      const state = backendLifecycle!.getSnapshot();
+      const report = [
+        'Media Organizer desktop diagnostics',
+        `Generated: ${new Date().toISOString()}`,
+        `Version: ${app.getVersion()}`,
+        `Platform: ${process.platform}/${process.arch}`,
+        `Backend state: ${state.status}`,
+        `Incident: ${state.incident ? JSON.stringify(state.incident) : 'none'}`,
+        `Log file: ${logger.filePath}`,
+        '',
+        'Recent log:',
+        logger.getTail() || readLogTail(logger.filePath)
+      ].join('\n');
+      clipboard.writeText(redactDiagnostics(report, app.getPath('home'), token));
+      logger.write('desktop', 'Diagnostic summary copied to clipboard.');
+      return { ok: true };
+    });
+
+    oauthBridge = new OAuthCallbackBridge(() => {
+      const port = backendLifecycle!.getPort();
+      if (port === null) throw new Error('The backend is offline. Restart it before signing in.');
+      return { port, token };
+    });
     registerAppProtocol({
       webRoot: paths.webRoot,
-      backendPort,
+      getBackendPort: () => backendLifecycle!.getPort(),
       token,
-      beforeOAuthStart: () => oauthBridge!.start()
+      beforeOAuthStart: () => oauthBridge!.start(),
+      onError: (error) => logger.write('protocol', error instanceof Error ? error.stack ?? error.message : String(error))
     });
 
     mainWindow = createWindow();
+    mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      if (level >= 2) {
+        logger.write(level === 3 ? 'renderer:error' : 'renderer:warning', `${message} (${sourceId}:${line})`);
+      }
+    });
     await mainWindow.loadURL('media-organizer://app/');
+    broadcastState(backendLifecycle.getSnapshot());
 
     const smokeReport = process.env.MEDIA_ORGANIZER_SMOKE_REPORT?.trim();
     if (smokeReport) {
@@ -152,7 +251,16 @@ void app.whenReady().then(async () => {
         const previous = localStorage.getItem('media-organizer:desktop-smoke');
         localStorage.setItem('media-organizer:desktop-smoke', ${JSON.stringify(marker)});
         const response = await fetch('/api/system/runtime');
-        return { previous, runtime: await response.json(), status: response.status };
+        const bridge = window.mediaOrganizerDesktop;
+        const backendState = bridge ? await bridge.getBackendState() : null;
+        return {
+          previous,
+          runtime: await response.json(),
+          status: response.status,
+          rendered: Boolean(document.querySelector('#root')?.childElementCount),
+          bridgeAvailable: Boolean(bridge),
+          backendState
+        };
       })()`);
       fs.writeFileSync(smokeReport, JSON.stringify({ ...result, expectedMarker }, null, 2));
       if (expectedMarker && result.previous !== expectedMarker) process.exitCode = 1;

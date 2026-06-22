@@ -40,6 +40,11 @@ jobs:
           $tagVersion = $env:GITHUB_REF_NAME.TrimStart('v')
           if ($packageVersion -ne $tagVersion) { throw "Tag $tagVersion does not match package version $packageVersion." }
       - run: npm run desktop:package:win
+      - name: Smoke test packaged portable
+        shell: pwsh
+        run: |
+          $portable = Get-ChildItem release\*.exe | Select-Object -First 1
+          npm run desktop:smoke -- --executable $portable.FullName
       - name: Create checksum
         shell: pwsh
         run: Get-FileHash release\*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } | Set-Content release\SHA256SUMS.txt

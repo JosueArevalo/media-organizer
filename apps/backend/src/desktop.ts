@@ -3,6 +3,20 @@ import { createBackendServer } from './index.js';
 import { requestAllCompressionProcessesPause } from './pipeline/compression/compressionProcessRegistry.js';
 
 type DesktopParentMessage = { type?: string };
+type UtilityParentPort = {
+  on: (event: 'message', listener: (message: { data?: DesktopParentMessage } | DesktopParentMessage) => void) => void;
+  postMessage: (message: unknown) => void;
+};
+
+const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort;
+const sendParentMessage = (message: unknown) => {
+  if (utilityParentPort) {
+    utilityParentPort.postMessage(message);
+    return;
+  }
+
+  process.send?.(message);
+};
 
 const server = createBackendServer();
 
@@ -17,11 +31,19 @@ process.on('message', (message: DesktopParentMessage) => {
     shutdown();
   }
 });
+utilityParentPort?.on('message', (event) => {
+  const message: DesktopParentMessage | undefined = 'data' in event
+    ? event.data
+    : event as DesktopParentMessage;
+  if (message?.type === 'shutdown') {
+    shutdown();
+  }
+});
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 server.on('error', (error) => {
-  process.send?.({
+  sendParentMessage({
     type: 'error',
     message: error instanceof Error ? error.message : String(error)
   });
@@ -30,5 +52,5 @@ server.on('error', (error) => {
 server.listen(0, '127.0.0.1', () => {
   const address = server.address() as AddressInfo;
   process.env.PORT = String(address.port);
-  process.send?.({ type: 'ready', port: address.port });
+  sendParentMessage({ type: 'ready', port: address.port });
 });

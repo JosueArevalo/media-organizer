@@ -9,6 +9,9 @@ import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useBackendHealth } from '../hooks/useBackendHealth';
 import { useTranslation } from '../i18n';
 import { useRuntimeInfo } from '../hooks/useRuntimeInfo';
+import { useDesktopBackendRecovery } from '../hooks/useDesktopBackendRecovery';
+import { BackendRecoveryBanner } from './BackendRecoveryBanner';
+import { LanguageFlag } from './LanguageFlag';
 
 const workflowStepBlueprint = [
   {
@@ -50,6 +53,7 @@ const AppShell = () => {
   const { currentLanguage, languages, locale, setLocale, t } = useTranslation();
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const backendHealth = useBackendHealth();
+  const backendRecovery = useDesktopBackendRecovery(backendHealth.status);
   const runtimeInfo = useRuntimeInfo();
   const isImportStepComplete = useImportStepCompletion();
   const { sourceSelection, destinationSelection } = useFolderSelections();
@@ -134,18 +138,8 @@ const AppShell = () => {
         </section>
 
         <div className="sidebar-footer">
-          {runtimeInfo && (
-            <a
-              className="runtime-version"
-              href="https://github.com/JosueArevalo/media-organizer/releases"
-              target="_blank"
-              rel="noreferrer"
-              title={t('app.version.openReleases')}
-            >
-              v{runtimeInfo.version}
-            </a>
-          )}
-          <div className="language-selector">
+          <div className="sidebar-footer-controls">
+            <div className="language-selector">
             <button
               className="settings-btn language-btn"
               type="button"
@@ -155,7 +149,7 @@ const AppShell = () => {
               aria-expanded={isLanguageMenuOpen}
               onClick={() => setIsLanguageMenuOpen((current) => !current)}
             >
-              <span aria-hidden="true">{currentLanguage.flag}</span>
+              <LanguageFlag locale={currentLanguage.locale} />
               <span>{currentLanguage.shortLabel}</span>
             </button>
             {isLanguageMenuOpen && (
@@ -172,27 +166,40 @@ const AppShell = () => {
                       setIsLanguageMenuOpen(false);
                     }}
                   >
-                    <span aria-hidden="true">{language.flag}</span>
+                    <LanguageFlag locale={language.locale} />
                     <span>{language.label}</span>
                   </button>
                 ))}
               </div>
             )}
+            </div>
+            <button
+              className="settings-btn theme-btn"
+              type="button"
+              title={theme === 'dark' ? t('theme.switchToLight') : t('theme.switchToDark')}
+              aria-label={theme === 'dark' ? t('theme.switchToLight') : t('theme.switchToDark')}
+              aria-pressed={theme === 'dark'}
+              onClick={toggleTheme}
+            >
+              {theme === 'dark' ? `☀️ ${t('theme.light')}` : `🌙 ${t('theme.dark')}`}
+            </button>
           </div>
-          <button
-            className="settings-btn theme-btn"
-            type="button"
-            title={theme === 'dark' ? t('theme.switchToLight') : t('theme.switchToDark')}
-            aria-label={theme === 'dark' ? t('theme.switchToLight') : t('theme.switchToDark')}
-            aria-pressed={theme === 'dark'}
-            onClick={toggleTheme}
-          >
-            {theme === 'dark' ? `☀️ ${t('theme.light')}` : `🌙 ${t('theme.dark')}`}
-          </button>
+          {runtimeInfo && (
+            <a
+              className="runtime-version"
+              href="https://github.com/JosueArevalo/media-organizer/releases"
+              target="_blank"
+              rel="noreferrer"
+              title={t('app.version.openReleases')}
+            >
+              v{runtimeInfo.version}
+            </a>
+          )}
         </div>
       </aside>
 
       <div className="main-zen">
+        <BackendRecoveryBanner recovery={backendRecovery} />
         <main className="content-zen">
           <Outlet />
         </main>

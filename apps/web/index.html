@@ -4,20 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Media Organizer Dashboard</title>
-    <script>
-      (function () {
-        try {
-          var storageKey = 'media-organizer-theme';
-          var savedTheme = localStorage.getItem(storageKey);
-          var theme = savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : 'dark';
-          document.documentElement.dataset.theme = theme;
-          document.documentElement.style.colorScheme = theme;
-        } catch (error) {
-          document.documentElement.dataset.theme = 'dark';
-          document.documentElement.style.colorScheme = 'dark';
-        }
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>

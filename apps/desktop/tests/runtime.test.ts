@@ -19,6 +19,20 @@ test('development runtime keeps durable data in userData', () => {
   };
   const paths = resolveDesktopRuntimePaths(fakeApp as never);
   assert.equal(paths.dataDir, path.join(fakeApp.getPath(), 'data'));
+  assert.equal(paths.workingDirectory, fakeApp.getAppPath());
   assert.equal(paths.workerPath, null);
   assert.match(paths.webRoot, /apps[\\/]web[\\/]dist$/);
+});
+
+test('packaged runtime uses the real resources directory instead of app.asar as cwd', () => {
+  const fakeApp = {
+    isPackaged: true,
+    getAppPath: () => 'C:\\portable\\resources\\app.asar',
+    getPath: () => 'C:\\Users\\test\\AppData\\Roaming\\Media Organizer'
+  };
+  const resourcesPath = 'C:\\portable\\resources';
+  const paths = resolveDesktopRuntimePaths(fakeApp as never, resourcesPath);
+  assert.equal(paths.workingDirectory, resourcesPath);
+  assert.notEqual(paths.workingDirectory, fakeApp.getAppPath());
+  assert.equal(paths.backendEntry, path.join(resourcesPath, 'backend', 'dist', 'desktop.js'));
 });

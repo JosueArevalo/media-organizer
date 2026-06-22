@@ -1,7 +1,10 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { en } from './i18n/locales/en';
+import { initializeDocumentTheme } from './hooks/useTheme';
 import './styles.css';
+
+initializeDocumentTheme();
 
 let hasRenderedApp = false;
 

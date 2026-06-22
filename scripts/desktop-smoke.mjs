@@ -6,12 +6,23 @@ import { spawn } from 'node:child_process';
 
 const root = process.cwd();
 const electron = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
+const executableArgumentIndex = process.argv.indexOf('--executable');
+const portableExecutable = executableArgumentIndex >= 0 ? path.resolve(process.argv[executableArgumentIndex + 1] ?? '') : null;
+const executable = portableExecutable || electron;
+
+if (!fs.existsSync(executable)) {
+  throw new Error(`Desktop executable was not found: ${executable}`);
+}
+
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-desktop-smoke-'));
 const userData = path.join(temp, 'user-data');
 
 const run = (name, value, expected = '') => new Promise((resolve, reject) => {
   const report = path.join(temp, `${name}.json`);
-  const child = spawn(electron, [root, `--user-data-dir=${userData}`], {
+  const launchArgs = portableExecutable
+    ? [`--user-data-dir=${userData}`, '--disable-gpu']
+    : [root, `--user-data-dir=${userData}`, '--disable-gpu'];
+  const child = spawn(executable, launchArgs, {
     cwd: root,
     env: {
       ...process.env,
@@ -32,6 +43,12 @@ const run = (name, value, expected = '') => new Promise((resolve, reject) => {
 const first = await run('first', 'persisted');
 assert.equal(first.status, 200);
 assert.equal(first.runtime.mode, 'desktop');
+assert.equal(first.rendered, true);
+assert.equal(first.bridgeAvailable, true);
+assert.equal(first.backendState?.status, 'online');
 const second = await run('second', 'persisted', 'persisted');
 assert.equal(second.previous, 'persisted');
-console.log('Desktop smoke test passed.');
+assert.equal(second.rendered, true);
+assert.equal(second.bridgeAvailable, true);
+assert.equal(second.backendState?.status, 'online');
+console.log(`Desktop smoke test passed (${portableExecutable ? 'portable' : 'development'} executable).`);
