@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
+import { createTaskQueue, runCommand } from './previewExecution.js';
 import { getDb } from '../../state/db.js';
 import { runMigrations } from '../../state/migrations/runMigrations.js';
 import type { MediaType } from '../../state/dto/state.types.js';
@@ -130,6 +130,8 @@ const THUMBNAIL_MAX_SIZE = '360x360';
 const THUMBNAIL_QUALITY = '78';
 const THUMBNAIL_MAX_DIMENSION = 360;
 const thumbnailGenerationByPath = new Map<string, Promise<void>>();
+const heicSupportByCommand = new Map<string, Promise<void>>();
+const runPreviewTask = createTaskQueue(2);
 
 export class GroupingPreviewError extends Error {
   constructor(message: string) {
@@ -1881,28 +1883,30 @@ const getPreviewFileName = (itemId: string) => `${getSafePreviewId(itemId)}.jpg`
 
 const getThumbnailFileName = (itemId: string) => `${getSafePreviewId(itemId)}-thumb.jpg`;
 
-const runImageMagick = (imageMagickCommand: string, args: string[]) =>
-  spawnSync(imageMagickCommand, args, {
-    encoding: 'utf8',
-    shell: process.platform === 'win32' && ['.cmd', '.bat'].includes(path.extname(imageMagickCommand).toLowerCase())
-  });
+const runImageMagick = (imageMagickCommand: string, args: string[], timeoutMs: number) => runCommand({
+  command: imageMagickCommand,
+  args,
+  timeoutMs,
+  shell: process.platform === 'win32' && ['.cmd', '.bat'].includes(path.extname(imageMagickCommand).toLowerCase())
+});
 
-const ensureHeicPreviewSupport = (imageMagickCommand: string) => {
-  const result = runImageMagick(imageMagickCommand, ['identify', '-list', 'format']);
-
-  if (result.error) {
-    throw new GroupingPreviewError(`ImageMagick command not found: ${imageMagickCommand}`);
-  }
-
-  if (result.status !== 0) {
-    const stderr = (result.stderr ?? '').trim();
-    throw new GroupingPreviewError(stderr || 'Could not verify ImageMagick HEIC support.');
-  }
-
-  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.toUpperCase();
-
-  if (!output.includes('HEIC') && !output.includes('HEIF')) {
-    throw new GroupingPreviewError('ImageMagick is installed, but HEIC/HEIF support was not found. Install a build with libheif.');
+const ensureHeicPreviewSupport = async (imageMagickCommand: string) => {
+  const existing = heicSupportByCommand.get(imageMagickCommand);
+  if (existing) return await existing;
+  const check = (async () => {
+    const result = await runImageMagick(imageMagickCommand, ['identify', '-list', 'format'], 15_000);
+    if (result.exitCode !== 0) throw new GroupingPreviewError(result.stderr.trim() || 'Could not verify ImageMagick HEIC support.');
+    const output = `${result.stdout}\n${result.stderr}`.toUpperCase();
+    if (!output.includes('HEIC') && !output.includes('HEIF')) {
+      throw new GroupingPreviewError('ImageMagick is installed, but HEIC/HEIF support was not found. Install a build with libheif.');
+    }
+  })();
+  heicSupportByCommand.set(imageMagickCommand, check);
+  try {
+    await check;
+  } catch (error) {
+    heicSupportByCommand.delete(imageMagickCommand);
+    throw error instanceof GroupingPreviewError ? error : new GroupingPreviewError(error instanceof Error ? error.message : String(error));
   }
 };
 
@@ -1913,36 +1917,34 @@ const generateImageDerivative = (input: {
   maxSize: string;
   quality: string;
   verifyHeicSupport: boolean;
-}) => {
+}) => runPreviewTask(async () => {
   if (input.verifyHeicSupport) {
-    ensureHeicPreviewSupport(input.imageMagickCommand);
+    await ensureHeicPreviewSupport(input.imageMagickCommand);
   }
 
   fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
-
-  const result = runImageMagick(input.imageMagickCommand, [
-    input.sourcePath,
-    '-auto-orient',
-    '-colorspace',
-    'sRGB',
-    '-resize',
-    input.maxSize,
-    '-quality',
-    input.quality,
-    input.outputPath
-  ]);
-
-  if (result.error) {
-    throw new GroupingPreviewError(`ImageMagick command not found: ${input.imageMagickCommand}`);
+  const temporaryPath = `${input.outputPath}.${randomUUID()}.tmp.jpg`;
+  try {
+    const result = await runImageMagick(input.imageMagickCommand, [
+      input.sourcePath, '-auto-orient', '-colorspace', 'sRGB', '-resize', input.maxSize,
+      '-quality', input.quality, temporaryPath
+    ], 30_000);
+    if (result.exitCode !== 0) throw new GroupingPreviewError(result.stderr.trim() || 'Could not generate media preview.');
+    try {
+      await fs.promises.rename(temporaryPath, input.outputPath);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST' && code !== 'EPERM') throw error;
+      await fs.promises.rm(input.outputPath, { force: true });
+      await fs.promises.rename(temporaryPath, input.outputPath);
+    }
+  } catch (error) {
+    await fs.promises.rm(temporaryPath, { force: true });
+    throw error instanceof GroupingPreviewError ? error : new GroupingPreviewError(error instanceof Error ? error.message : String(error));
   }
+});
 
-  if (result.status !== 0) {
-    const stderr = (result.stderr ?? '').trim();
-    throw new GroupingPreviewError(stderr || 'Could not generate media preview.');
-  }
-};
-
-const generateHeicPreview = (imageMagickCommand: string, sourcePath: string, previewPath: string) => {
+const generateHeicPreview = (imageMagickCommand: string, sourcePath: string, previewPath: string) =>
   generateImageDerivative({
     imageMagickCommand,
     sourcePath,
@@ -1951,7 +1953,6 @@ const generateHeicPreview = (imageMagickCommand: string, sourcePath: string, pre
     quality: PREVIEW_QUALITY,
     verifyHeicSupport: true
   });
-};
 
 const generateWebSafeThumbnail = async (sourcePath: string, thumbnailPath: string) => {
   const pendingGeneration = thumbnailGenerationByPath.get(thumbnailPath);
@@ -1961,12 +1962,13 @@ const generateWebSafeThumbnail = async (sourcePath: string, thumbnailPath: strin
     return;
   }
 
-  const generation = (async () => {
+  const generation = runPreviewTask(async () => {
     fs.mkdirSync(path.dirname(thumbnailPath), { recursive: true });
     const temporaryPath = `${thumbnailPath}.${randomUUID()}.tmp.jpg`;
 
     try {
       await sharp(sourcePath, { animated: false })
+        .timeout({ seconds: 30 })
         .rotate()
         .toColourspace('srgb')
         .resize({
@@ -1996,7 +1998,7 @@ const generateWebSafeThumbnail = async (sourcePath: string, thumbnailPath: strin
         error instanceof Error ? `Could not generate media thumbnail: ${error.message}` : 'Could not generate media thumbnail.'
       );
     }
-  })();
+  });
 
   thumbnailGenerationByPath.set(thumbnailPath, generation);
 
@@ -2017,7 +2019,7 @@ const isPreviewFresh = (sourcePath: string, previewPath: string) => {
   return previewStats.mtimeMs >= sourceStats.mtimeMs;
 };
 
-export const getGroupingPreviewPath = (sessionId: string, itemId: string) => {
+export const getGroupingPreviewPath = async (sessionId: string, itemId: string) => {
   const workspace = getGroupingWorkspace(sessionId);
 
   if (!workspace) {
@@ -2064,7 +2066,7 @@ export const getGroupingPreviewPath = (sessionId: string, itemId: string) => {
   if (!isPreviewFresh(item.outputPath, previewPath)) {
     const compressionManifest = getCompressionManifest(workspace.compressionSessionId);
     const imageMagickCommand = getImageMagickPreviewCommand(compressionManifest);
-    generateHeicPreview(imageMagickCommand, item.outputPath, previewPath);
+    await generateHeicPreview(imageMagickCommand, item.outputPath, previewPath);
   }
 
   return {
@@ -2112,7 +2114,7 @@ export const getGroupingThumbnailPath = async (sessionId: string, itemId: string
     } else {
       const compressionManifest = getCompressionManifest(workspace.compressionSessionId);
       const imageMagickCommand = getImageMagickPreviewCommand(compressionManifest);
-      generateImageDerivative({
+      await generateImageDerivative({
         imageMagickCommand,
         sourcePath: item.outputPath,
         outputPath: thumbnailPath,

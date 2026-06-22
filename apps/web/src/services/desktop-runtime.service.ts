@@ -15,6 +15,7 @@ type DesktopBridge = {
   restartBackend: () => Promise<DesktopBackendState>;
   openLogsFolder: () => Promise<{ ok: boolean; message?: string }>;
   copyDiagnostics: () => Promise<{ ok: boolean }>;
+  reportBackendUnresponsive: () => Promise<void>;
   onBackendState: (listener: (state: DesktopBackendState) => void) => () => void;
 };
 

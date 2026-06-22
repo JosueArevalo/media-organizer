@@ -1,6 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { createBackendServer } from './index.js';
 import { requestAllCompressionProcessesPause } from './pipeline/compression/compressionProcessRegistry.js';
+import { getActiveGroupingMediaOperations } from './pipeline/grouping/groupingMediaDiagnostics.js';
 
 type DesktopParentMessage = { type?: string };
 type UtilityParentPort = {
@@ -19,6 +20,15 @@ const sendParentMessage = (message: unknown) => {
 };
 
 const server = createBackendServer();
+let expectedWatchdogAt = Date.now() + 1000;
+setInterval(() => {
+  const now = Date.now();
+  const lagMs = now - expectedWatchdogAt;
+  expectedWatchdogAt = now + 1000;
+  if (lagMs >= 5000) {
+    console.error(`[backend-watchdog] event-loop-lag durationMs=${lagMs} activeGroupingMedia=${JSON.stringify(getActiveGroupingMediaOperations())}`);
+  }
+}, 1000).unref();
 
 const shutdown = () => {
   requestAllCompressionProcessesPause();

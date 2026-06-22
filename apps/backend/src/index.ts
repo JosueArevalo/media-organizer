@@ -48,6 +48,7 @@ import {
 } from './http/localAccess.js';
 import { readRequestJson, sendCaughtError, sendEmpty, sendJson } from './http/httpResponses.js';
 import { getRuntimeInfo } from './runtime/runtimeInfo.js';
+import { beginGroupingMediaOperation } from './pipeline/grouping/groupingMediaDiagnostics.js';
 
 const port = Number(process.env.PORT ?? 4000);
 const BACKEND_HEALTH_OFFLINE_REPORT_PATH = '/api/health/offline-report';
@@ -254,6 +255,28 @@ const streamMediaFile = (
     'Content-Range': `bytes ${start}-${end}/${stats.size}`
   });
   pipeStream(fs.createReadStream(filePath, { start, end }));
+};
+
+const traceGroupingMediaRequest = (
+  req: import('node:http').IncomingMessage,
+  res: import('node:http').ServerResponse,
+  operation: 'media' | 'preview' | 'thumbnail',
+  sessionId: string,
+  itemId: string
+) => {
+  const item = getGroupingWorkspace(sessionId)?.items.find((candidate) => candidate.id === itemId);
+  const trace = beginGroupingMediaOperation({
+    operation,
+    sessionId,
+    itemId,
+    fileName: item?.fileName ?? 'unknown'
+  });
+  req.once('aborted', () => trace.finish('aborted'));
+  res.once('finish', () => trace.finish('completed'));
+  res.once('close', () => {
+    if (!res.writableFinished) trace.finish('aborted');
+  });
+  return trace;
 };
 
 export const createBackendServer = (appliedMigrations = runMigrations()) => {
@@ -696,6 +719,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     }
 
     if (req.method === 'GET' && subPath === 'items' && subId && tailPath === 'media') {
+      const trace = traceGroupingMediaRequest(req, res, 'media', sessionId, subId);
       try {
         const media = getGroupingMediaPath(sessionId, subId);
 
@@ -706,6 +730,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
 
         streamMediaFile(req, res, media.path);
       } catch (error) {
+        trace.finish('failed', error);
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not stream media.'
@@ -716,8 +741,9 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     }
 
     if (req.method === 'GET' && subPath === 'items' && subId && tailPath === 'preview') {
+      const trace = traceGroupingMediaRequest(req, res, 'preview', sessionId, subId);
       try {
-        const media = getGroupingPreviewPath(sessionId, subId);
+        const media = await getGroupingPreviewPath(sessionId, subId);
 
         if (!media || !fs.existsSync(media.path)) {
           sendJson(res, 404, { status: 'not_found' });
@@ -726,6 +752,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
 
         streamMediaFile(req, res, media.path);
       } catch (error) {
+        trace.finish('failed', error);
         if (error instanceof GroupingPreviewError) {
           sendJson(res, 422, {
             status: 'preview_unavailable',
@@ -744,6 +771,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     }
 
     if (req.method === 'GET' && subPath === 'items' && subId && tailPath === 'thumbnail') {
+      const trace = traceGroupingMediaRequest(req, res, 'thumbnail', sessionId, subId);
       try {
         const media = await getGroupingThumbnailPath(sessionId, subId);
 
@@ -754,6 +782,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
 
         streamMediaFile(req, res, media.path, 'private, max-age=86400');
       } catch (error) {
+        trace.finish('failed', error);
         if (error instanceof GroupingPreviewError) {
           sendJson(res, 422, {
             status: 'preview_unavailable',

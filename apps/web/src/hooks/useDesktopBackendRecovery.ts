@@ -30,6 +30,7 @@ export const useDesktopBackendRecovery = (healthStatus: BackendHealthStatus) => 
       offlineTimer.current = window.setTimeout(() => {
         offlineTimer.current = null;
         setIsSustainedOffline(true);
+        void bridge.reportBackendUnresponsive().catch(() => undefined);
       }, SUSTAINED_OFFLINE_DELAY_MS);
     }
 

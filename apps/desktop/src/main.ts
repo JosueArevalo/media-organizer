@@ -220,6 +220,10 @@ void app.whenReady().then(async () => {
       logger.write('desktop', 'Diagnostic summary copied to clipboard.');
       return { ok: true };
     });
+    ipcMain.handle('desktop:report-backend-unresponsive', (event) => {
+      requireTrustedIpc(event);
+      logger.write('renderer:health', 'Backend health remained offline for at least 30000ms while the process was still running.');
+    });
 
     oauthBridge = new OAuthCallbackBridge(() => {
       const port = backendLifecycle!.getPort();
