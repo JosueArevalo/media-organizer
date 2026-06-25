@@ -42,7 +42,7 @@ const getPosterSeekTime = (duration: number) => {
   return Math.min(Math.max(duration * 0.1, 0.25), 1);
 };
 
-const captureVideoPoster = (url: string) =>
+const captureVideoPosterFromObjectUrl = (url: string) =>
   new Promise<string>((resolve, reject) => {
     const video = document.createElement('video');
     let finished = false;
@@ -103,13 +103,32 @@ const captureVideoPoster = (url: string) =>
     video.load();
   });
 
+const captureVideoPoster = async (url: string) => {
+  let objectUrl: string | null = null;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Video poster request failed with ${response.status}.`);
+    objectUrl = URL.createObjectURL(await response.blob());
+    return await captureVideoPosterFromObjectUrl(objectUrl);
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }
+};
+
 export const getCachedVideoPoster = (cacheKey: string) => posterCache.get(cacheKey) ?? null;
 
-export const generateVideoPoster = async (cacheKey: string, url: string) => {
+export const generateVideoPoster = async (cacheKey: string, url: string, fallbackUrl?: string) => {
   const cached = getCachedVideoPoster(cacheKey);
   if (cached) return cached;
 
-  const poster = await enqueuePosterTask(() => captureVideoPoster(url));
+  const poster = await enqueuePosterTask(async () => {
+    try {
+      return await captureVideoPoster(url);
+    } catch (error) {
+      if (!fallbackUrl || fallbackUrl === url) throw error;
+      return await captureVideoPoster(fallbackUrl);
+    }
+  });
   posterCache.set(cacheKey, poster);
   return poster;
 };

@@ -18,6 +18,7 @@ test('Grouping grid uses thumbnails and avoids persistent video streams', () => 
   assert.match(pageSource, /buildGroupingPreviewUrl\(workspace\.sessionId, previewItem\.id\)/);
   assert.match(pageSource, /generateVideoPoster/);
   assert.match(pageSource, /videoPosterCacheKey/);
+  assert.match(pageSource, /videoPosterFallbackUrl/);
   assert.match(pageSource, /GROUPING_GRID_INITIAL_LIMIT/);
   assert.match(pageSource, /const GroupingMediaPreview =/);
   assert.match(pageSource, /IntersectionObserver/);

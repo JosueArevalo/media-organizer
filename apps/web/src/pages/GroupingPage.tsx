@@ -251,6 +251,7 @@ type GroupingMediaPreviewProps = {
   item: GroupingWorkspaceItem;
   imageThumbnailUrl: string;
   videoPosterSourceUrl: string;
+  videoPosterFallbackUrl: string;
   videoPosterCacheKey: string;
   hasPreviewFailed: boolean;
   previewUnavailableLabel: string;
@@ -262,6 +263,7 @@ const GroupingMediaPreview = ({
   item,
   imageThumbnailUrl,
   videoPosterSourceUrl,
+  videoPosterFallbackUrl,
   videoPosterCacheKey,
   hasPreviewFailed,
   previewUnavailableLabel,
@@ -288,7 +290,7 @@ const GroupingMediaPreview = ({
 
     let cancelled = false;
     const loadPoster = () => {
-      void generateVideoPoster(videoPosterCacheKey, videoPosterSourceUrl)
+      void generateVideoPoster(videoPosterCacheKey, videoPosterSourceUrl, videoPosterFallbackUrl)
         .then((posterUrl) => {
           if (!cancelled) setVideoPosterUrl(posterUrl);
         })
@@ -320,7 +322,7 @@ const GroupingMediaPreview = ({
       cancelled = true;
       observer.disconnect();
     };
-  }, [hasPreviewFailed, item.id, item.mediaType, onPreviewFailed, videoPosterCacheKey, videoPosterSourceUrl]);
+  }, [hasPreviewFailed, item.id, item.mediaType, onPreviewFailed, videoPosterCacheKey, videoPosterFallbackUrl, videoPosterSourceUrl]);
 
   return (
     <button ref={previewRef} className="grouping-media-preview" type="button" onDoubleClick={onOpenPreview}>
@@ -1931,6 +1933,7 @@ export const GroupingPage = () => {
                       item={item}
                       imageThumbnailUrl={itemThumbnailUrl}
                       videoPosterSourceUrl={itemVideoPosterUrl}
+                      videoPosterFallbackUrl={itemMediaUrl}
                       videoPosterCacheKey={itemVideoPosterCacheKey}
                       hasPreviewFailed={hasThumbnailFailed}
                       previewUnavailableLabel={t('grouping.previewUnavailable')}
