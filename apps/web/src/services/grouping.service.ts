@@ -219,6 +219,8 @@ export const deleteGroupingTemplateRequest = async (templateId: string) => {
 
 export const buildGroupingMediaUrl = (sessionId: string, itemId: string) => `/api/grouping/${sessionId}/items/${itemId}/media`;
 
+export const buildGroupingVideoPosterUrl = (sessionId: string, itemId: string) => `/api/grouping/${sessionId}/items/${itemId}/media?usage=poster`;
+
 export const buildGroupingPreviewUrl = (sessionId: string, itemId: string) => `/api/grouping/${sessionId}/items/${itemId}/preview`;
 
 export const buildGroupingThumbnailUrl = (sessionId: string, itemId: string) => `/api/grouping/${sessionId}/items/${itemId}/thumbnail`;

@@ -76,3 +76,14 @@ test('backend lifecycle keeps a failed restart offline with an incident', async 
   assert.equal(lifecycle.getSnapshot().status, 'offline');
   assert.match(lifecycle.getSnapshot().incident?.message ?? '', /launch failed/);
 });
+
+test('backend lifecycle records sustained health outages as incidents without changing status', async () => {
+  const handle = createHandle(4100);
+  const lifecycle = createBackendLifecycle({ launch: async () => handle, log: () => undefined });
+  await lifecycle.start();
+  lifecycle.reportUnresponsive('Active grouping media operations: request=abc operation=media file="clip.mp4"');
+  const snapshot = lifecycle.getSnapshot();
+  assert.equal(snapshot.status, 'online');
+  assert.equal(snapshot.incident?.reason, 'health-offline-timeout');
+  assert.match(snapshot.incident?.details ?? '', /clip\.mp4/);
+});

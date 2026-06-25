@@ -32,6 +32,21 @@ let backendLifecycle: ReturnType<typeof createBackendLifecycle> | null = null;
 let oauthBridge: OAuthCallbackBridge | null = null;
 let isQuitting = false;
 
+const summarizeActiveGroupingMedia = (logTail: string) => {
+  const active = new Map<string, string>();
+  for (const line of logTail.split(/\r?\n/)) {
+    const start = line.match(/\[grouping-media\] start request=([^\s]+).*operation=([^\s]+).*file=(".*"|[^\s]+)/);
+    if (start) {
+      active.set(start[1], `request=${start[1]} operation=${start[2]} file=${start[3]}`);
+      continue;
+    }
+    const finish = line.match(/\[grouping-media\] finish request=([^\s]+)/);
+    if (finish) active.delete(finish[1]);
+  }
+
+  return [...active.values()].slice(-8);
+};
+
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) {
   app.quit();
@@ -222,7 +237,13 @@ void app.whenReady().then(async () => {
     });
     ipcMain.handle('desktop:report-backend-unresponsive', (event) => {
       requireTrustedIpc(event);
-      logger.write('renderer:health', 'Backend health remained offline for at least 30000ms while the process was still running.');
+      const activeGroupingMedia = summarizeActiveGroupingMedia(logger.getTail());
+      const details = activeGroupingMedia.length > 0
+        ? `Active grouping media operations: ${activeGroupingMedia.join(' | ')}`
+        : 'No active grouping media operations were found in the recent log tail.';
+      logger.write('renderer:health', `Backend health remained offline for at least 30000ms while the process was still running. ${details}`);
+      backendLifecycle!.reportUnresponsive(details);
+      broadcastState(backendLifecycle!.getSnapshot());
     });
 
     oauthBridge = new OAuthCallbackBridge(() => {

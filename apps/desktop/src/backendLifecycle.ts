@@ -5,6 +5,7 @@ export type BackendIncident = {
   message: string;
   exitCode: number | null;
   reason: string;
+  details?: string;
 };
 
 export type BackendLifecycleSnapshot = {
@@ -135,6 +136,18 @@ export const createBackendLifecycle = ({ launch, log, stopTimeoutMs = 5000 }: Ba
         pendingRestart = null;
       });
       return pendingRestart;
+    },
+    reportUnresponsive(details?: string) {
+      publish({
+        status: snapshot.status,
+        incident: {
+          occurredAt: new Date().toISOString(),
+          message: 'The backend health check stayed offline while the backend process was still running.',
+          exitCode: null,
+          reason: 'health-offline-timeout',
+          details
+        }
+      });
     },
     async stop() {
       await stopCurrent();

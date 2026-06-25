@@ -17,13 +17,13 @@ export const createDesktopLogger = (logsDir: string) => {
 
   const timestamp = new Date().toISOString().replaceAll(':', '-');
   const filePath = path.join(logsDir, `desktop-${timestamp}.log`);
-  const stream = fs.createWriteStream(filePath, { flags: 'a' });
+  fs.closeSync(fs.openSync(filePath, 'a'));
   const recentLines: string[] = [];
   const write = (scope: string, value: string) => {
     const line = `${new Date().toISOString()} [${scope}] ${value.trimEnd()}`;
     recentLines.push(line);
     if (recentLines.length > MAX_RECENT_LINES) recentLines.splice(0, recentLines.length - MAX_RECENT_LINES);
-    stream.write(`${line}\n`);
+    fs.appendFileSync(filePath, `${line}\n`, 'utf8');
   };
 
   return {
@@ -33,6 +33,6 @@ export const createDesktopLogger = (logsDir: string) => {
     write,
     filePath,
     getTail: () => recentLines.join('\n'),
-    close: () => stream.end()
+    close: () => undefined
   };
 };

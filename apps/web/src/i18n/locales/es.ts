@@ -440,6 +440,7 @@ export const es: TranslationDictionary = {
   'grouping.selectVisible': 'Seleccionar visibles',
   'grouping.showMoreMedia': 'Mostrar mas ({shown} / {total})',
   'grouping.loadingWorkspace': 'Cargando espacio de trabajo...',
+  'grouping.loadingVideo': 'Cargando vista previa de vídeo...',
   'grouping.noDate': 'Sin fecha',
   'grouping.preservedStructure': 'Mantiene estructura original',
   'grouping.setupRules': '¿Cómo quieres organizar tus archivos?',

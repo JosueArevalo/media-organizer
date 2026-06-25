@@ -7,6 +7,7 @@ export type DesktopBackendState = {
     message: string;
     exitCode: number | null;
     reason: string;
+    details?: string;
   } | null;
 };
 

@@ -438,6 +438,7 @@ export const en = {
   'grouping.selectVisible': 'Select visible',
   'grouping.showMoreMedia': 'Show more ({shown} / {total})',
   'grouping.loadingWorkspace': 'Loading workspace...',
+  'grouping.loadingVideo': 'Loading video preview...',
   'grouping.noDate': 'No date',
   'grouping.preservedStructure': 'Keeps original structure',
   'grouping.setupRules': 'How should your media be organized?',

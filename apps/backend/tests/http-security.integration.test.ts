@@ -145,6 +145,8 @@ const seedCompressionSession = (input: {
   outputDir: string;
   relativePath: string;
   imageMagickCommand: string;
+  mediaType?: 'image' | 'video';
+  outputContent?: string | Buffer;
 }) => {
   const db = getDb();
   const now = new Date().toISOString();
@@ -155,8 +157,8 @@ const seedCompressionSession = (input: {
 
   fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(sourcePath, 'source image');
-  fs.writeFileSync(outputPath, 'output image');
+  fs.writeFileSync(sourcePath, input.outputContent ?? 'source image');
+  fs.writeFileSync(outputPath, input.outputContent ?? 'output image');
 
   db.prepare(
     `
@@ -179,9 +181,9 @@ const seedCompressionSession = (input: {
         capture_time,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, 'image', 'camera', NULL, 100, NULL, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, 'camera', NULL, 100, NULL, ?, ?)
     `
-  ).run(itemId, compressionSessionId, sourcePath, input.relativePath, now, now);
+  ).run(itemId, compressionSessionId, sourcePath, input.relativePath, input.mediaType ?? 'image', now, now);
 
   db.prepare(
     `
@@ -330,6 +332,121 @@ test('grouping thumbnail endpoint returns a cached JPEG preview', async () => {
   assert.equal(thumbnailResponse.headers['content-type'], 'image/jpeg');
   assert.equal(thumbnailResponse.headers['cache-control'], 'private, max-age=86400');
   assert.ok(Number(thumbnailResponse.headers['content-length']) > 0);
+});
+
+test('grouping video media without poster usage can stream the full file', async () => {
+  const sourceDir = path.join(tempRoot, 'video-source');
+  const outputDir = path.join(tempRoot, 'video-output');
+  fs.rmSync(sourceDir, { recursive: true, force: true });
+  fs.rmSync(outputDir, { recursive: true, force: true });
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const content = Buffer.alloc(2 * 1024 * 1024, 'v');
+  const compressionSessionId = seedCompressionSession({
+    sourceDir,
+    outputDir,
+    relativePath: 'clip.mp4',
+    imageMagickCommand: '',
+    mediaType: 'video',
+    outputContent: content
+  });
+
+  const workspaceResponse = await request({
+    method: 'POST',
+    path: '/api/grouping/workspace',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sourceDir,
+      outputDir,
+      compressionSessionId
+    })
+  });
+
+  assert.equal(workspaceResponse.statusCode, 201);
+  const workspace = JSON.parse(workspaceResponse.body) as { sessionId: string; items: Array<{ id: string }> };
+  const mediaResponse = await request({
+    path: `/api/grouping/${workspace.sessionId}/items/${workspace.items[0].id}/media`
+  });
+
+  assert.equal(mediaResponse.statusCode, 200);
+  assert.equal(mediaResponse.headers['content-type'], 'video/mp4');
+  assert.equal(mediaResponse.headers['content-length'], String(content.length));
+  assert.equal(mediaResponse.headers['content-range'], undefined);
+  assert.equal(Buffer.byteLength(mediaResponse.body), content.length);
+});
+
+test('grouping video poster usage bounds open-ended ranges', async () => {
+  const sourceDir = path.join(tempRoot, 'video-range-source');
+  const outputDir = path.join(tempRoot, 'video-range-output');
+  fs.rmSync(sourceDir, { recursive: true, force: true });
+  fs.rmSync(outputDir, { recursive: true, force: true });
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const content = Buffer.alloc(14 * 1024 * 1024, 'r');
+  const compressionSessionId = seedCompressionSession({
+    sourceDir,
+    outputDir,
+    relativePath: 'clip.mp4',
+    imageMagickCommand: '',
+    mediaType: 'video',
+    outputContent: content
+  });
+
+  const workspaceResponse = await request({
+    method: 'POST',
+    path: '/api/grouping/workspace',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceDir, outputDir, compressionSessionId })
+  });
+
+  assert.equal(workspaceResponse.statusCode, 201);
+  const workspace = JSON.parse(workspaceResponse.body) as { sessionId: string; items: Array<{ id: string }> };
+  const mediaResponse = await request({
+    path: `/api/grouping/${workspace.sessionId}/items/${workspace.items[0].id}/media?usage=poster`,
+    headers: { Range: 'bytes=1048576-' }
+  });
+
+  assert.equal(mediaResponse.statusCode, 206);
+  assert.equal(mediaResponse.headers['content-length'], String(12 * 1024 * 1024));
+  assert.equal(mediaResponse.headers['content-range'], `bytes 1048576-${13 * 1024 * 1024 - 1}/${content.length}`);
+});
+
+test('grouping video poster usage bounds requests without Range', async () => {
+  const sourceDir = path.join(tempRoot, 'video-poster-source');
+  const outputDir = path.join(tempRoot, 'video-poster-output');
+  fs.rmSync(sourceDir, { recursive: true, force: true });
+  fs.rmSync(outputDir, { recursive: true, force: true });
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const content = Buffer.alloc(14 * 1024 * 1024, 'p');
+  const compressionSessionId = seedCompressionSession({
+    sourceDir,
+    outputDir,
+    relativePath: 'clip.mp4',
+    imageMagickCommand: '',
+    mediaType: 'video',
+    outputContent: content
+  });
+
+  const workspaceResponse = await request({
+    method: 'POST',
+    path: '/api/grouping/workspace',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceDir, outputDir, compressionSessionId })
+  });
+
+  assert.equal(workspaceResponse.statusCode, 201);
+  const workspace = JSON.parse(workspaceResponse.body) as { sessionId: string; items: Array<{ id: string }> };
+  const mediaResponse = await request({
+    path: `/api/grouping/${workspace.sessionId}/items/${workspace.items[0].id}/media?usage=poster`
+  });
+
+  assert.equal(mediaResponse.statusCode, 206);
+  assert.equal(mediaResponse.headers['content-length'], String(12 * 1024 * 1024));
+  assert.equal(mediaResponse.headers['content-range'], `bytes 0-${12 * 1024 * 1024 - 1}/${content.length}`);
 });
 
 test('backend health offline reports are logged for local diagnostics', async () => {

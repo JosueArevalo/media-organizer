@@ -53,6 +53,7 @@ import { beginGroupingMediaOperation } from './pipeline/grouping/groupingMediaDi
 const port = Number(process.env.PORT ?? 4000);
 const BACKEND_HEALTH_OFFLINE_REPORT_PATH = '/api/health/offline-report';
 const MAX_RECENT_HEALTH_PROBES = 8;
+const VIDEO_POSTER_RANGE_BYTES = 12 * 1024 * 1024;
 
 type BackendHealthOfflineReport = {
   previousStatus?: string;
@@ -195,15 +196,18 @@ const streamMediaFile = (
   req: import('node:http').IncomingMessage,
   res: import('node:http').ServerResponse,
   filePath: string,
-  cacheControl = 'private, max-age=3600'
+  cacheControl = 'private, max-age=3600',
+  options: { limitOpenEndedVideoRange?: boolean } = {}
 ) => {
   const stats = fs.statSync(filePath);
   const range = req.headers.range;
+  const contentType = getMediaContentType(filePath);
+  const isVideo = contentType.startsWith('video/');
   const headersBase = {
     'Accept-Ranges': 'bytes',
     'Cache-Control': cacheControl,
     'Last-Modified': stats.mtime.toUTCString(),
-    'Content-Type': getMediaContentType(filePath)
+    'Content-Type': contentType
   };
 
   const pipeStream = (stream: fs.ReadStream) => {
@@ -219,6 +223,17 @@ const streamMediaFile = (
     });
     stream.pipe(res);
   };
+
+  if (!range && isVideo && stats.size > 0 && options.limitOpenEndedVideoRange) {
+    const end = Math.min(stats.size - 1, VIDEO_POSTER_RANGE_BYTES - 1);
+    res.writeHead(206, {
+      ...headersBase,
+      'Content-Length': end + 1,
+      'Content-Range': `bytes 0-${end}/${stats.size}`
+    });
+    pipeStream(fs.createReadStream(filePath, { start: 0, end }));
+    return;
+  }
 
   if (!range) {
     res.writeHead(200, {
@@ -238,7 +253,10 @@ const streamMediaFile = (
   }
 
   const start = match[1] ? Number(match[1]) : 0;
-  const end = match[2] ? Number(match[2]) : stats.size - 1;
+  const requestedEnd = match[2] ? Number(match[2]) : stats.size - 1;
+  const end = isVideo && !match[2] && options.limitOpenEndedVideoRange
+    ? Math.min(stats.size - 1, start + VIDEO_POSTER_RANGE_BYTES - 1)
+    : requestedEnd;
 
   if (start >= stats.size || end >= stats.size || start > end) {
     res.writeHead(416, {
@@ -728,7 +746,9 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
           return;
         }
 
-        streamMediaFile(req, res, media.path);
+        streamMediaFile(req, res, media.path, 'private, max-age=3600', {
+          limitOpenEndedVideoRange: requestUrl.searchParams.get('usage') === 'poster'
+        });
       } catch (error) {
         trace.finish('failed', error);
         sendJson(res, 500, {
