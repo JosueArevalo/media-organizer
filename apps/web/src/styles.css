@@ -3345,6 +3345,58 @@ body {
   gap: 12px;
 }
 
+.grouping-form-dialog-panel {
+  width: min(460px, 94vw);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.4);
+}
+
+.grouping-form-dialog-fields {
+  display: grid;
+  gap: 14px;
+}
+
+.grouping-form-dialog-fields label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.grouping-form-dialog-fields input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.grouping-form-dialog-fields input:focus {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  outline-offset: 1px;
+}
+
+.grouping-form-dialog-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.grouping-form-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .grouping-modal-head {
   display: flex;
   justify-content: space-between;
