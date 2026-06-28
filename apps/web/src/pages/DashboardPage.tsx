@@ -575,30 +575,34 @@ export const DashboardPage = () => {
         <DashboardWelcomePanel preflight={toolPreflight} onClose={handleDismissOnboarding} />
       )}
 
-      <section className="panel panel-highlight dashboard-hero">
-        <div>
-          <p className="panel-kicker">{t('dashboard.status')}</p>
-          <h2 className="panel-title">{currentState.title}</h2>
-          <p className="panel-description">{currentState.description}</p>
-        </div>
-        <div className="action-row">
-          <Link to={currentState.action.to} className="btn btn-primary">
-            {currentState.action.label}
-          </Link>
-          {canStartNewSession && (
-            <button
-              className="btn btn-secondary"
-              type="button"
-              onClick={() => void handleStartNewSession()}
-              disabled={isStartingNewSession}
-            >
-              {isStartingNewSession ? t('dashboard.action.startingNewSession') : t('dashboard.action.startNewSession')}
-            </button>
-          )}
-        </div>
-      </section>
+      {!showOnboarding && (
+        <>
+          <section className="panel panel-highlight dashboard-hero">
+            <div>
+              <p className="panel-kicker">{t('dashboard.status')}</p>
+              <h2 className="panel-title">{currentState.title}</h2>
+              <p className="panel-description">{currentState.description}</p>
+            </div>
+            <div className="action-row">
+              <Link to={currentState.action.to} className="btn btn-primary">
+                {currentState.action.label}
+              </Link>
+              {canStartNewSession && (
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={() => void handleStartNewSession()}
+                  disabled={isStartingNewSession}
+                >
+                  {isStartingNewSession ? t('dashboard.action.startingNewSession') : t('dashboard.action.startNewSession')}
+                </button>
+              )}
+            </div>
+          </section>
 
-      <MediaToolsNotice preflight={toolPreflight} returnTo="/dashboard" />
+          <MediaToolsNotice preflight={toolPreflight} returnTo="/dashboard" />
+        </>
+      )}
 
       {dashboardError && <p className="error">{dashboardError}</p>}
 
