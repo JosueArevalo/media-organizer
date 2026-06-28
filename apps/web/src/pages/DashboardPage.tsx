@@ -9,6 +9,8 @@ import { useTranslation, type TranslationKey } from '../i18n';
 import { resetRuntimeStateWithBackend } from '../services/app-maintenance.store';
 import { useToolPreflight } from '../hooks/useToolPreflight';
 import { MediaToolsNotice } from '../components/MediaToolsNotice';
+import { DashboardWelcomePanel } from '../components/DashboardWelcomePanel';
+import { dismissOnboarding, shouldShowOnboarding } from '../services/dashboard-onboarding.store';
 import {
   deleteDashboardExecution,
   getBackendHealth,
@@ -307,6 +309,7 @@ export const DashboardPage = () => {
   const [expandedExecutionId, setExpandedExecutionId] = useState<string | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const [isStartingNewSession, setIsStartingNewSession] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => shouldShowOnboarding());
   const toolPreflight = useToolPreflight();
 
   const refreshDashboard = async () => {
@@ -557,11 +560,20 @@ export const DashboardPage = () => {
     }
   };
 
+  const handleDismissOnboarding = () => {
+    dismissOnboarding();
+    setShowOnboarding(false);
+  };
+
   return (
     <div className="dashboard-grid dashboard-real">
       <div className="page-header">
         <h1 className="page-title">{t('dashboard.title')}</h1>
       </div>
+
+      {showOnboarding && (
+        <DashboardWelcomePanel preflight={toolPreflight} onClose={handleDismissOnboarding} />
+      )}
 
       <section className="panel panel-highlight dashboard-hero">
         <div>
