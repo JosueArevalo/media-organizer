@@ -2897,6 +2897,11 @@ body {
   gap: 10px;
 }
 
+.grouping-exclusions-leading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .grouping-exclusions-icon {
   align-items: center;
   background: var(--accent-light);
@@ -2922,6 +2927,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.grouping-exclusions-title > strong {
+  white-space: nowrap;
 }
 
 .grouping-exclusions-title > span {
@@ -4605,6 +4614,10 @@ body {
   .grouping-exclusions-actions {
     justify-content: flex-start;
     padding-left: 44px;
+  }
+
+  .grouping-exclusions-title > strong {
+    white-space: normal;
   }
 }
 .backend-recovery-banner {

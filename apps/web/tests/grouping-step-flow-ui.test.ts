@@ -119,6 +119,14 @@ test('grouping date result indents files below their destination folders', () =>
   assert.match(styles, /\.grouping-example-group > ul > li::before/);
 });
 
+test('grouping exclusions heading stays on one line outside narrow mobile layouts', () => {
+  const styles = fs.readFileSync(stylesPath, 'utf8');
+
+  assert.match(styles, /\.grouping-exclusions-leading \{[\s\S]*flex: 1 1 auto;[\s\S]*min-width: 0;/);
+  assert.match(styles, /\.grouping-exclusions-title > strong \{[\s\S]*white-space: nowrap;/);
+  assert.match(styles, /@media \(max-width: 520px\) \{[\s\S]*\.grouping-exclusions-title > strong \{[\s\S]*white-space: normal;/);
+});
+
 test('grouping review no longer locks preserved folders or media cards', () => {
   const pageSource = fs.readFileSync(path.join(pagesRoot, 'GroupingPage.tsx'), 'utf8');
   const english = fs.readFileSync(path.join(i18nRoot, 'en.ts'), 'utf8');
