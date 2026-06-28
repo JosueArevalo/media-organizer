@@ -123,9 +123,15 @@ test('grouping review no longer locks preserved folders or media cards', () => {
 
   assert.match(pageSource, /renamePreservedGroupingFolderScopeRequest/);
   assert.match(pageSource, /handleRenamePreservedFolder/);
+  assert.match(pageSource, /const sidebarEntries = useMemo<GroupingSidebarEntry\[]>\(\(\) => \{/);
+  assert.match(pageSource, /preservedFolderScopes\.map\(\(scope\) => \(\{/);
+  assert.match(pageSource, /workspace\.folders\.map\(\(folder\) => \(\{/);
+  assert.match(pageSource, /\.sort\(\(left, right\) => left\.label\.localeCompare\(right\.label, undefined, \{ sensitivity: 'base' \}\)\)/);
   assert.match(pageSource, /visibleItems\.map\(\(item\) => item\.id\)/);
   assert.match(pageSource, /const canEditItem = canMutateGrouping;/);
-  assert.match(pageSource, /scope\.itemCount > 0/);
+  assert.match(pageSource, /entry\.itemCount > 0/);
+  assert.match(pageSource, /sidebarEntries\.map\(\(entry\) => \(/);
+  assert.doesNotMatch(pageSource, /grouping-folder-list">\s*\{preservedFolderScopes\.map/);
   assert.doesNotMatch(pageSource, /groupingItemLocked/);
   assert.doesNotMatch(pageSource, /grouping-folder-drop-preserved/);
   assert.doesNotMatch(pageSource, /previewItem\.preservedStructure/);

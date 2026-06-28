@@ -100,6 +100,24 @@ type PreservedFolderScope = {
   itemCount: number;
 };
 
+type GroupingSidebarEntry =
+  | {
+      kind: 'preserved';
+      key: string;
+      label: string;
+      itemCount: number;
+      activeLabel: string;
+      scope: PreservedFolderScope;
+    }
+  | {
+      kind: 'folder';
+      key: string;
+      label: string;
+      itemCount: number;
+      activeLabel: string;
+      folder: GroupingWorkspaceFolder;
+    };
+
 const getPreservedFolderActiveLabel = (path: string) => `${PRESERVED_FOLDER_PREFIX}${path}`;
 
 const getActivePreservedFolderPath = (activeFolderLabel: string) =>
@@ -747,6 +765,31 @@ export const GroupingPage = () => {
     () => preservedFolderScopes.find((scope) => scope.activeLabel === activeFolderLabel) ?? null,
     [activeFolderLabel, preservedFolderScopes]
   );
+
+  const sidebarEntries = useMemo<GroupingSidebarEntry[]>(() => {
+    if (!workspace) {
+      return [];
+    }
+
+    return [
+      ...preservedFolderScopes.map((scope) => ({
+        kind: 'preserved' as const,
+        key: scope.path,
+        label: scope.label,
+        itemCount: scope.itemCount,
+        activeLabel: scope.activeLabel,
+        scope
+      })),
+      ...workspace.folders.map((folder) => ({
+        kind: 'folder' as const,
+        key: folder.id,
+        label: folder.label,
+        itemCount: folder.itemCount,
+        activeLabel: folder.label,
+        folder
+      }))
+    ].sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: 'base' }));
+  }, [preservedFolderScopes, workspace]);
 
   const activeFolder = useMemo(() => {
     if (!workspace || activeFolderLabel === '__all__' || activePreservedFolder) {
@@ -1845,20 +1888,41 @@ export const GroupingPage = () => {
           </button>
 
           <div className="grouping-folder-list">
-            {preservedFolderScopes.map((scope) => (
+            {sidebarEntries.map((entry) => (
               <div
-                key={scope.path}
-                className={`grouping-folder-drop ${activeFolderLabel === scope.activeLabel ? 'is-active' : ''}`}
+                key={entry.key}
+                className={`grouping-folder-drop ${activeFolderLabel === entry.activeLabel ? 'is-active' : ''}`}
+                onDragOver={canMutateGrouping && entry.kind === 'folder' ? (event) => event.preventDefault() : undefined}
+                onDrop={canMutateGrouping
+                  && entry.kind === 'folder'
+                  ? (event) => {
+                      event.preventDefault();
+                      const ids = event.dataTransfer.getData('application/json');
+                      if (ids) {
+                        void moveItemsToFolder(JSON.parse(ids) as string[], entry.folder.label);
+                      }
+                    }
+                  : undefined}
               >
-                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel(scope.activeLabel)}>
-                  <span>{scope.label}</span>
-                  <strong>{scope.itemCount}</strong>
+                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel(entry.activeLabel)}>
+                  <span>{entry.label}</span>
+                  <strong>{entry.itemCount}</strong>
                 </button>
                 <div className="grouping-folder-actions">
-                  <button type="button" onClick={() => handleRenamePreservedFolder(scope)} disabled={!canMutateGrouping} title={t('grouping.renameTitle')}>
+                  <button
+                    type="button"
+                    onClick={() => entry.kind === 'preserved' ? handleRenamePreservedFolder(entry.scope) : void handleRenameFolder(entry.folder)}
+                    disabled={!canMutateGrouping}
+                    title={t('grouping.renameTitle')}
+                  >
                     {t('grouping.rename')}
                   </button>
-                  <button type="button" disabled={!canMutateGrouping || scope.itemCount > 0} title={t('grouping.deleteTitle')}>
+                  <button
+                    type="button"
+                    onClick={entry.kind === 'folder' ? () => void handleDeleteFolder(entry.folder) : undefined}
+                    disabled={!canMutateGrouping || entry.itemCount > 0}
+                    title={t('grouping.deleteTitle')}
+                  >
                     {t('grouping.delete')}
                   </button>
                 </div>
@@ -1873,35 +1937,6 @@ export const GroupingPage = () => {
                 <p className="grouping-folder-note">{t('grouping.noProposedFolderNote')}</p>
               </div>
             )}
-            {workspace?.folders.map((folder) => (
-              <div
-                key={folder.id}
-                className={`grouping-folder-drop ${activeFolderLabel === folder.label ? 'is-active' : ''}`}
-                onDragOver={canMutateGrouping ? (event) => event.preventDefault() : undefined}
-                onDrop={canMutateGrouping
-                  ? (event) => {
-                      event.preventDefault();
-                      const ids = event.dataTransfer.getData('application/json');
-                      if (ids) {
-                        void moveItemsToFolder(JSON.parse(ids) as string[], folder.label);
-                      }
-                    }
-                  : undefined}
-              >
-                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel(folder.label)}>
-                  <span>{folder.label}</span>
-                  <strong>{folder.itemCount}</strong>
-                </button>
-                <div className="grouping-folder-actions">
-                  <button type="button" onClick={() => void handleRenameFolder(folder)} disabled={!canMutateGrouping} title={t('grouping.renameTitle')}>
-                    {t('grouping.rename')}
-                  </button>
-                  <button type="button" onClick={() => void handleDeleteFolder(folder)} disabled={!canMutateGrouping || folder.itemCount > 0} title={t('grouping.deleteTitle')}>
-                    {t('grouping.delete')}
-                  </button>
-                </div>
-              </div>
-            ))}
           </div>
 
           <div className="grouping-templates">
