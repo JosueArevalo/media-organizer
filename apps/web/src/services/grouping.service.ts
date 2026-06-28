@@ -176,6 +176,13 @@ export const assignGroupingItemsRequest = async (sessionId: string, itemIds: str
     body: JSON.stringify({ itemIds, targetGroupLabel })
   });
 
+export const renamePreservedGroupingFolderScopeRequest = async (sessionId: string, scopePath: string, label: string) =>
+  requestJson<GroupingWorkspace>(`/api/grouping/${sessionId}/preserved-folders/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scopePath, label })
+  });
+
 export const deleteGroupingItemsRequest = async (sessionId: string, itemIds: string[]) =>
   requestJson<GroupingWorkspace>(`/api/grouping/${sessionId}/items/delete`, {
     method: 'POST',

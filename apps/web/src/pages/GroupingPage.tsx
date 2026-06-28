@@ -33,6 +33,7 @@ import {
   getGroupingWorkspaceRequest,
   reorganizeGroupingWorkspaceRequest,
   renameGroupingFolderRequest,
+  renamePreservedGroupingFolderScopeRequest,
   resetGroupingWorkspaceRequest,
   updateGroupingTemplateRequest,
   type GroupingFolderTemplate,
@@ -54,6 +55,16 @@ const formatBytes = (value: number) => {
   const size = value / 1024 ** exponent;
 
   return `${size.toFixed(size >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+};
+
+const sanitizeGroupingFolderLabel = (label: string) => {
+  const sanitized = label
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '');
+
+  return sanitized || 'Sin nombre';
 };
 
 const formatDateTime = (value: string | null) => {
@@ -88,6 +99,24 @@ type PreservedFolderScope = {
   activeLabel: string;
   itemCount: number;
 };
+
+type GroupingSidebarEntry =
+  | {
+      kind: 'preserved';
+      key: string;
+      label: string;
+      itemCount: number;
+      activeLabel: string;
+      scope: PreservedFolderScope;
+    }
+  | {
+      kind: 'folder';
+      key: string;
+      label: string;
+      itemCount: number;
+      activeLabel: string;
+      folder: GroupingWorkspaceFolder;
+    };
 
 const getPreservedFolderActiveLabel = (path: string) => `${PRESERVED_FOLDER_PREFIX}${path}`;
 
@@ -234,6 +263,7 @@ type MarqueeSelection = {
 type GroupingFormDialogState =
   | { kind: 'create-folder'; name: string }
   | { kind: 'rename-folder'; folder: GroupingWorkspaceFolder; name: string }
+  | { kind: 'rename-preserved-folder'; scopePath: string; currentLabel: string; name: string }
   | { kind: 'create-template'; name: string; pattern: string; patternTouched: boolean };
 
 type GroupingFormDialogProps = {
@@ -574,6 +604,7 @@ export const GroupingPage = () => {
   const [renderedItemLimit, setRenderedItemLimit] = useState(GROUPING_GRID_INITIAL_LIMIT);
   const [marqueeSelection, setMarqueeSelection] = useState<MarqueeSelection | null>(null);
   const [verification, setVerification] = useState<ExecutionVerification | null>(null);
+  const [requiresProposalRefresh, setRequiresProposalRefresh] = useState(false);
 
   const sourcePath = sourceSelection?.path ?? '';
   const destinationPath = destinationSelection?.path ?? '';
@@ -659,6 +690,7 @@ export const GroupingPage = () => {
         setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
         setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
         setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
+        setRequiresProposalRefresh(false);
         setExpandedDirectories(new Set([nextWorkspace.sourceDir.split(/[\\/]/).filter(Boolean).pop() ?? 'Source']));
         changeGroupingView(
           groupingSessionState.activeView ?? (nextWorkspace.folders.length > 0 || nextWorkspace.strategy ? 'review' : 'setup')
@@ -736,6 +768,31 @@ export const GroupingPage = () => {
     [activeFolderLabel, preservedFolderScopes]
   );
 
+  const sidebarEntries = useMemo<GroupingSidebarEntry[]>(() => {
+    if (!workspace) {
+      return [];
+    }
+
+    return [
+      ...preservedFolderScopes.map((scope) => ({
+        kind: 'preserved' as const,
+        key: scope.path,
+        label: scope.label,
+        itemCount: scope.itemCount,
+        activeLabel: scope.activeLabel,
+        scope
+      })),
+      ...workspace.folders.map((folder) => ({
+        kind: 'folder' as const,
+        key: folder.id,
+        label: folder.label,
+        itemCount: folder.itemCount,
+        activeLabel: folder.label,
+        folder
+      }))
+    ].sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: 'base' }));
+  }, [preservedFolderScopes, workspace]);
+
   const activeFolder = useMemo(() => {
     if (!workspace || activeFolderLabel === '__all__' || activePreservedFolder) {
       return null;
@@ -743,6 +800,26 @@ export const GroupingPage = () => {
 
     return workspace.folders.find((folder) => folder.label === activeFolderLabel) ?? null;
   }, [activeFolderLabel, activePreservedFolder, workspace]);
+
+  const resolveNextActiveFolderLabel = useCallback((nextWorkspace: GroupingWorkspace, preferredLabel: string) => {
+    if (preferredLabel === '__all__') {
+      return '__all__';
+    }
+
+    if (preferredLabel === '__unassigned__') {
+      return nextWorkspace.items.some((item) => !item.preservedStructure && !item.targetGroupLabel)
+        ? '__unassigned__'
+        : '__all__';
+    }
+
+    if (getActivePreservedFolderPath(preferredLabel)) {
+      return getItemsForFolderScope(nextWorkspace.items, preferredLabel, nextWorkspace.sourceDir).length > 0
+        ? preferredLabel
+        : '__all__';
+    }
+
+    return nextWorkspace.folders.some((folder) => folder.label === preferredLabel) ? preferredLabel : '__all__';
+  }, []);
 
   const folderScopeItems = useMemo(() => {
     if (!workspace) {
@@ -792,7 +869,6 @@ export const GroupingPage = () => {
 
     return workspace.items.filter((item) => selectedIds.has(item.id));
   }, [selectedIds, workspace]);
-  const editableSelectedItems = selectedItems.filter((item) => !item.preservedStructure);
 
   const directoryTree = useMemo(() => (workspace ? buildGroupingDirectoryTree(workspace) : null), [workspace]);
 
@@ -818,7 +894,7 @@ export const GroupingPage = () => {
       !areSortedValuesEqual(getSortedSetValues(reorganizedDirectories), getSortedValues(workspace.reorganizedDirectories))
     )
   );
-  const shouldUpdateGroupingProposal = !hasGroupingProposal || hasSetupChanges;
+  const shouldUpdateGroupingProposal = requiresProposalRefresh || !hasGroupingProposal || hasSetupChanges;
   const canUseSetupPrimary = Boolean(workspace) &&
     !isReorganizing &&
     canMutateGrouping &&
@@ -928,6 +1004,7 @@ export const GroupingPage = () => {
       setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
       setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
       setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
+      setRequiresProposalRefresh(false);
       setSelectedIds(new Set());
       setActiveFolderLabel('__all__');
       changeGroupingView('review');
@@ -965,6 +1042,12 @@ export const GroupingPage = () => {
     setFormDialog({ kind: 'rename-folder', folder, name: folder.label });
   };
 
+  const handleRenamePreservedFolder = (scope: PreservedFolderScope) => {
+    if (!workspace || !canMutateGrouping) return;
+    setBackendError(null);
+    setFormDialog({ kind: 'rename-preserved-folder', scopePath: scope.path, currentLabel: scope.label, name: scope.label });
+  };
+
   const handleDeleteFolder = async (folder: GroupingWorkspaceFolder) => {
     if (!workspace || !canMutateGrouping) return;
 
@@ -981,13 +1064,13 @@ export const GroupingPage = () => {
   const moveItemsToFolder = async (itemIds: string[], targetGroupLabel: string) => {
     if (!workspace || itemIds.length === 0 || !canMutateGrouping) return;
 
-    const editableItemIds = itemIds.filter((itemId) => !workspace.items.find((item) => item.id === itemId)?.preservedStructure);
-    if (editableItemIds.length === 0) return;
+    const uniqueItemIds = Array.from(new Set(itemIds));
 
     try {
-      const nextWorkspace = await assignGroupingItemsRequest(workspace.sessionId, editableItemIds, targetGroupLabel);
+      const nextWorkspace = await assignGroupingItemsRequest(workspace.sessionId, uniqueItemIds, targetGroupLabel);
       setWorkspace(nextWorkspace);
       setSelectedIds(new Set());
+      setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, activeFolderLabel));
       setBackendError(null);
       markGroupingDraftChanged();
     } catch (error) {
@@ -1016,7 +1099,7 @@ export const GroupingPage = () => {
   }, [canShowNextPreview, folderScopeItems, previewIndex]);
 
   const handleDeleteSelected = async () => {
-    if (!workspace || editableSelectedItems.length === 0 || !canMutateGrouping) return;
+    if (!workspace || selectedItems.length === 0 || !canMutateGrouping) return;
 
     const confirmed = window.confirm(t('grouping.deleteSelectedConfirm'));
 
@@ -1027,10 +1110,11 @@ export const GroupingPage = () => {
     try {
       const nextWorkspace = await deleteGroupingItemsRequest(
         workspace.sessionId,
-        editableSelectedItems.map((item) => item.id)
+        selectedItems.map((item) => item.id)
       );
       setWorkspace(nextWorkspace);
       setSelectedIds(new Set());
+      setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, activeFolderLabel));
       setBackendError(null);
       markGroupingDraftChanged();
     } catch (error) {
@@ -1039,7 +1123,7 @@ export const GroupingPage = () => {
   };
 
   const handleDeletePreviewItem = async () => {
-    if (!workspace || !previewItem || previewItem.preservedStructure || previewIndex < 0 || !canMutateGrouping) return;
+    if (!workspace || !previewItem || previewIndex < 0 || !canMutateGrouping) return;
 
     const confirmed = window.confirm(t('grouping.deletePreviewConfirm', { name: previewItem.fileName }));
 
@@ -1056,6 +1140,7 @@ export const GroupingPage = () => {
         return next;
       });
       setPreviewItemId(getNextPreviewItemId(nextWorkspace.items, activeFolderLabel, sourceRootPath, previewIndex));
+      setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, activeFolderLabel));
       setBackendError(null);
       markGroupingDraftChanged();
     } catch (error) {
@@ -1064,13 +1149,14 @@ export const GroupingPage = () => {
   };
 
   const handleMovePreviewItem = async (targetGroupLabel: string) => {
-    if (!workspace || !previewItem || previewItem.preservedStructure || previewIndex < 0 || !targetGroupLabel || !canMutateGrouping) return;
+    if (!workspace || !previewItem || previewIndex < 0 || !targetGroupLabel || !canMutateGrouping) return;
 
     try {
       const nextWorkspace = await assignGroupingItemsRequest(workspace.sessionId, [previewItem.id], targetGroupLabel);
       setWorkspace(nextWorkspace);
       setSelectedIds(new Set());
       setPreviewItemId(getNextPreviewItemId(nextWorkspace.items, activeFolderLabel, sourceRootPath, previewIndex, previewItem.id));
+      setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, activeFolderLabel));
       setBackendError(null);
       markGroupingDraftChanged();
     } catch (error) {
@@ -1101,6 +1187,30 @@ export const GroupingPage = () => {
   const markThumbnailFailed = useCallback((itemId: string) => {
     setFailedThumbnailIds((current) => new Set(current).add(itemId));
   }, []);
+
+  const isGroupingMainVisible = useCallback(() => {
+    const container = groupingMainRef.current;
+
+    if (!container) {
+      return false;
+    }
+
+    const rect = container.getBoundingClientRect();
+    return rect.bottom > 0 && rect.top < window.innerHeight;
+  }, []);
+
+  const handleSelectReviewFolder = useCallback((nextLabel: string) => {
+    setActiveFolderLabel(nextLabel);
+
+    if (isGroupingMainVisible()) {
+      return;
+    }
+
+    groupingMainRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start'
+    });
+  }, [isGroupingMainVisible]);
 
   const getMarqueePoint = (event: PointerEvent<HTMLElement>): Point | null => {
     const container = groupingMainRef.current;
@@ -1134,7 +1244,6 @@ export const GroupingPage = () => {
 
     return Array.from(container.querySelectorAll<HTMLElement>('[data-grouping-item-id]'))
       .filter((element) => rectsIntersect(element.getBoundingClientRect(), marqueeDomRect))
-      .filter((element) => element.dataset.groupingItemLocked !== 'true')
       .map((element) => element.dataset.groupingItemId)
       .filter((itemId): itemId is string => Boolean(itemId));
   };
@@ -1215,7 +1324,7 @@ export const GroupingPage = () => {
   };
 
   const handleItemClick = (item: GroupingWorkspaceItem, event: MouseEvent) => {
-    if (!canMutateGrouping || item.preservedStructure) {
+    if (!canMutateGrouping) {
       return;
     }
 
@@ -1259,8 +1368,16 @@ export const GroupingPage = () => {
         const label = formDialog.name.trim();
         if (!label || label === formDialog.folder.label) return;
         await renameGroupingFolderRequest(workspace.sessionId, formDialog.folder.id, label);
-        setActiveFolderLabel(label);
+        setActiveFolderLabel(sanitizeGroupingFolderLabel(label));
         await refreshWorkspace(workspace.sessionId);
+        markGroupingDraftChanged();
+      } else if (formDialog.kind === 'rename-preserved-folder') {
+        const label = formDialog.name.trim();
+        if (!label || label === formDialog.currentLabel) return;
+        const nextWorkspace = await renamePreservedGroupingFolderScopeRequest(workspace.sessionId, formDialog.scopePath, label);
+        setWorkspace(nextWorkspace);
+        setSelectedIds(new Set());
+        setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, sanitizeGroupingFolderLabel(label)));
         markGroupingDraftChanged();
       } else {
         const name = formDialog.name.trim();
@@ -1274,7 +1391,7 @@ export const GroupingPage = () => {
     } catch (error) {
       const fallback = formDialog.kind === 'create-folder'
         ? t('grouping.createFolderError')
-        : formDialog.kind === 'rename-folder'
+        : formDialog.kind === 'rename-folder' || formDialog.kind === 'rename-preserved-folder'
           ? t('grouping.renameFolderError')
           : t('grouping.createTemplateError');
       setBackendError(error instanceof Error ? error.message : fallback);
@@ -1402,12 +1519,8 @@ export const GroupingPage = () => {
     try {
       const result = await resetGroupingWorkspaceRequest(workspace.sessionId);
       setVerification(result.verification);
-      const nextWorkspace = await refreshWorkspace(workspace.sessionId);
-      setSelectedStrategy(nextWorkspace.strategy);
-      setSingleDateHandling(nextWorkspace.dateOptions.singleDateHandling);
-      setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
-      setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
-      setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
+      await refreshWorkspace(workspace.sessionId);
+      setRequiresProposalRefresh(true);
       setSelectedIds(new Set());
       setPreviewItemId(null);
       setActiveFolderLabel('__all__');
@@ -1441,7 +1554,10 @@ export const GroupingPage = () => {
     : null;
   const isFormDialogSubmitDisabled = !formDialog || formDialog.kind === 'create-template'
     ? !formDialog || !formDialog.name.trim() || !formDialog.pattern.trim()
-    : !formDialog.name.trim() || (formDialog.kind === 'rename-folder' && formDialog.name.trim() === formDialog.folder.label);
+    : !formDialog.name.trim() || (
+      (formDialog.kind === 'rename-folder' && formDialog.name.trim() === formDialog.folder.label) ||
+      (formDialog.kind === 'rename-preserved-folder' && formDialog.name.trim() === formDialog.currentLabel)
+    );
 
   const hasCopiedHeic = Boolean(workspace?.items.some((item) => /\.(heic|heif)$/i.test(item.fileName)));
 
@@ -1732,10 +1848,6 @@ export const GroupingPage = () => {
                     <div className="selection-tree-copy">
                       <div className="selection-row-head">
                         <strong>{row.name}</strong>
-                        <span className="page-chip">{row.isPreserved ? t('grouping.keepStructure') : t('grouping.reorganizeMode')}</span>
-                        {row.isPreservedOverride && <span className="page-chip">{t('grouping.keepOverride')}</span>}
-                        {row.isPreserved && !row.isPreservedOverride && <span className="page-chip">{t('grouping.inherited')}</span>}
-                        {row.isReorganizedOverride && <span className="page-chip">{t('grouping.reorganizeOverride')}</span>}
                       </div>
                       <p className="selection-row-note">{row.path}</p>
                     </div>
@@ -1788,63 +1900,62 @@ export const GroupingPage = () => {
           <button
             className={`grouping-folder-button ${activeFolderLabel === '__all__' ? 'is-active' : ''}`}
             type="button"
-            onClick={() => setActiveFolderLabel('__all__')}
+            onClick={() => handleSelectReviewFolder('__all__')}
           >
             <span>{t('grouping.allMedia')}</span>
             <strong>{workspace?.items.length ?? 0}</strong>
           </button>
 
           <div className="grouping-folder-list">
-            {preservedFolderScopes.map((scope) => (
+            {sidebarEntries.map((entry) => (
               <div
-                key={scope.path}
-                className={`grouping-folder-drop grouping-folder-drop-preserved ${activeFolderLabel === scope.activeLabel ? 'is-active' : ''}`}
+                key={entry.key}
+                className={`grouping-folder-drop ${activeFolderLabel === entry.activeLabel ? 'is-active' : ''}`}
+                onDragOver={canMutateGrouping && entry.kind === 'folder' ? (event) => event.preventDefault() : undefined}
+                onDrop={canMutateGrouping
+                  && entry.kind === 'folder'
+                  ? (event) => {
+                      event.preventDefault();
+                      const ids = event.dataTransfer.getData('application/json');
+                      if (ids) {
+                        void moveItemsToFolder(JSON.parse(ids) as string[], entry.folder.label);
+                      }
+                    }
+                  : undefined}
               >
-                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel(scope.activeLabel)}>
-                  <span>{scope.label}</span>
-                  <strong>{scope.itemCount}</strong>
+                <button className="grouping-folder-button" type="button" onClick={() => handleSelectReviewFolder(entry.activeLabel)}>
+                  <span>{entry.label}</span>
+                  <strong>{entry.itemCount}</strong>
                 </button>
-                <p className="grouping-folder-note">{t('grouping.preservedFolderLocked')}</p>
+                <div className="grouping-folder-actions">
+                  <button
+                    type="button"
+                    onClick={() => entry.kind === 'preserved' ? handleRenamePreservedFolder(entry.scope) : void handleRenameFolder(entry.folder)}
+                    disabled={!canMutateGrouping}
+                    title={t('grouping.renameTitle')}
+                  >
+                    {t('grouping.rename')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={entry.kind === 'folder' ? () => void handleDeleteFolder(entry.folder) : undefined}
+                    disabled={!canMutateGrouping || entry.itemCount > 0}
+                    title={t('grouping.deleteTitle')}
+                  >
+                    {t('grouping.delete')}
+                  </button>
+                </div>
               </div>
             ))}
             {unassignedItemsCount > 0 && (
               <div className={`grouping-folder-drop grouping-folder-drop-unassigned ${activeFolderLabel === '__unassigned__' ? 'is-active' : ''}`}>
-                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel('__unassigned__')}>
+                <button className="grouping-folder-button" type="button" onClick={() => handleSelectReviewFolder('__unassigned__')}>
                   <span>{t('grouping.noProposedFolder')}</span>
                   <strong>{unassignedItemsCount}</strong>
                 </button>
                 <p className="grouping-folder-note">{t('grouping.noProposedFolderNote')}</p>
               </div>
             )}
-            {workspace?.folders.map((folder) => (
-              <div
-                key={folder.id}
-                className={`grouping-folder-drop ${activeFolderLabel === folder.label ? 'is-active' : ''}`}
-                onDragOver={canMutateGrouping ? (event) => event.preventDefault() : undefined}
-                onDrop={canMutateGrouping
-                  ? (event) => {
-                      event.preventDefault();
-                      const ids = event.dataTransfer.getData('application/json');
-                      if (ids) {
-                        void moveItemsToFolder(JSON.parse(ids) as string[], folder.label);
-                      }
-                    }
-                  : undefined}
-              >
-                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel(folder.label)}>
-                  <span>{folder.label}</span>
-                  <strong>{folder.itemCount}</strong>
-                </button>
-                <div className="grouping-folder-actions">
-                  <button type="button" onClick={() => void handleRenameFolder(folder)} disabled={!canMutateGrouping} title={t('grouping.renameTitle')}>
-                    {t('grouping.rename')}
-                  </button>
-                  <button type="button" onClick={() => void handleDeleteFolder(folder)} disabled={!canMutateGrouping || folder.itemCount > 0} title={t('grouping.deleteTitle')}>
-                    {t('grouping.delete')}
-                  </button>
-                </div>
-              </div>
-            ))}
           </div>
 
           <div className="grouping-templates">
@@ -1882,9 +1993,9 @@ export const GroupingPage = () => {
           onPointerUp={endMarqueeSelection}
           onPointerCancel={endMarqueeSelection}
         >
-          {editableSelectedItems.length > 0 && (
+          {selectedItems.length > 0 && (
             <div className="grouping-selection-bar">
-              <strong>{t('grouping.selected', { count: editableSelectedItems.length })}</strong>
+              <strong>{t('grouping.selected', { count: selectedItems.length })}</strong>
               <select
                 className="grouping-select"
                 value=""
@@ -1920,8 +2031,8 @@ export const GroupingPage = () => {
             <button
               className="btn btn-ghost"
               type="button"
-              onClick={() => setSelectedIds(new Set(visibleItems.filter((item) => !item.preservedStructure).map((item) => item.id)))}
-              disabled={!canMutateGrouping || visibleItems.every((item) => item.preservedStructure)}
+              onClick={() => setSelectedIds(new Set(visibleItems.map((item) => item.id)))}
+              disabled={!canMutateGrouping || visibleItems.length === 0}
             >
               {t('grouping.selectVisible')}
             </button>
@@ -1944,7 +2055,7 @@ export const GroupingPage = () => {
               )}
               {renderedItems.map((item) => {
                 const isSelected = selectedIds.has(item.id);
-                const canEditItem = canMutateGrouping && !item.preservedStructure;
+                const canEditItem = canMutateGrouping;
                 const itemThumbnailUrl = workspace ? buildGroupingThumbnailUrl(workspace.sessionId, item.id) : '';
                 const itemVideoPosterUrl = workspace ? buildGroupingVideoPosterUrl(workspace.sessionId, item.id) : '';
                 const itemVideoPosterCacheKey = workspace ? `${workspace.sessionId}:${item.id}` : item.id;
@@ -1954,7 +2065,6 @@ export const GroupingPage = () => {
                   <article
                     key={item.id}
                     data-grouping-item-id={item.id}
-                    data-grouping-item-locked={item.preservedStructure ? 'true' : undefined}
                     className={`grouping-media-card ${isSelected ? 'is-selected' : ''} ${item.preservedStructure ? 'is-preserved' : ''}`}
                     draggable={canEditItem}
                     onClick={canEditItem ? (event) => handleItemClick(item, event) : undefined}
@@ -2029,7 +2139,7 @@ export const GroupingPage = () => {
                     void handleMovePreviewItem(event.target.value);
                   }
                 }}
-                disabled={!canMutateGrouping || Boolean(previewItem.preservedStructure) || workspace.folders.length === 0}
+                disabled={!canMutateGrouping || workspace.folders.length === 0}
                 aria-label={t('grouping.movePreview')}
               >
                 <option value="">{t('grouping.movePreview')}</option>
@@ -2043,7 +2153,7 @@ export const GroupingPage = () => {
                 className="btn btn-danger-secondary"
                 type="button"
                 onClick={() => void handleDeletePreviewItem()}
-                disabled={!canMutateGrouping || Boolean(previewItem.preservedStructure)}
+                disabled={!canMutateGrouping}
               >
                 {t('grouping.delete')}
               </button>
@@ -2091,10 +2201,12 @@ export const GroupingPage = () => {
         <GroupingFormDialog
           title={formDialog.kind === 'create-folder'
             ? t('grouping.createFolderTitle')
-            : formDialog.kind === 'rename-folder'
+            : formDialog.kind === 'rename-folder' || formDialog.kind === 'rename-preserved-folder'
               ? t('grouping.renameTitle')
               : t('grouping.createTemplateTitle')}
-          submitLabel={formDialog.kind === 'rename-folder' ? t('grouping.rename') : t('grouping.create')}
+          submitLabel={formDialog.kind === 'rename-folder' || formDialog.kind === 'rename-preserved-folder'
+            ? t('grouping.rename')
+            : t('grouping.create')}
           cancelLabel={t('grouping.cancel')}
           isSubmitting={isSubmittingFormDialog}
           submitDisabled={isFormDialogSubmitDisabled}

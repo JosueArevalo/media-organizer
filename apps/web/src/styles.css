@@ -2897,6 +2897,11 @@ body {
   gap: 10px;
 }
 
+.grouping-exclusions-leading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .grouping-exclusions-icon {
   align-items: center;
   background: var(--accent-light);
@@ -2922,6 +2927,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.grouping-exclusions-title > strong {
+  white-space: nowrap;
 }
 
 .grouping-exclusions-title > span {
@@ -3049,11 +3058,6 @@ body {
 .grouping-folder-drop.is-active {
   border-color: var(--accent);
   background: var(--accent-light);
-}
-
-.grouping-folder-drop-preserved {
-  border-color: rgba(20, 184, 166, 0.5);
-  background: rgba(20, 184, 166, 0.08);
 }
 
 .grouping-folder-drop-unassigned {
@@ -4610,6 +4614,10 @@ body {
   .grouping-exclusions-actions {
     justify-content: flex-start;
     padding-left: 44px;
+  }
+
+  .grouping-exclusions-title > strong {
+    white-space: normal;
   }
 }
 .backend-recovery-banner {
