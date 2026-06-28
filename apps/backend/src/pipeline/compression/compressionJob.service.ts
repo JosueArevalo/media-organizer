@@ -509,6 +509,17 @@ const getSourceDisplayPath = (sourceDir: string | null, sourcePath: string) => {
     return sourcePath;
   }
 
+  const toComparablePath = (value: string) => path.resolve(value).replace(/[\\/]+/g, '/');
+  const tryGetCanonicalPath = (value: string) => {
+    try {
+      return fs.realpathSync.native(value);
+    } catch {
+      return value;
+    }
+  };
+  const canonicalSourceDir = tryGetCanonicalPath(sourceDir);
+  const canonicalSourcePath = tryGetCanonicalPath(sourcePath);
+
   const relativePath = path.relative(sourceDir, sourcePath);
   const escapesSource = relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || relativePath.startsWith('../') || relativePath.startsWith('..\\');
 
@@ -516,8 +527,19 @@ const getSourceDisplayPath = (sourceDir: string | null, sourcePath: string) => {
     return relativePath.replace(/[\\/]+/g, '\\');
   }
 
-  const normalizedSourceDir = path.resolve(sourceDir).replace(/[\\/]+/g, '/').replace(/\/+$/u, '');
-  const normalizedSourcePath = path.resolve(sourcePath).replace(/[\\/]+/g, '/');
+  const canonicalRelativePath = path.relative(canonicalSourceDir, canonicalSourcePath);
+  const canonicalEscapesSource =
+    canonicalRelativePath === '..' ||
+    canonicalRelativePath.startsWith(`..${path.sep}`) ||
+    canonicalRelativePath.startsWith('../') ||
+    canonicalRelativePath.startsWith('..\\');
+
+  if (canonicalRelativePath && !path.isAbsolute(canonicalRelativePath) && !canonicalEscapesSource) {
+    return canonicalRelativePath.replace(/[\\/]+/g, '\\');
+  }
+
+  const normalizedSourceDir = toComparablePath(canonicalSourceDir).replace(/\/+$/u, '');
+  const normalizedSourcePath = toComparablePath(canonicalSourcePath);
   const normalizedSourceDirLower = normalizedSourceDir.toLowerCase();
   const normalizedSourcePathLower = normalizedSourcePath.toLowerCase();
 

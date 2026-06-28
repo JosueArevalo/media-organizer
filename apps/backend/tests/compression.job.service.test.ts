@@ -620,6 +620,58 @@ test('compression progress reports the actively processing video and clears it a
   assert.equal(resumedProgress?.processedItems[0].outcome, 'original-retained-size');
 });
 
+test('compression progress normalizes Windows path aliases for active and processed items', async () => {
+  const originalRealpathNative = fs.realpathSync.native;
+  const aliasSegment = process.platform === 'win32' ? 'RUNNER~1' : 'runner-alias';
+
+  fs.realpathSync.native = ((targetPath: fs.PathLike) => {
+    const resolved = originalRealpathNative(targetPath);
+    return typeof resolved === 'string' ? resolved.replace('runneradmin', aliasSegment) : resolved;
+  }) as typeof fs.realpathSync.native;
+
+  try {
+    const { startCompressionSession, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js?path-alias=1');
+    const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js?path-alias=1');
+    const scopedSourceDir = path.join(tempRoot, 'path-alias-source');
+    const scopedOutputDir = path.join(tempRoot, 'path-alias-output');
+    const toolsDir = path.join(tempRoot, 'path-alias-tools');
+    const sourceSubdir = path.join(scopedSourceDir, 'album', 'clips');
+    const expectedDisplayPath = ['album', 'clips', 'slow.mp4'].join('\\');
+    fs.mkdirSync(sourceSubdir, { recursive: true });
+    fs.mkdirSync(scopedOutputDir, { recursive: true });
+    fs.mkdirSync(toolsDir, { recursive: true });
+    fs.writeFileSync(path.join(sourceSubdir, 'slow.mp4'), 'fake-video-content', 'utf8');
+
+    const started = startCompressionSession({
+      name: 'Path alias progress test',
+      sourceDir: scopedSourceDir,
+      outputDir: scopedOutputDir,
+      imageQuality: 80,
+      imageProfileLabel: 'Balanced',
+      videoPresetLabel: 'Fast 1080p30',
+      imageToolCommand: '__missing_image_encoder__',
+      videoToolCommand: writeFakeVideoTool(toolsDir, 1000)
+    });
+
+    const execution = executeCompressionSession(started.session.id);
+    let activeProgress = getCompressionProgress(started.session.id);
+
+    for (let attempt = 0; attempt < 100 && !activeProgress?.currentlyProcessing.length; attempt += 1) {
+      await sleep(100);
+      activeProgress = getCompressionProgress(started.session.id);
+    }
+
+    assert.equal(activeProgress?.currentlyProcessing[0].displayPath, expectedDisplayPath);
+
+    await execution;
+
+    const finalProgress = getCompressionProgress(started.session.id);
+    assert.equal(finalProgress?.processedItems[0].displayPath, expectedDisplayPath);
+  } finally {
+    fs.realpathSync.native = originalRealpathNative;
+  }
+});
+
 test('pauseCompressionSession stops active compression and resume processes pending items', async () => {
   const {
     getCompressionProgress,
