@@ -1188,6 +1188,30 @@ export const GroupingPage = () => {
     setFailedThumbnailIds((current) => new Set(current).add(itemId));
   }, []);
 
+  const isGroupingMainVisible = useCallback(() => {
+    const container = groupingMainRef.current;
+
+    if (!container) {
+      return false;
+    }
+
+    const rect = container.getBoundingClientRect();
+    return rect.bottom > 0 && rect.top < window.innerHeight;
+  }, []);
+
+  const handleSelectReviewFolder = useCallback((nextLabel: string) => {
+    setActiveFolderLabel(nextLabel);
+
+    if (isGroupingMainVisible()) {
+      return;
+    }
+
+    groupingMainRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start'
+    });
+  }, [isGroupingMainVisible]);
+
   const getMarqueePoint = (event: PointerEvent<HTMLElement>): Point | null => {
     const container = groupingMainRef.current;
 
@@ -1876,7 +1900,7 @@ export const GroupingPage = () => {
           <button
             className={`grouping-folder-button ${activeFolderLabel === '__all__' ? 'is-active' : ''}`}
             type="button"
-            onClick={() => setActiveFolderLabel('__all__')}
+            onClick={() => handleSelectReviewFolder('__all__')}
           >
             <span>{t('grouping.allMedia')}</span>
             <strong>{workspace?.items.length ?? 0}</strong>
@@ -1899,7 +1923,7 @@ export const GroupingPage = () => {
                     }
                   : undefined}
               >
-                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel(entry.activeLabel)}>
+                <button className="grouping-folder-button" type="button" onClick={() => handleSelectReviewFolder(entry.activeLabel)}>
                   <span>{entry.label}</span>
                   <strong>{entry.itemCount}</strong>
                 </button>
@@ -1925,7 +1949,7 @@ export const GroupingPage = () => {
             ))}
             {unassignedItemsCount > 0 && (
               <div className={`grouping-folder-drop grouping-folder-drop-unassigned ${activeFolderLabel === '__unassigned__' ? 'is-active' : ''}`}>
-                <button className="grouping-folder-button" type="button" onClick={() => setActiveFolderLabel('__unassigned__')}>
+                <button className="grouping-folder-button" type="button" onClick={() => handleSelectReviewFolder('__unassigned__')}>
                   <span>{t('grouping.noProposedFolder')}</span>
                   <strong>{unassignedItemsCount}</strong>
                 </button>

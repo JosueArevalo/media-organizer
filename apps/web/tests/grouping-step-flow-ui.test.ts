@@ -163,14 +163,32 @@ test('grouping reorganize clears reset-invalidated proposals', () => {
 
 test('grouping setup tree relies on the structure toggle instead of directory badges', () => {
   const pageSource = fs.readFileSync(path.join(pagesRoot, 'GroupingPage.tsx'), 'utf8');
+  const selectionRowsStart = pageSource.indexOf('directoryRows.map((row) =>');
+  const selectionRowsEnd = pageSource.indexOf('{workspace && view === \'review\'', selectionRowsStart);
+  const selectionRowsSource = pageSource.slice(selectionRowsStart, selectionRowsEnd);
 
-  assert.match(pageSource, /<div className="selection-row-head">\s*<strong>\{row\.name\}<\/strong>\s*<\/div>/);
-  assert.match(pageSource, /<p className="selection-row-note">\{row\.path\}<\/p>/);
-  assert.match(pageSource, /className=\{row\.isPreserved \? 'is-active' : ''\}/);
-  assert.match(pageSource, /onClick=\{\(\) => setDirectoryStructureMode\(row\.path, 'preserve'\)\}/);
-  assert.match(pageSource, /onClick=\{\(\) => setDirectoryStructureMode\(row\.path, 'reorganize'\)\}/);
-  assert.doesNotMatch(pageSource, /t\('grouping\.keepOverride'\)/);
-  assert.doesNotMatch(pageSource, /t\('grouping\.inherited'\)/);
-  assert.doesNotMatch(pageSource, /t\('grouping\.reorganizeOverride'\)/);
-  assert.doesNotMatch(pageSource, /t\('grouping\.reorganizeMode'\)/);
+  assert.match(selectionRowsSource, /<div className="selection-row-head">\s*<strong>\{row\.name\}<\/strong>\s*<\/div>/);
+  assert.match(selectionRowsSource, /<p className="selection-row-note">\{row\.path\}<\/p>/);
+  assert.match(selectionRowsSource, /className=\{row\.isPreserved \? 'is-active' : ''\}/);
+  assert.match(selectionRowsSource, /onClick=\{\(\) => setDirectoryStructureMode\(row\.path, 'preserve'\)\}/);
+  assert.match(selectionRowsSource, /onClick=\{\(\) => setDirectoryStructureMode\(row\.path, 'reorganize'\)\}/);
+  assert.doesNotMatch(selectionRowsSource, /page-chip/);
+  assert.doesNotMatch(selectionRowsSource, /t\('grouping\.keepOverride'\)/);
+  assert.doesNotMatch(selectionRowsSource, /t\('grouping\.inherited'\)/);
+  assert.doesNotMatch(selectionRowsSource, /t\('grouping\.reorganizeOverride'\)/);
+});
+
+test('grouping review sidebar selection only scrolls when the main panel is out of view', () => {
+  const pageSource = fs.readFileSync(path.join(pagesRoot, 'GroupingPage.tsx'), 'utf8');
+
+  assert.match(pageSource, /const isGroupingMainVisible = useCallback\(\(\) => \{/);
+  assert.match(pageSource, /const rect = container\.getBoundingClientRect\(\);/);
+  assert.match(pageSource, /return rect\.bottom > 0 && rect\.top < window\.innerHeight;/);
+  assert.match(pageSource, /const handleSelectReviewFolder = useCallback\(\(nextLabel: string\) => \{/);
+  assert.match(pageSource, /setActiveFolderLabel\(nextLabel\);/);
+  assert.match(pageSource, /if \(isGroupingMainVisible\(\)\) \{\s*return;\s*\}/);
+  assert.match(pageSource, /groupingMainRef\.current\?\.scrollIntoView\(\{\s*behavior: 'smooth',\s*block: 'start'\s*\}\);/);
+  assert.match(pageSource, /onClick=\{\(\) => handleSelectReviewFolder\('__all__'\)\}/);
+  assert.match(pageSource, /onClick=\{\(\) => handleSelectReviewFolder\(entry\.activeLabel\)\}/);
+  assert.match(pageSource, /onClick=\{\(\) => handleSelectReviewFolder\('__unassigned__'\)\}/);
 });
