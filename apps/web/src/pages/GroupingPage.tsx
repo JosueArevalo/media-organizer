@@ -1690,7 +1690,7 @@ export const GroupingPage = () => {
             )}
           </section>
 
-          <details className="page-card elevated grouping-exclusions grouping-setup-main">
+          <details className="page-card elevated grouping-exclusions grouping-setup-main" open>
             <summary>
               <span className="grouping-exclusions-leading">
                 <span className="grouping-exclusions-icon" aria-hidden="true">
