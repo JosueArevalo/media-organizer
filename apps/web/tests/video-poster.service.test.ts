@@ -13,6 +13,7 @@ let frameCallbacks = 0;
 let canvasDraws = 0;
 let drawsBeforeDecodedFrame = 0;
 let forceTimeout = false;
+let suppressFrameCallback = false;
 const revokedObjectUrls: string[] = [];
 
 class FakeVideo extends EventTarget {
@@ -70,6 +71,9 @@ class FakeVideo extends EventTarget {
   requestVideoFrameCallback(callback: () => void) {
     frameCallbacks += 1;
     const id = frameCallbacks;
+    if (suppressFrameCallback) {
+      return id;
+    }
     queueMicrotask(() => {
       this.decodedFrame = true;
       callback();
@@ -196,4 +200,15 @@ test('poster generation falls back to the full media URL when the poster stream 
 
   assert.match(poster, /^data:image\/jpeg/);
   assert.equal(getCachedVideoPoster('behavior:fallback'), poster);
+});
+
+test('poster generation falls back when requestVideoFrameCallback never delivers a frame', async () => {
+  suppressFrameCallback = true;
+
+  try {
+    const poster = await generateVideoPoster('behavior:no-frame-callback', '/no-frame-callback.mp4');
+    assert.match(poster, /^data:image\/jpeg/);
+  } finally {
+    suppressFrameCallback = false;
+  }
 });

@@ -2,6 +2,7 @@ type PosterTask = () => Promise<void>;
 
 const MAX_CONCURRENT_POSTERS = 1;
 const POSTER_TIMEOUT_MS = 8_000;
+const FRAME_CALLBACK_FALLBACK_MS = 250;
 
 const posterCache = new Map<string, string>();
 const failedPosterKeys = new Set<string>();
@@ -76,11 +77,15 @@ const captureVideoPosterFromObjectUrl = (url: string, signal?: AbortSignal) =>
     const video = document.createElement('video');
     let finished = false;
     let frameCallbackId: number | null = null;
+    let frameFallbackTimeoutId: number | null = null;
     let seekComplete = false;
     const settle = (complete: () => void) => {
       if (finished) return;
       finished = true;
       window.clearTimeout(timeout);
+      if (frameFallbackTimeoutId !== null) {
+        window.clearTimeout(frameFallbackTimeoutId);
+      }
       signal?.removeEventListener('abort', abort);
       if (frameCallbackId !== null && typeof video.cancelVideoFrameCallback === 'function') {
         video.cancelVideoFrameCallback(frameCallbackId);
@@ -126,7 +131,15 @@ const captureVideoPosterFromObjectUrl = (url: string, signal?: AbortSignal) =>
       if (finished || !seekComplete || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
       if (typeof video.requestVideoFrameCallback === 'function') {
         if (frameCallbackId !== null) return;
+        frameFallbackTimeoutId = window.setTimeout(() => {
+          frameFallbackTimeoutId = null;
+          capture();
+        }, FRAME_CALLBACK_FALLBACK_MS);
         frameCallbackId = video.requestVideoFrameCallback(() => {
+          if (frameFallbackTimeoutId !== null) {
+            window.clearTimeout(frameFallbackTimeoutId);
+            frameFallbackTimeoutId = null;
+          }
           frameCallbackId = null;
           capture();
         });
