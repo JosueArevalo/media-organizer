@@ -22,7 +22,7 @@ test('grouping stores and restores the active setup or review view', () => {
 test('grouping setup primary action reviews an unchanged proposal without reorganizing', () => {
   const pageSource = fs.readFileSync(path.join(pagesRoot, 'GroupingPage.tsx'), 'utf8');
   const setupHandlerStart = pageSource.indexOf('const handleSetupPrimaryAction = async () => {');
-  const setupHandlerEnd = pageSource.indexOf('const handleCreateFolder = async () => {', setupHandlerStart);
+  const setupHandlerEnd = pageSource.indexOf('const handleCreateFolder = () => {', setupHandlerStart);
   const setupHandlerSource = pageSource.slice(setupHandlerStart, setupHandlerEnd);
 
   assert.match(pageSource, /const hasSetupChanges = Boolean/);
@@ -113,4 +113,23 @@ test('grouping date result indents files below their destination folders', () =>
 
   assert.match(styles, /\.grouping-example-group > ul \{[\s\S]*border-left: 1px solid var\(--line\);[\s\S]*padding-left: 14px;/);
   assert.match(styles, /\.grouping-example-group > ul > li::before/);
+});
+
+test('grouping review no longer locks preserved folders or media cards', () => {
+  const pageSource = fs.readFileSync(path.join(pagesRoot, 'GroupingPage.tsx'), 'utf8');
+  const english = fs.readFileSync(path.join(i18nRoot, 'en.ts'), 'utf8');
+  const spanish = fs.readFileSync(path.join(i18nRoot, 'es.ts'), 'utf8');
+  const styles = fs.readFileSync(stylesPath, 'utf8');
+
+  assert.match(pageSource, /renamePreservedGroupingFolderScopeRequest/);
+  assert.match(pageSource, /handleRenamePreservedFolder/);
+  assert.match(pageSource, /visibleItems\.map\(\(item\) => item\.id\)/);
+  assert.match(pageSource, /const canEditItem = canMutateGrouping;/);
+  assert.match(pageSource, /scope\.itemCount > 0/);
+  assert.doesNotMatch(pageSource, /groupingItemLocked/);
+  assert.doesNotMatch(pageSource, /grouping-folder-drop-preserved/);
+  assert.doesNotMatch(pageSource, /previewItem\.preservedStructure/);
+  assert.doesNotMatch(styles, /\.grouping-folder-drop-preserved \{/);
+  assert.doesNotMatch(english, /grouping\.preservedFolderLocked/);
+  assert.doesNotMatch(spanish, /grouping\.preservedFolderLocked/);
 });

@@ -725,7 +725,7 @@ test('reorganized child directories override a preserved parent directory', asyn
   assert.ok(fs.existsSync(path.join(outputDir, '2025.01.03 - Event', 'IMG_20250103_121111.jpg')));
 });
 
-test('manual assignments cannot move media from preserved directories', async () => {
+test('manual assignments can move media from preserved directories during review', async () => {
   const { compressionSessionId, items } = seedCompressionSession(['Album/IMG_20250102_111111.jpg']);
   const { assignGroupingItems, createGroupingWorkspace, getGroupingWorkspace, reorganizeGroupingWorkspace } = await import(
     '../src/pipeline/grouping/groupingWorkspace.service.js'
@@ -742,17 +742,15 @@ test('manual assignments cannot move media from preserved directories', async ()
   assert.equal(proposed.items[0].preservedStructure, true);
   assert.equal(proposed.items[0].targetGroupLabel, null);
 
-  assert.throws(
-    () => assignGroupingItems(workspace.sessionId, [items[0].itemId], 'Manual'),
-    /Cannot modify media inside a preserved folder/
-  );
+  assignGroupingItems(workspace.sessionId, [items[0].itemId], 'Manual');
 
-  const afterAttempt = getGroupingWorkspace(workspace.sessionId);
-  assert.equal(afterAttempt?.folders.find((folder) => folder.label === 'Manual'), undefined);
-  assert.equal(afterAttempt?.items[0].targetGroupLabel, null);
+  const afterAssignment = getGroupingWorkspace(workspace.sessionId);
+  assert.equal(afterAssignment?.folders.find((folder) => folder.label === 'Manual')?.itemCount, 1);
+  assert.equal(afterAssignment?.items[0].targetGroupLabel, 'Manual');
+  assert.equal(afterAssignment?.items[0].preservedStructure, false);
 });
 
-test('deleteGroupingItems cannot delete media from preserved directories', async () => {
+test('deleteGroupingItems can delete media from preserved directories during review', async () => {
   const { compressionSessionId, items } = seedCompressionSession(['Album/IMG_20250102_111111.jpg']);
   const { createGroupingWorkspace, deleteGroupingItems, getGroupingWorkspace, reorganizeGroupingWorkspace } = await import(
     '../src/pipeline/grouping/groupingWorkspace.service.js'
@@ -765,14 +763,10 @@ test('deleteGroupingItems cannot delete media from preserved directories', async
     reorganizedDirectories: []
   });
 
-  assert.throws(
-    () => deleteGroupingItems(workspace.sessionId, [items[0].itemId]),
-    /Cannot modify media inside a preserved folder/
-  );
+  deleteGroupingItems(workspace.sessionId, [items[0].itemId]);
 
-  const afterAttempt = getGroupingWorkspace(workspace.sessionId);
-  assert.equal(afterAttempt?.items.length, 1);
-  assert.equal(afterAttempt?.items[0].preservedStructure, true);
+  const afterDelete = getGroupingWorkspace(workspace.sessionId);
+  assert.equal(afterDelete?.items.length, 0);
 });
 
 test('manual edits are allowed for reorganized child directories inside a preserved parent', async () => {
@@ -805,6 +799,34 @@ test('manual edits are allowed for reorganized child directories inside a preser
   assert.equal(afterEdits?.items.find((item) => item.id === reorganizedItems[0].itemId)?.targetGroupLabel, 'Manual');
   assert.equal(afterEdits?.items.find((item) => item.id === reorganizedItems[1].itemId), undefined);
   assert.equal(afterEdits?.items.find((item) => item.id === keptItem.itemId)?.preservedStructure, true);
+});
+
+test('renaming a preserved scope converts its items into a manual folder assignment', async () => {
+  const { compressionSessionId, items } = seedCompressionSession([
+    'Album/keep/IMG_20250102_111111.jpg',
+    'Album/keep/IMG_20250102_121111.jpg'
+  ]);
+  const {
+    createGroupingWorkspace,
+    getGroupingWorkspace,
+    renamePreservedGroupingFolderScope,
+    reorganizeGroupingWorkspace
+  } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  reorganizeGroupingWorkspace(workspace.sessionId, {
+    rules: ['date-event-multiple'],
+    preservedDirectories: ['source/Album'],
+    reorganizedDirectories: []
+  });
+
+  const renamed = renamePreservedGroupingFolderScope(workspace.sessionId, 'source/Album', 'Album curated');
+
+  assert.equal(renamed?.folders.find((folder) => folder.label === 'Album curated')?.itemCount, 2);
+  assert.ok(renamed?.items.every((item) => item.targetGroupLabel === 'Album curated'));
+  assert.ok(renamed?.items.every((item) => item.preservedStructure === false));
+  assert.equal(getGroupingWorkspace(workspace.sessionId)?.items.filter((item) => item.preservedStructure).length, 0);
+  assert.deepEqual(items.map((item) => item.itemId).sort(), renamed?.items.map((item) => item.id).sort());
 });
 
 test('folders can be created, renamed, assigned, deleted when empty, and applied with collision-safe moves', async () => {

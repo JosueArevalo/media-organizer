@@ -35,6 +35,7 @@ import {
   listGroupingTemplates,
   reorganizeGroupingWorkspace,
   renameGroupingFolder,
+  renamePreservedGroupingFolderScope,
   resetGroupingWorkspace,
   updateGroupingTemplate
 } from './pipeline/grouping/groupingWorkspace.service.js';
@@ -660,6 +661,32 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
           sendJson(res, 200, assignGroupingItems(sessionId, body.itemIds, body.targetGroupLabel));
         } catch (error) {
           sendCaughtError(res, error, 'Could not assign items.');
+        }
+      })();
+
+      return;
+    }
+
+    if (req.method === 'POST' && subPath === 'preserved-folders' && subId === 'rename') {
+      void (async () => {
+        try {
+          const body = (await readRequestJson(req)) as { scopePath?: string; label?: string } | null;
+
+          if (!body?.scopePath || !body.label) {
+            sendJson(res, 400, { status: 'invalid_request', message: 'scopePath and label are required.' });
+            return;
+          }
+
+          const workspace = renamePreservedGroupingFolderScope(sessionId, body.scopePath, body.label);
+
+          if (!workspace) {
+            sendJson(res, 404, { status: 'not_found' });
+            return;
+          }
+
+          sendJson(res, 200, workspace);
+        } catch (error) {
+          sendCaughtError(res, error, 'Could not rename preserved folder.');
         }
       })();
 

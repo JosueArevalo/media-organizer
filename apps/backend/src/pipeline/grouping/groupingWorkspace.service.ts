@@ -468,41 +468,6 @@ const listMediaRows = (sessionId: string): MediaRow[] => {
     .all(sessionId) as MediaRow[];
 };
 
-const listMediaRowsByIds = (sessionId: string, itemIds: string[]): MediaRow[] => {
-  if (itemIds.length === 0) {
-    return [];
-  }
-
-  const db = getDb();
-  const placeholders = itemIds.map(() => '?').join(', ');
-  return db
-    .prepare(
-      `
-        SELECT
-          mi.id,
-          mi.source_path,
-          mi.relative_path,
-          mi.media_type,
-          mi.size_bytes,
-          mi.capture_time,
-          decision.target_group_label
-        FROM media_items mi
-        INNER JOIN item_stage_status compress_status
-          ON compress_status.session_id = mi.session_id
-          AND compress_status.item_id = mi.id
-          AND compress_status.stage = 'compress'
-          AND compress_status.status = 'completed'
-        LEFT JOIN item_decisions decision
-          ON decision.session_id = mi.session_id
-          AND decision.item_id = mi.id
-        WHERE mi.session_id = ?
-          AND mi.id IN (${placeholders})
-          AND COALESCE(decision.selected_for_output, 1) = 1
-      `
-    )
-    .all(sessionId, ...itemIds) as MediaRow[];
-};
-
 const listDeletedMediaRows = (sessionId: string): MediaRow[] => {
   const db = getDb();
   return db
@@ -827,28 +792,43 @@ const isRowPreserved = (
   return candidates.some((candidatePath) => isCandidatePathPreserved(candidatePath, preservedScopes, reorganizedScopes));
 };
 
-const assertItemsAreNotPreserved = (groupingSessionId: string, sourceSessionId: string, itemIds: string[]) => {
-  const uniqueItemIds = Array.from(new Set(itemIds));
-  if (uniqueItemIds.length === 0) {
-    return;
+const getRelativePathDirectory = (relativePath: string) => {
+  const normalized = relativePath.replace(/\\/g, '/');
+  const lastSeparatorIndex = normalized.lastIndexOf('/');
+  return lastSeparatorIndex >= 0 ? normalized.slice(0, lastSeparatorIndex) : '';
+};
+
+const getRelativePreservedFolderPath = (scopePath: string, sourceRootPath: string) => {
+  const normalizedScope = scopePath.replace(/\\/g, '/');
+  const normalizedSourceRoot = sourceRootPath.replace(/\\/g, '/');
+  const normalizedRootName = path.basename(sourceRootPath).replace(/\\/g, '/');
+
+  if (normalizedScope === normalizedSourceRoot || normalizedScope === normalizedRootName) {
+    return '';
   }
 
-  const session = getSessionRow(groupingSessionId);
-  const groupingManifest = getGroupingManifest(groupingSessionId);
-  const preservedDirectories = groupingManifest?.preservedDirectories ?? [];
-
-  if (!session || preservedDirectories.length === 0) {
-    return;
+  if (normalizedScope.startsWith(`${normalizedSourceRoot}/`)) {
+    return normalizedScope.slice(normalizedSourceRoot.length + 1);
   }
 
-  const reorganizedDirectories = groupingManifest?.reorganizedDirectories ?? [];
-  const preservedRows = listMediaRowsByIds(sourceSessionId, uniqueItemIds).filter((row) =>
-    isRowPreserved(session.source_dir, row, preservedDirectories, reorganizedDirectories)
+  return normalizedScope.startsWith(`${normalizedRootName}/`)
+    ? normalizedScope.slice(normalizedRootName.length + 1)
+    : normalizedScope;
+};
+
+const isWorkspaceItemInPreservedFolderScope = (item: GroupingWorkspaceItem, scopePath: string, sourceRootPath: string) => {
+  if (!item.preservedStructure) {
+    return false;
+  }
+
+  const relativeScopePath = getRelativePreservedFolderPath(scopePath, sourceRootPath);
+  const itemDirectory = getRelativePathDirectory(item.relativePath);
+
+  return (
+    relativeScopePath === '' ||
+    itemDirectory === relativeScopePath ||
+    itemDirectory.startsWith(`${relativeScopePath}/`)
   );
-
-  if (preservedRows.length > 0) {
-    throw new Error('Cannot modify media inside a preserved folder.');
-  }
 };
 
 const clearGeneratedGrouping = (groupingSessionId: string, sourceSessionId: string) => {
@@ -1058,7 +1038,8 @@ const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => 
     items: mediaRows.map((row) => {
       const outputPath = getOutputPath(session.output_dir, row.relative_path);
       const captureDate = getCaptureDate(outputPath, row.relative_path);
-      const preservedStructure = isRowPreserved(session.source_dir, row, preservedDirectories, reorganizedDirectories);
+      const preservedStructure = row.target_group_label === null &&
+        isRowPreserved(session.source_dir, row, preservedDirectories, reorganizedDirectories);
       return {
         id: row.id,
         sourcePath: row.source_path,
@@ -1253,7 +1234,6 @@ export const assignGroupingItems = (sessionId: string, itemIds: string[], target
   runMigrations();
   const safeLabel = sanitizeFolderLabel(targetGroupLabel);
   const sourceSessionId = getCompressionSourceSessionId(sessionId) ?? sessionId;
-  assertItemsAreNotPreserved(sessionId, sourceSessionId, itemIds);
   upsertFolder(sessionId, safeLabel, 'manual');
 
   for (const itemId of itemIds) {
@@ -1274,7 +1254,6 @@ export const deleteGroupingItems = (sessionId: string, itemIds: string[]) => {
   const timestamp = nowIso();
   const sourceSessionId = getCompressionSourceSessionId(sessionId) ?? sessionId;
   const uniqueItemIds = Array.from(new Set(itemIds));
-  assertItemsAreNotPreserved(sessionId, sourceSessionId, uniqueItemIds);
 
   db.exec('BEGIN TRANSACTION');
 
@@ -1312,6 +1291,31 @@ export const deleteGroupingItems = (sessionId: string, itemIds: string[]) => {
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
+  }
+
+  return getGroupingWorkspace(sessionId);
+};
+
+export const renamePreservedGroupingFolderScope = (sessionId: string, scopePath: string, label: string) => {
+  runMigrations();
+  const workspace = getGroupingWorkspace(sessionId);
+
+  if (!workspace) {
+    return null;
+  }
+
+  const safeLabel = sanitizeFolderLabel(label);
+  const scopedItems = workspace.items.filter((item) => isWorkspaceItemInPreservedFolderScope(item, scopePath, workspace.sourceDir));
+
+  if (scopedItems.length === 0) {
+    return workspace;
+  }
+
+  const sourceSessionId = getCompressionSourceSessionId(sessionId) ?? sessionId;
+  upsertFolder(sessionId, safeLabel, 'manual');
+
+  for (const item of scopedItems) {
+    upsertDecisionLabel(sourceSessionId, item.id, safeLabel, true);
   }
 
   return getGroupingWorkspace(sessionId);
