@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { platform } from 'node:process';
 
-const workspaceRoot = 'd:/Software Development/media-organizer';
+const workspaceRoot = path.resolve(process.cwd(), '..', '..');
 const devServerUrl = 'http://127.0.0.1:4173';
 
 const startDevServer = async () => {
-  const command = platform === 'win32' ? 'cmd.exe' : 'npm';
+  const command = platform === 'win32' ? (process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe') : 'npm';
   const args =
     platform === 'win32'
       ? ['/d', '/s', '/c', 'npm run dev --workspace apps/web -- --host 127.0.0.1 --port 4173 --strictPort']

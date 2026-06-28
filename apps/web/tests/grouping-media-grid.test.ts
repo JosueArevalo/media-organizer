@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 
-const workspaceRoot = 'd:/Software Development/media-organizer';
+const workspaceRoot = path.resolve(process.cwd(), '..', '..');
 
 test('Grouping grid uses thumbnails and avoids persistent video streams', () => {
   const pageSource = fs.readFileSync(path.join(workspaceRoot, 'apps', 'web', 'src', 'pages', 'GroupingPage.tsx'), 'utf8');
