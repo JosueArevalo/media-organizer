@@ -9,6 +9,8 @@ import { useTranslation, type TranslationKey } from '../i18n';
 import { resetRuntimeStateWithBackend } from '../services/app-maintenance.store';
 import { useToolPreflight } from '../hooks/useToolPreflight';
 import { MediaToolsNotice } from '../components/MediaToolsNotice';
+import { DashboardWelcomePanel } from '../components/DashboardWelcomePanel';
+import { dismissOnboarding, shouldShowOnboarding } from '../services/dashboard-onboarding.store';
 import {
   deleteDashboardExecution,
   getBackendHealth,
@@ -307,6 +309,7 @@ export const DashboardPage = () => {
   const [expandedExecutionId, setExpandedExecutionId] = useState<string | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const [isStartingNewSession, setIsStartingNewSession] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => shouldShowOnboarding());
   const toolPreflight = useToolPreflight();
 
   const refreshDashboard = async () => {
@@ -557,36 +560,49 @@ export const DashboardPage = () => {
     }
   };
 
+  const handleDismissOnboarding = () => {
+    dismissOnboarding();
+    setShowOnboarding(false);
+  };
+
   return (
     <div className="dashboard-grid dashboard-real">
       <div className="page-header">
         <h1 className="page-title">{t('dashboard.title')}</h1>
       </div>
 
-      <section className="panel panel-highlight dashboard-hero">
-        <div>
-          <p className="panel-kicker">{t('dashboard.status')}</p>
-          <h2 className="panel-title">{currentState.title}</h2>
-          <p className="panel-description">{currentState.description}</p>
-        </div>
-        <div className="action-row">
-          <Link to={currentState.action.to} className="btn btn-primary">
-            {currentState.action.label}
-          </Link>
-          {canStartNewSession && (
-            <button
-              className="btn btn-secondary"
-              type="button"
-              onClick={() => void handleStartNewSession()}
-              disabled={isStartingNewSession}
-            >
-              {isStartingNewSession ? t('dashboard.action.startingNewSession') : t('dashboard.action.startNewSession')}
-            </button>
-          )}
-        </div>
-      </section>
+      {showOnboarding && (
+        <DashboardWelcomePanel preflight={toolPreflight} onClose={handleDismissOnboarding} />
+      )}
 
-      <MediaToolsNotice preflight={toolPreflight} returnTo="/dashboard" />
+      {!showOnboarding && (
+        <>
+          <section className="panel panel-highlight dashboard-hero">
+            <div>
+              <p className="panel-kicker">{t('dashboard.status')}</p>
+              <h2 className="panel-title">{currentState.title}</h2>
+              <p className="panel-description">{currentState.description}</p>
+            </div>
+            <div className="action-row">
+              <Link to={currentState.action.to} className="btn btn-primary">
+                {currentState.action.label}
+              </Link>
+              {canStartNewSession && (
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={() => void handleStartNewSession()}
+                  disabled={isStartingNewSession}
+                >
+                  {isStartingNewSession ? t('dashboard.action.startingNewSession') : t('dashboard.action.startNewSession')}
+                </button>
+              )}
+            </div>
+          </section>
+
+          <MediaToolsNotice preflight={toolPreflight} returnTo="/dashboard" />
+        </>
+      )}
 
       {dashboardError && <p className="error">{dashboardError}</p>}
 
