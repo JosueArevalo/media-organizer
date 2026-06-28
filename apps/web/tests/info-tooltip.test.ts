@@ -16,3 +16,18 @@ test('info tooltip supports pointer, focus, click, escape and outside dismissal'
   assert.match(source, /aria-expanded=\{isOpen\}/);
   assert.match(source, /role="tooltip"/);
 });
+
+test('info tooltip supports optional placement and contextual class hooks', () => {
+  const source = fs.readFileSync(componentPath, 'utf8');
+
+  assert.match(source, /className\?: string/);
+  assert.match(source, /triggerClassName\?: string/);
+  assert.match(source, /contentClassName\?: string/);
+  assert.match(source, /placement\?: 'bottom-center' \| 'top-start'/);
+  assert.match(source, /icon\?: 'circled' \| 'plain'/);
+  assert.match(source, /placement = 'bottom-center'/);
+  assert.match(source, /icon = 'circled'/);
+  assert.match(source, /info-tooltip-content-\$\{placement\}/);
+  assert.match(source, /icon === 'plain'/);
+  assert.match(source, /info-tooltip-glyph/);
+});

@@ -18,13 +18,35 @@ test('Grouping replaces browser prompts with an accessible React dialog', () => 
   assert.match(stylesSource, /\.grouping-form-dialog-panel/);
 });
 
-test('Grouping dialog supports create folder, rename folder, and template creation', () => {
+test('Grouping dialog supports create folder, rename folder, template creation, and template editing', () => {
   assert.match(pageSource, /kind: 'create-folder'/);
   assert.match(pageSource, /kind: 'rename-folder'/);
   assert.match(pageSource, /kind: 'create-template'/);
+  assert.match(pageSource, /kind: 'edit-template'/);
   assert.match(pageSource, /createGroupingFolderRequest/);
   assert.match(pageSource, /renameGroupingFolderRequest/);
   assert.match(pageSource, /createGroupingTemplateRequest/);
-  assert.match(pageSource, /patternTouched/);
+  assert.match(pageSource, /updateGroupingTemplateRequest/);
+  assert.match(pageSource, /formatTemplatePreview/);
+  assert.match(pageSource, /templateValuePrompt/);
+  assert.match(pageSource, /templateHelpIntro/);
   assert.match(pageSource, /setFormDialog\(null\)/);
+});
+
+test('Grouping templates expose explicit actions and inline help', () => {
+  assert.match(pageSource, /templatesInfoTitle/);
+  assert.match(pageSource, /templatesInfoDateNote/);
+  assert.match(pageSource, /handleCreateFolderFromTemplate/);
+  assert.match(pageSource, /handleEditTemplate/);
+  assert.match(pageSource, /grouping-template-copy/);
+  assert.match(pageSource, /placement="top-start"/);
+  assert.match(pageSource, /grouping-templates-info-trigger/);
+  assert.match(pageSource, /icon="plain"/);
+  assert.doesNotMatch(pageSource, /grouping\.on/);
+  assert.doesNotMatch(pageSource, /grouping\.off/);
+  assert.match(stylesSource, /\.grouping-template-help/);
+  assert.match(stylesSource, /\.grouping-section-title/);
+  assert.match(stylesSource, /\.grouping-templates-info-content/);
+  assert.match(stylesSource, /\.info-tooltip-content-top-start/);
+  assert.match(stylesSource, /\.info-tooltip-glyph/);
 });

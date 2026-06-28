@@ -264,7 +264,8 @@ type GroupingFormDialogState =
   | { kind: 'create-folder'; name: string }
   | { kind: 'rename-folder'; folder: GroupingWorkspaceFolder; name: string }
   | { kind: 'rename-preserved-folder'; scopePath: string; currentLabel: string; name: string }
-  | { kind: 'create-template'; name: string; pattern: string; patternTouched: boolean };
+  | { kind: 'create-template'; value: string }
+  | { kind: 'edit-template'; template: GroupingFolderTemplate; value: string };
 
 type GroupingFormDialogProps = {
   title: string;
@@ -320,6 +321,18 @@ const GroupingFormDialog = ({
       </form>
     </div>
   );
+};
+
+const formatTemplatePreview = (value: string) => {
+  const date = new Date();
+  const year = String(date.getFullYear());
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const tokenDate = `${year}.${month}.${day}`;
+
+  return value
+    .split('{year}').join(year)
+    .split('{date}').join(tokenDate);
 };
 
 const formatPath = (path: string) => path.split('\\').join('/');
@@ -1344,7 +1357,13 @@ export const GroupingPage = () => {
   const handleCreateTemplate = () => {
     if (!canMutateGrouping) return;
     setBackendError(null);
-    setFormDialog({ kind: 'create-template', name: '', pattern: '', patternTouched: false });
+    setFormDialog({ kind: 'create-template', value: '' });
+  };
+
+  const handleEditTemplate = (template: GroupingFolderTemplate) => {
+    if (!canMutateGrouping) return;
+    setBackendError(null);
+    setFormDialog({ kind: 'edit-template', template, value: template.pattern || template.name });
   };
 
   const closeFormDialog = useCallback(() => {
@@ -1380,10 +1399,11 @@ export const GroupingPage = () => {
         setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, sanitizeGroupingFolderLabel(label)));
         markGroupingDraftChanged();
       } else {
-        const name = formDialog.name.trim();
-        const pattern = formDialog.pattern.trim();
-        if (!name || !pattern) return;
-        const response = await createGroupingTemplateRequest({ name, pattern, enabled: true });
+        const value = formDialog.value.trim();
+        if (!value) return;
+        const response = formDialog.kind === 'create-template'
+          ? await createGroupingTemplateRequest({ name: value, pattern: value, enabled: true })
+          : await updateGroupingTemplateRequest(formDialog.template.id, { name: value, pattern: value, enabled: true });
         setWorkspace((current) => (current ? { ...current, templates: response.templates } : current));
       }
 
@@ -1393,21 +1413,12 @@ export const GroupingPage = () => {
         ? t('grouping.createFolderError')
         : formDialog.kind === 'rename-folder' || formDialog.kind === 'rename-preserved-folder'
           ? t('grouping.renameFolderError')
-          : t('grouping.createTemplateError');
+          : formDialog.kind === 'edit-template'
+            ? t('grouping.updateTemplateError')
+            : t('grouping.createTemplateError');
       setBackendError(error instanceof Error ? error.message : fallback);
     } finally {
       setIsSubmittingFormDialog(false);
-    }
-  };
-
-  const handleToggleTemplate = async (template: GroupingFolderTemplate) => {
-    if (!canMutateGrouping) return;
-
-    try {
-      const response = await updateGroupingTemplateRequest(template.id, { enabled: !template.enabled });
-      setWorkspace((current) => (current ? { ...current, templates: response.templates } : current));
-    } catch (error) {
-      setBackendError(error instanceof Error ? error.message : t('grouping.updateTemplateError'));
     }
   };
 
@@ -1552,9 +1563,13 @@ export const GroupingPage = () => {
       ? buildGroupingPreviewUrl(workspace.sessionId, previewItem.id)
       : buildGroupingMediaUrl(workspace.sessionId, previewItem.id)
     : null;
-  const isFormDialogSubmitDisabled = !formDialog || formDialog.kind === 'create-template'
-    ? !formDialog || !formDialog.name.trim() || !formDialog.pattern.trim()
-    : !formDialog.name.trim() || (
+  const isFormDialogSubmitDisabled = !formDialog
+    ? true
+    : formDialog.kind === 'create-template'
+      ? !formDialog.value.trim()
+      : formDialog.kind === 'edit-template'
+        ? !formDialog.value.trim() || formDialog.value.trim() === (formDialog.template.pattern || formDialog.template.name)
+        : !formDialog.name.trim() || (
       (formDialog.kind === 'rename-folder' && formDialog.name.trim() === formDialog.folder.label) ||
       (formDialog.kind === 'rename-preserved-folder' && formDialog.name.trim() === formDialog.currentLabel)
     );
@@ -1960,7 +1975,21 @@ export const GroupingPage = () => {
 
           <div className="grouping-templates">
             <div className="grouping-section-head">
-              <p className="page-section-title">{t('grouping.templates')}</p>
+              <div className="grouping-section-title">
+                <p className="page-section-title">{t('grouping.templates')}</p>
+                <InfoTooltip
+                  label={t('grouping.templatesInfoLabel')}
+                  className="grouping-templates-info"
+                  triggerClassName="grouping-templates-info-trigger"
+                  contentClassName="grouping-templates-info-content"
+                  placement="top-start"
+                  icon="plain"
+                >
+                  <strong>{t('grouping.templatesInfoTitle')}</strong>
+                  <span>{t('grouping.templatesInfoBody')}</span>
+                  <span>{t('grouping.templatesInfoDateNote')}</span>
+                </InfoTooltip>
+              </div>
               <button type="button" onClick={() => void handleCreateTemplate()} disabled={!canMutateGrouping}>
                 {t('grouping.add')}
               </button>
@@ -1968,11 +1997,14 @@ export const GroupingPage = () => {
             {workspace?.templates.length ? (
               workspace.templates.map((template) => (
                 <div key={template.id} className="grouping-template-row">
+                  <div className="grouping-template-copy">
+                    <strong>{template.pattern || template.name}</strong>
+                  </div>
                   <button type="button" onClick={() => void handleCreateFolderFromTemplate(template)} disabled={!canMutateGrouping || !template.enabled}>
-                    {template.name}
+                    {t('grouping.create')}
                   </button>
-                  <button type="button" onClick={() => void handleToggleTemplate(template)} disabled={!canMutateGrouping}>
-                    {template.enabled ? t('grouping.on') : t('grouping.off')}
+                  <button type="button" onClick={() => handleEditTemplate(template)} disabled={!canMutateGrouping}>
+                    {t('grouping.edit')}
                   </button>
                   <button type="button" onClick={() => void handleDeleteTemplate(template)} disabled={!canMutateGrouping}>
                     {t('grouping.delete')}
@@ -2203,10 +2235,14 @@ export const GroupingPage = () => {
             ? t('grouping.createFolderTitle')
             : formDialog.kind === 'rename-folder' || formDialog.kind === 'rename-preserved-folder'
               ? t('grouping.renameTitle')
-              : t('grouping.createTemplateTitle')}
+              : formDialog.kind === 'edit-template'
+                ? t('grouping.editTemplateTitle')
+                : t('grouping.createTemplateTitle')}
           submitLabel={formDialog.kind === 'rename-folder' || formDialog.kind === 'rename-preserved-folder'
             ? t('grouping.rename')
-            : t('grouping.create')}
+            : formDialog.kind === 'edit-template'
+              ? t('grouping.save')
+              : t('grouping.create')}
           cancelLabel={t('grouping.cancel')}
           isSubmitting={isSubmittingFormDialog}
           submitDisabled={isFormDialogSubmitDisabled}
@@ -2214,32 +2250,25 @@ export const GroupingPage = () => {
           onSubmit={() => void submitFormDialog()}
           onCancel={closeFormDialog}
         >
-          {formDialog.kind === 'create-template' ? (
+          {formDialog.kind === 'create-template' || formDialog.kind === 'edit-template' ? (
             <>
               <label>
-                <span>{t('grouping.templateNamePrompt')}</span>
+                <span>{t('grouping.templateValuePrompt')}</span>
                 <input
                   autoFocus
-                  value={formDialog.name}
-                  onChange={(event) => {
-                    const name = event.target.value;
-                    setFormDialog((current) => current?.kind === 'create-template'
-                      ? { ...current, name, pattern: current.patternTouched ? current.pattern : name }
-                      : current);
-                  }}
-                  disabled={isSubmittingFormDialog}
-                />
-              </label>
-              <label>
-                <span>{t('grouping.templatePatternPrompt')}</span>
-                <input
-                  value={formDialog.pattern}
-                  onChange={(event) => setFormDialog((current) => current?.kind === 'create-template'
-                    ? { ...current, pattern: event.target.value, patternTouched: true }
+                  value={formDialog.value}
+                  onChange={(event) => setFormDialog((current) => current?.kind === 'create-template' || current?.kind === 'edit-template'
+                    ? { ...current, value: event.target.value }
                     : current)}
                   disabled={isSubmittingFormDialog}
                 />
               </label>
+              <div className="grouping-template-help">
+                <p>{t('grouping.templateHelpIntro')}</p>
+                <p>{t('grouping.templateTokenHelp')}</p>
+                <p><strong>{t('grouping.templatePreviewLabel')}</strong> <code>{formatTemplatePreview(formDialog.value || 'Test {year} {date}')}</code></p>
+                <p><strong>{t('grouping.templateExamplesLabel')}</strong> {t('grouping.templateExamples')}</p>
+              </div>
             </>
           ) : (
             <label>
@@ -2249,7 +2278,9 @@ export const GroupingPage = () => {
                 value={formDialog.name}
                 onChange={(event) => {
                   const name = event.target.value;
-                  setFormDialog((current) => current && current.kind !== 'create-template' ? { ...current, name } : current);
+                  setFormDialog((current) => current && current.kind !== 'create-template' && current.kind !== 'edit-template'
+                    ? { ...current, name }
+                    : current);
                 }}
                 disabled={isSubmittingFormDialog}
               />

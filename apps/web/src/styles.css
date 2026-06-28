@@ -2805,6 +2805,8 @@ body {
 .info-tooltip {
   display: inline-flex;
   position: relative;
+  flex-shrink: 0;
+  z-index: 1;
 }
 
 .info-tooltip-trigger {
@@ -2820,10 +2822,15 @@ body {
   width: 22px;
 }
 
+.info-tooltip-trigger:focus-visible {
+  border-radius: 999px;
+  outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+  outline-offset: 2px;
+}
+
 .info-tooltip-trigger:hover,
 .info-tooltip-trigger:focus-visible {
   color: var(--accent);
-  outline: none;
 }
 
 .info-tooltip-trigger svg {
@@ -2833,6 +2840,26 @@ body {
   stroke-linecap: round;
   stroke-width: 1.6;
   width: 18px;
+}
+
+.info-tooltip-glyph {
+  display: inline-block;
+  font-size: 16px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.info-tooltip-content-bottom-center {
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+}
+
+.info-tooltip-content-top-start {
+  bottom: calc(100% + 10px);
+  left: 0;
+  transform: none;
 }
 
 .info-tooltip-content {
@@ -2845,14 +2872,11 @@ body {
   font-size: 11px;
   font-weight: 400;
   gap: 7px;
-  left: 50%;
   line-height: 1.45;
   padding: 10px 12px;
   position: absolute;
-  top: calc(100% + 6px);
-  transform: translateX(-50%);
   width: min(290px, 70vw);
-  z-index: 40;
+  z-index: 200;
 }
 
 .info-tooltip-content strong {
@@ -3037,6 +3061,8 @@ body {
   position: sticky;
   top: 20px;
   min-height: 0;
+  z-index: 3;
+  isolation: isolate;
 }
 
 .grouping-folder-list {
@@ -3155,14 +3181,60 @@ body {
   justify-content: space-between;
 }
 
-.grouping-template-row {
-  padding: 0;
+.grouping-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.grouping-template-row button:first-child {
+.grouping-section-title .page-section-title {
+  margin-bottom: 0;
+}
+
+.grouping-templates-info {
+  align-self: center;
+  margin-top: 0;
+}
+
+.grouping-templates-info-trigger {
+  color: color-mix(in srgb, var(--text-muted) 86%, var(--text) 14%);
+  height: 20px;
+  padding: 0;
+  width: 20px;
+}
+
+.grouping-templates-info-trigger .info-tooltip-glyph {
+  font-size: 17px;
+  font-weight: 600;
+  transform: translateY(-1px);
+}
+
+.grouping-templates-info-content {
+  padding: 12px 14px;
+  width: min(300px, 72vw);
+}
+
+.grouping-template-row {
+  padding: 0;
+  align-items: center;
+}
+
+.grouping-template-copy {
   flex: 1;
+  min-width: 0;
+  padding: 5px 7px;
+}
+
+.grouping-template-copy strong {
   color: var(--text);
-  text-align: left;
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.grouping-template-row button:first-of-type {
+  margin-left: auto;
 }
 
 .grouping-main {
@@ -3387,6 +3459,31 @@ body {
   border-color: var(--accent);
   outline: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
   outline-offset: 1px;
+}
+
+.grouping-template-help {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 88%, white);
+  padding: 12px;
+}
+
+.grouping-template-help p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.grouping-template-help strong {
+  color: var(--text);
+}
+
+.grouping-template-help code {
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .grouping-form-dialog-error {

@@ -3,13 +3,29 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 type InfoTooltipProps = {
   label: string;
   children: ReactNode;
+  className?: string;
+  triggerClassName?: string;
+  contentClassName?: string;
+  placement?: 'bottom-center' | 'top-start';
+  icon?: 'circled' | 'plain';
 };
 
-export const InfoTooltip = ({ label, children }: InfoTooltipProps) => {
+export const InfoTooltip = ({
+  label,
+  children,
+  className,
+  triggerClassName,
+  contentClassName,
+  placement = 'bottom-center',
+  icon = 'circled'
+}: InfoTooltipProps) => {
   const tooltipId = useId();
   const containerRef = useRef<HTMLSpanElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
+  const containerClassName = ['info-tooltip', className].filter(Boolean).join(' ');
+  const triggerClasses = ['info-tooltip-trigger', triggerClassName].filter(Boolean).join(' ');
+  const contentClasses = ['info-tooltip-content', `info-tooltip-content-${placement}`, contentClassName].filter(Boolean).join(' ');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -37,7 +53,7 @@ export const InfoTooltip = ({ label, children }: InfoTooltipProps) => {
 
   return (
     <span
-      className="info-tooltip"
+      className={containerClassName}
       ref={containerRef}
       onMouseEnter={() => setIsOpen(true)}
       onMouseLeave={() => {
@@ -52,7 +68,7 @@ export const InfoTooltip = ({ label, children }: InfoTooltipProps) => {
       }}
     >
       <button
-        className="info-tooltip-trigger"
+        className={triggerClasses}
         type="button"
         aria-label={label}
         aria-expanded={isOpen}
@@ -68,13 +84,17 @@ export const InfoTooltip = ({ label, children }: InfoTooltipProps) => {
           setIsPinned(true);
         }}
       >
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <circle cx="10" cy="10" r="8" />
-          <path d="M10 9v5M10 6.2v.1" />
-        </svg>
+        {icon === 'plain' ? (
+          <span className="info-tooltip-glyph" aria-hidden="true">i</span>
+        ) : (
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="10" cy="10" r="8" />
+            <path d="M10 9v5M10 6.2v.1" />
+          </svg>
+        )}
       </button>
       {isOpen && (
-        <span className="info-tooltip-content" id={tooltipId} role="tooltip">
+        <span className={contentClasses} id={tooltipId} role="tooltip">
           {children}
         </span>
       )}
