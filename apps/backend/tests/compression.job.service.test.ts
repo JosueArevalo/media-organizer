@@ -976,6 +976,159 @@ test('failed compression sessions resume only failed image items', async () => {
   assert.equal(progress?.failed, 0);
 });
 
+test('failed compression resume replaces aliased failed items with completed results', async () => {
+  const originalRealpathNative = fs.realpathSync.native;
+  const { startCompressionSession, startCompressionSessionResume, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js?resume-failed-alias=1');
+  const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js?resume-failed-alias=1');
+  const scopedSourceDir = path.join(tempRoot, 'resume-failed-alias-source');
+  const scopedOutputDir = path.join(tempRoot, 'resume-failed-alias-output');
+  const toolsDir = path.join(tempRoot, 'resume-failed-alias-tools');
+  const callLogPath = path.join(tempRoot, 'resume-failed-alias-calls.log');
+  const aliasSourceDir = path.join(tempRoot, 'resume-failed-alias-source-link');
+  fs.rmSync(scopedSourceDir, { recursive: true, force: true });
+  fs.rmSync(scopedOutputDir, { recursive: true, force: true });
+  fs.rmSync(toolsDir, { recursive: true, force: true });
+  fs.rmSync(callLogPath, { force: true });
+  fs.mkdirSync(scopedSourceDir, { recursive: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+
+  fs.realpathSync.native = ((targetPath: fs.PathLike) => {
+    const inputPath = String(targetPath);
+    if (inputPath.startsWith(aliasSourceDir)) {
+      return originalRealpathNative(inputPath.replace(aliasSourceDir, scopedSourceDir));
+    }
+    return originalRealpathNative(targetPath);
+  }) as typeof fs.realpathSync.native;
+
+  try {
+    for (const name of ['done-a.jpg', 'done-b.jpg', 'failed.jpg']) {
+      fs.writeFileSync(path.join(scopedSourceDir, name), `source-${name}`, 'utf8');
+    }
+
+    const started = startCompressionSession({
+      name: 'Failed image resume alias test',
+      sourceDir: scopedSourceDir,
+      outputDir: scopedOutputDir,
+      imageQuality: 80,
+      imageProfileLabel: 'Balanced',
+      videoPresetLabel: 'Balanced',
+      imageToolCommand: writeFakeImageTool(toolsDir, callLogPath),
+      videoToolCommand: '__missing_video_encoder__'
+    });
+
+    const db = getDb();
+    const timestamp = new Date().toISOString();
+
+    for (const name of ['done-a.jpg', 'done-b.jpg', 'failed.jpg']) {
+      const sourcePath = path.join(scopedSourceDir, name);
+      const outputPath = path.join(started.outputRoot, name);
+      const itemId = `resume-alias-${name}`;
+      const status = name === 'failed.jpg' ? 'failed' : 'completed';
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      fs.writeFileSync(outputPath, status === 'completed' ? `compressed-${name}` : `fallback-${name}`, 'utf8');
+
+      db.prepare(
+        `
+          INSERT INTO media_items (
+            id,
+            session_id,
+            source_path,
+            relative_path,
+            media_type,
+            source_kind_detected,
+            source_kind_override,
+            size_bytes,
+            capture_time,
+            created_at,
+            updated_at
+          ) VALUES (?, ?, ?, ?, 'image', 'unknown', NULL, ?, NULL, ?, ?)
+        `
+      ).run(itemId, started.session.id, sourcePath, name, fs.statSync(outputPath).size, timestamp, timestamp);
+
+      db.prepare(
+        `
+          INSERT INTO item_decisions (
+            id,
+            session_id,
+            item_id,
+            selected_for_compression,
+            selected_for_output,
+            target_group_label,
+            user_overridden,
+            updated_at
+          ) VALUES (?, ?, ?, 1, 1, NULL, 0, ?)
+        `
+      ).run(`decision-alias-${name}`, started.session.id, itemId, timestamp);
+
+      db.prepare(
+        `
+          INSERT INTO item_stage_status (
+            id,
+            session_id,
+            item_id,
+            stage,
+            status,
+            attempt_count,
+            last_error,
+            updated_at
+          ) VALUES (?, ?, ?, 'compress', ?, 1, ?, ?)
+        `
+      ).run(`status-alias-${name}`, started.session.id, itemId, status, status === 'failed' ? 'Could not read image.' : null, timestamp);
+    }
+
+    db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run('failed', started.session.id);
+    db.prepare(
+      `
+        UPDATE session_checkpoints
+        SET payload_json = ?
+        WHERE session_id = ? AND stage = 'compress'
+      `
+    ).run(
+      JSON.stringify({
+        outputRoot: started.outputRoot,
+        manifest: started.manifest,
+        totalCount: 3,
+        summary: {
+          completedItems: 2,
+          failedItems: 1,
+          totalCompressCount: 3,
+          totalCopyCount: 0,
+          completedCompressCount: 2,
+          completedCopyCount: 0,
+          failedCompressCount: 1,
+          failedCopyCount: 0
+        },
+        processedItems: ['done-a.jpg', 'done-b.jpg', 'failed.jpg'].map((name) => ({
+          source: path.join(name === 'failed.jpg' ? aliasSourceDir : scopedSourceDir, name),
+          output: path.join(started.outputRoot, name),
+          command: [],
+          status: name === 'failed.jpg' ? 'failed' : 'completed',
+          operation: 'compress',
+          ...(name === 'failed.jpg' ? { error: 'Could not read image.' } : {})
+        }))
+      }),
+      started.session.id
+    );
+
+    const resumed = startCompressionSessionResume(started.session.id);
+    assert.equal(resumed?.accepted, true);
+    assert.equal(resumed?.progress?.completed, 2);
+    assert.equal(resumed?.progress?.failed, 1);
+
+    await executeCompressionSession(started.session.id);
+
+    const progress = getCompressionProgress(started.session.id);
+    assert.equal(progress?.status, 'completed');
+    assert.equal(progress?.completed, 3);
+    assert.equal(progress?.failed, 0);
+    assert.equal(progress?.processedItems.filter((item) => item.status === 'failed').length, 0);
+    assert.equal(progress?.processedItems.filter((item) => path.basename(item.sourcePath) === 'failed.jpg').length, 1);
+  } finally {
+    fs.realpathSync.native = originalRealpathNative;
+  }
+});
+
 test('fatal compression resume errors preserve existing failed item counts', async () => {
   const { startCompressionSession, markCompressionSessionFailed, getCompressionProgress, getCompressionSession } = await import('../src/pipeline/compression/compressionJob.service.js?fatal-resume-counts=1');
   const scopedSourceDir = path.join(tempRoot, 'fatal-resume-source');

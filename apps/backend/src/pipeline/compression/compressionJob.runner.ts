@@ -224,6 +224,7 @@ const tryGetCanonicalPath = (value: string) => {
     return value;
   }
 };
+const getCanonicalPathKey = (value: string) => normalizeComparablePath(tryGetCanonicalPath(value)).toLowerCase();
 
 const getSourceDisplayPath = (sourceDir: string, sourcePath: string) => {
   const relativePath = path.relative(sourceDir, sourcePath);
@@ -855,7 +856,7 @@ const calculateProgressFromProcessedItems = (items: ScriptResultItem[], totalCom
 };
 
 const toActiveCompressionItem = (item: ScriptActiveItem, scope: SelectionScope, policy: CompressionProcessingPolicy, sourceDir: string): ActiveCompressionItem => ({
-  id: normalizePath(item.source),
+  id: getCanonicalPathKey(item.source),
   sourcePath: item.source,
   displayPath: getSourceDisplayPath(sourceDir, item.source),
   operation: item.operation ?? (isCompressOperation(item.source, scope, policy) ? 'compress' : 'copy'),
@@ -863,13 +864,13 @@ const toActiveCompressionItem = (item: ScriptActiveItem, scope: SelectionScope, 
 });
 
 const withoutActiveItem = (items: ActiveCompressionItem[], sourcePath: string) => {
-  const itemId = normalizePath(sourcePath);
+  const itemId = getCanonicalPathKey(sourcePath);
   return items.filter((item) => item.id !== itemId);
 };
 
 const replaceProcessedItem = (items: ScriptResultItem[], item: ScriptResultItem) => {
-  const itemId = normalizePath(item.source);
-  const existingIndex = items.findIndex((processedItem) => normalizePath(processedItem.source) === itemId);
+  const itemId = getCanonicalPathKey(item.source);
+  const existingIndex = items.findIndex((processedItem) => getCanonicalPathKey(processedItem.source) === itemId);
 
   if (existingIndex >= 0) {
     items.splice(existingIndex, 1, item);
@@ -957,13 +958,13 @@ export const executeCompressionSession = async (sessionId: string) => {
   const checkpointProcessedItems = (checkpointData.processedItems ?? []).map((item) =>
     enrichResultItemDisplayPath(checkpointData.manifest.sourceDir, item)
   );
-  const checkpointItemsBySource = new Map(checkpointProcessedItems.map((item) => [normalizePath(item.source), item]));
-  const enrichedResumeCompletedItems = resumeCompletedItems.map((item) => checkpointItemsBySource.get(normalizePath(item.source)) ?? item);
+  const checkpointItemsBySource = new Map(checkpointProcessedItems.map((item) => [getCanonicalPathKey(item.source), item]));
+  const enrichedResumeCompletedItems = resumeCompletedItems.map((item) => checkpointItemsBySource.get(getCanonicalPathKey(item.source)) ?? item);
   let activeItems: ActiveCompressionItem[] = [];
-  const completedSources = new Set(resumeCompletedItems.map((item) => normalizePath(item.source)));
+  const completedSources = new Set(resumeCompletedItems.map((item) => getCanonicalPathKey(item.source)));
   const processedItems: ScriptResultItem[] = [
     ...enrichedResumeCompletedItems,
-    ...checkpointProcessedItems.filter((item) => item.status === 'failed' && !completedSources.has(normalizePath(item.source)))
+    ...checkpointProcessedItems.filter((item) => item.status === 'failed' && !completedSources.has(getCanonicalPathKey(item.source)))
   ];
   let progressState = calculateProgressFromProcessedItems(processedItems, totalCompressCount, totalCopyCount);
 
