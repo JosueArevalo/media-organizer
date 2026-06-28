@@ -14,6 +14,8 @@ pnpm-debug.log*
 *.tsbuildinfo
 coverage/
 apps/**/.vite/
+build/
+release/
 
 # Local environment files
 .env

@@ -216,16 +216,30 @@ const executeCommand = async (
 };
 
 const normalizePath = (value: string) => path.resolve(value).replace(/\\/g, '/').toLowerCase();
+const normalizeComparablePath = (value: string) => path.resolve(value).replace(/[\\/]+/g, '/');
 
 const getSourceDisplayPath = (sourceDir: string, sourcePath: string) => {
   const relativePath = path.relative(sourceDir, sourcePath);
   const escapesSource = relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || relativePath.startsWith('../') || relativePath.startsWith('..\\');
 
-  if (!relativePath || path.isAbsolute(relativePath) || escapesSource) {
-    return sourcePath;
+  if (relativePath && !path.isAbsolute(relativePath) && !escapesSource) {
+    return relativePath.replace(/[\\/]+/g, '\\');
   }
 
-  return relativePath.replace(/[\\/]+/g, '\\');
+  const normalizedSourceDir = normalizeComparablePath(sourceDir).replace(/\/+$/u, '');
+  const normalizedSourcePath = normalizeComparablePath(sourcePath);
+  const normalizedSourceDirLower = normalizedSourceDir.toLowerCase();
+  const normalizedSourcePathLower = normalizedSourcePath.toLowerCase();
+
+  if (normalizedSourcePathLower.startsWith(`${normalizedSourceDirLower}/`)) {
+    const normalizedRelativePath = normalizedSourcePath.slice(normalizedSourceDir.length + 1);
+
+    if (normalizedRelativePath) {
+      return normalizedRelativePath.replace(/[\\/]+/g, '\\');
+    }
+  }
+
+  return sourcePath;
 };
 
 const enrichResultItemDisplayPath = (sourceDir: string, item: ScriptResultItem): ScriptResultItem => ({

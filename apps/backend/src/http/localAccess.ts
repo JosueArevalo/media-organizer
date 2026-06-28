@@ -37,9 +37,17 @@ export const getCorsHeaders = (origin: string | undefined) => {
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Range',
+    'Access-Control-Allow-Headers': 'Content-Type, Range, X-Media-Organizer-Token',
     Vary: 'Origin'
   };
+};
+
+export const isDesktopRequestAuthorized = (token: string | string[] | undefined, expectedToken = process.env.MEDIA_ORGANIZER_DESKTOP_TOKEN) => {
+  if (!expectedToken) {
+    return true;
+  }
+
+  return typeof token === 'string' && token.length > 0 && token === expectedToken;
 };
 
 export const hasDestructiveConfirmation = (body: unknown, expectedConfirmation: string) => {

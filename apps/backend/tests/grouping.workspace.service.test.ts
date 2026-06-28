@@ -194,6 +194,16 @@ printf 'preview\\n' > "$last"
   return filePath;
 };
 
+const writeSlowFakeMagick = (toolsDir: string) => {
+  const filePath = writeFakeMagick(toolsDir, true);
+  const source = fs.readFileSync(filePath, 'utf8');
+  const delayed = process.platform === 'win32'
+    ? source.replace('set "last="', 'ping 127.0.0.1 -n 2 >nul\nset "last="')
+    : source.replace('last=""', 'sleep 0.5\nlast=""');
+  fs.writeFileSync(filePath, delayed, 'utf8');
+  return filePath;
+};
+
 test('createGroupingWorkspace opens without automatic proposals', async () => {
   const { compressionSessionId } = seedCompressionSession([
     'IMG_20250102_101010.jpg',
@@ -244,7 +254,7 @@ test('getGroupingPreviewPath serves web-safe images without conversion', async (
   const { createGroupingWorkspace, getGroupingPreviewPath } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
   const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
 
-  const preview = getGroupingPreviewPath(workspace.sessionId, items[0].itemId);
+  const preview = await getGroupingPreviewPath(workspace.sessionId, items[0].itemId);
 
   assert.ok(preview);
   assert.equal(preview.path, path.join(outputDir, 'photo.webp'));
@@ -295,6 +305,19 @@ test('getGroupingThumbnailPath regenerates stale thumbnails', async () => {
   assert.ok(fs.statSync(thumbnail.path).mtimeMs >= initialMtime);
 });
 
+test('getGroupingThumbnailPath reports corrupt images without leaving temporary files', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['corrupt.jpg']);
+  fs.writeFileSync(items[0].outputPath, 'not an image');
+  const { createGroupingWorkspace, getGroupingThumbnailPath, GroupingPreviewError } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  await assert.rejects(
+    getGroupingThumbnailPath(workspace.sessionId, items[0].itemId),
+    (error) => error instanceof GroupingPreviewError && /thumbnail/.test(error.message)
+  );
+  const previewDir = path.join(outputDir, '.media-organizer', 'previews', workspace.sessionId);
+  assert.deepEqual(fs.existsSync(previewDir) ? fs.readdirSync(previewDir).filter((name) => name.includes('.tmp.')) : [], []);
+});
+
 test('getGroupingThumbnailPath supports web formats, EXIF rotation and concurrent requests', async () => {
   const { compressionSessionId, items } = seedCompressionSession(['photo.jpg', 'photo.png', 'photo.webp', 'photo.gif']);
   await Promise.all([
@@ -334,7 +357,7 @@ test('getGroupingPreviewPath generates and reuses HEIC previews with ImageMagick
   const { createGroupingWorkspace, getGroupingPreviewPath } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
   const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
 
-  const preview = getGroupingPreviewPath(workspace.sessionId, items[0].itemId);
+  const preview = await getGroupingPreviewPath(workspace.sessionId, items[0].itemId);
 
   assert.ok(preview);
   assert.equal(preview.path.endsWith('.jpg'), true);
@@ -342,10 +365,37 @@ test('getGroupingPreviewPath generates and reuses HEIC previews with ImageMagick
   assert.equal(fs.readFileSync(preview.path, 'utf8').trim(), 'preview');
 
   fs.writeFileSync(preview.path, 'cached\n', 'utf8');
-  const cachedPreview = getGroupingPreviewPath(workspace.sessionId, items[0].itemId);
+  const cachedPreview = await getGroupingPreviewPath(workspace.sessionId, items[0].itemId);
 
   assert.equal(cachedPreview?.path, preview.path);
   assert.equal(fs.readFileSync(preview.path, 'utf8').trim(), 'cached');
+});
+
+test('health remains responsive while an ImageMagick preview is running', async () => {
+  const { compressionSessionId, items } = seedCompressionSession(['slow.heic']);
+  const fakeMagick = writeSlowFakeMagick(path.join(tempRoot, 'tools-slow-preview'));
+  seedCompressionManifest(compressionSessionId, fakeMagick);
+  const { createGroupingWorkspace } = await import('../src/pipeline/grouping/groupingWorkspace.service.js');
+  const { createBackendServer } = await import('../src/index.js');
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+  const server = createBackendServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+    const base = `http://127.0.0.1:${address.port}`;
+    const previewPromise = fetch(`${base}/api/grouping/${workspace.sessionId}/items/${items[0].itemId}/preview`, {
+      headers: { Origin: 'http://localhost:5173' }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const startedAt = Date.now();
+    const health = await fetch(`${base}/api/health`, { headers: { Origin: 'http://localhost:5173' } });
+    assert.equal(health.status, 200);
+    assert.ok(Date.now() - startedAt < 400);
+    assert.equal((await previewPromise).status, 200);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test('getGroupingThumbnailPath reports ImageMagick errors', async () => {
@@ -406,8 +456,8 @@ test('getGroupingPreviewPath reports HEIC support errors from ImageMagick', asyn
   );
   const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
 
-  assert.throws(
-    () => getGroupingPreviewPath(workspace.sessionId, items[0].itemId),
+  await assert.rejects(
+    getGroupingPreviewPath(workspace.sessionId, items[0].itemId),
     (error) => error instanceof GroupingPreviewError && /HEIC\/HEIF support/.test(error.message)
   );
 });

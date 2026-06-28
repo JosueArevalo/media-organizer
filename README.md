@@ -63,7 +63,13 @@ Every filesystem-writing step is explicit. The dashboard keeps the proposed resu
 
 ## 🚀 Quick Start
 
-To launch the dashboard you only need **Git**, **Node.js**, and **npm**. Media-processing tools can be installed afterwards when you need compression, conversion, or metadata support.
+For non-technical users, Windows x64 portable builds are published on the [Releases page](https://github.com/JosueArevalo/media-organizer/releases). Download the `Media-Organizer-*-windows-x64-portable.exe` file and open it directly; no installer, Node.js, npm, Git, or Python is required. Application data remains in `%APPDATA%\Media Organizer` when the executable is replaced.
+
+The first beta builds are unsigned, so Windows SmartScreen can display an **Unknown publisher** warning. Verify the downloaded file against `SHA256SUMS.txt` from the same release. Automatic updates are not enabled; download a newer executable manually when a new release is available.
+
+MozJPEG, ImageMagick, ExifTool and HandBrakeCLI are intentionally not redistributed. Configure their executable paths from **Settings** when the corresponding processing feature is needed. The application can still start, select folders, inspect media and use safe copy paths when those optional tools are absent.
+
+For source-based development, you need **Git**, **Node.js**, and **npm**. Media-processing tools can be installed afterwards when you need compression, conversion, or metadata support.
 
 The repository is pinned to **Node.js `22.22.3`**. The supported minimum is `22.13.0`; Node 24 LTS is also supported.
 
@@ -375,7 +381,7 @@ V1 is local-first and single-user:
 
 Media Organizer is under active development. The current focus is a dependable local MVP with preview-driven workflows, explicit filesystem writes, resumable state, and practical cross-platform setup.
 
-There is currently no packaged release or Docker requirement: clone the repository, install a supported Node.js version, and run it locally.
+Packaged Windows releases require no Docker or source checkout. Developers can still clone the repository, install a supported Node.js version, and run it locally.
 
 ## 🤝 Contributing
 

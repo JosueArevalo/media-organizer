@@ -43,9 +43,12 @@ import { handleSystemRoutes } from './system/system.routes.js';
 import {
   getCorsHeaders,
   isAllowedLocalHost,
-  isAllowedLocalOrigin
+  isAllowedLocalOrigin,
+  isDesktopRequestAuthorized
 } from './http/localAccess.js';
 import { readRequestJson, sendCaughtError, sendEmpty, sendJson } from './http/httpResponses.js';
+import { getRuntimeInfo } from './runtime/runtimeInfo.js';
+import { beginGroupingMediaOperation } from './pipeline/grouping/groupingMediaDiagnostics.js';
 
 const port = Number(process.env.PORT ?? 4000);
 const BACKEND_HEALTH_OFFLINE_REPORT_PATH = '/api/health/offline-report';
@@ -188,6 +191,43 @@ const getMediaContentType = (filePath: string) => {
   return 'application/octet-stream';
 };
 
+type MediaByteRange =
+  | { kind: 'full' }
+  | { kind: 'partial'; start: number; end: number }
+  | { kind: 'unsatisfiable' };
+
+const parseMediaByteRange = (value: string | undefined, size: number): MediaByteRange => {
+  if (!value) return { kind: 'full' };
+  if (size === 0) return { kind: 'unsatisfiable' };
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return { kind: 'unsatisfiable' };
+
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return { kind: 'unsatisfiable' };
+    return {
+      kind: 'partial',
+      start: Math.max(0, size - suffixLength),
+      end: size - 1
+    };
+  }
+
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (
+    !Number.isSafeInteger(start)
+    || !Number.isSafeInteger(requestedEnd)
+    || start < 0
+    || start >= size
+    || requestedEnd < start
+  ) {
+    return { kind: 'unsatisfiable' };
+  }
+
+  return { kind: 'partial', start, end: Math.min(requestedEnd, size - 1) };
+};
+
 const streamMediaFile = (
   req: import('node:http').IncomingMessage,
   res: import('node:http').ServerResponse,
@@ -195,16 +235,22 @@ const streamMediaFile = (
   cacheControl = 'private, max-age=3600'
 ) => {
   const stats = fs.statSync(filePath);
-  const range = req.headers.range;
-  const headersBase = {
+  const contentType = getMediaContentType(filePath);
+  const range = parseMediaByteRange(req.method === 'HEAD' ? undefined : req.headers.range, stats.size);
+  const headersBase: Record<string, string> = {
     'Accept-Ranges': 'bytes',
     'Cache-Control': cacheControl,
     'Last-Modified': stats.mtime.toUTCString(),
-    'Content-Type': getMediaContentType(filePath)
+    'Content-Type': contentType
   };
-
   const pipeStream = (stream: fs.ReadStream) => {
-    req.on('aborted', () => stream.destroy());
+    const destroyStream = () => stream.destroy();
+    req.once('aborted', destroyStream);
+    res.once('close', destroyStream);
+    stream.once('close', () => {
+      req.removeListener('aborted', destroyStream);
+      res.removeListener('close', destroyStream);
+    });
     stream.on('error', () => {
       if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -217,41 +263,57 @@ const streamMediaFile = (
     stream.pipe(res);
   };
 
-  if (!range) {
-    res.writeHead(200, {
-      ...headersBase,
-      'Content-Length': stats.size
-    });
-    pipeStream(fs.createReadStream(filePath));
-    return;
-  }
-
-  const match = range.match(/bytes=(\d*)-(\d*)/);
-
-  if (!match) {
-    res.writeHead(416, headersBase);
-    res.end();
-    return;
-  }
-
-  const start = match[1] ? Number(match[1]) : 0;
-  const end = match[2] ? Number(match[2]) : stats.size - 1;
-
-  if (start >= stats.size || end >= stats.size || start > end) {
+  if (range.kind === 'unsatisfiable') {
     res.writeHead(416, {
       ...headersBase,
+      'Content-Length': '0',
       'Content-Range': `bytes */${stats.size}`
     });
     res.end();
     return;
   }
 
+  if (range.kind === 'full') {
+    res.writeHead(200, {
+      ...headersBase,
+      'Content-Length': stats.size
+    });
+    if (req.method === 'HEAD' || stats.size === 0) {
+      res.end();
+      return;
+    }
+    pipeStream(fs.createReadStream(filePath));
+    return;
+  }
+
   res.writeHead(206, {
     ...headersBase,
-    'Content-Length': end - start + 1,
-    'Content-Range': `bytes ${start}-${end}/${stats.size}`
+    'Content-Length': range.end - range.start + 1,
+    'Content-Range': `bytes ${range.start}-${range.end}/${stats.size}`
   });
-  pipeStream(fs.createReadStream(filePath, { start, end }));
+  pipeStream(fs.createReadStream(filePath, { start: range.start, end: range.end }));
+};
+
+const traceGroupingMediaRequest = (
+  req: import('node:http').IncomingMessage,
+  res: import('node:http').ServerResponse,
+  operation: 'media' | 'poster' | 'preview' | 'thumbnail',
+  sessionId: string,
+  itemId: string
+) => {
+  const item = getGroupingWorkspace(sessionId)?.items.find((candidate) => candidate.id === itemId);
+  const trace = beginGroupingMediaOperation({
+    operation,
+    sessionId,
+    itemId,
+    fileName: item?.fileName ?? 'unknown'
+  });
+  req.once('aborted', () => trace.finish('aborted'));
+  res.once('finish', () => trace.finish('completed'));
+  res.once('close', () => {
+    if (!res.writableFinished) trace.finish('aborted');
+  });
+  return trace;
 };
 
 export const createBackendServer = (appliedMigrations = runMigrations()) => {
@@ -277,8 +339,28 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     return;
   }
 
+  if (!isDesktopRequestAuthorized(req.headers['x-media-organizer-token'])) {
+    sendJson(res, 401, { status: 'unauthorized' });
+    return;
+  }
+
   for (const [header, value] of Object.entries(getCorsHeaders(req.headers.origin))) {
     res.setHeader(header, value);
+  }
+
+  const internalMediaMatch = requestUrl.pathname.match(/^\/internal\/grouping\/([^/]+)\/items\/([^/]+)\/media-path$/);
+  if (internalMediaMatch && req.method === 'GET') {
+    if (!process.env.MEDIA_ORGANIZER_DESKTOP_TOKEN) {
+      sendJson(res, 404, { status: 'not_found' });
+      return;
+    }
+    const media = getGroupingMediaPath(decodeURIComponent(internalMediaMatch[1]), decodeURIComponent(internalMediaMatch[2]));
+    if (!media || !fs.existsSync(media.path)) {
+      sendJson(res, 404, { status: 'not_found' });
+      return;
+    }
+    sendJson(res, 200, { path: media.path, contentType: getMediaContentType(media.path) });
+    return;
   }
 
   if (requestUrl.pathname === BACKEND_HEALTH_OFFLINE_REPORT_PATH && req.method === 'POST') {
@@ -304,6 +386,12 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
       dbPath: getDbPath(),
       appliedMigrations
     });
+    return;
+  }
+
+
+  if (requestUrl.pathname === '/api/system/runtime' && req.method === 'GET') {
+    sendJson(res, 200, getRuntimeInfo());
     return;
   }
 
@@ -448,7 +536,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     return;
   }
 
-  if (requestUrl.pathname.startsWith('/api/grouping/') && ['GET', 'POST', 'PATCH', 'DELETE'].includes(req.method ?? '')) {
+  if (requestUrl.pathname.startsWith('/api/grouping/') && ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'].includes(req.method ?? '')) {
     const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
     const sessionId = pathSegments[2];
     const subPath = pathSegments[3];
@@ -682,7 +770,10 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
       return;
     }
 
-    if (req.method === 'GET' && subPath === 'items' && subId && tailPath === 'media') {
+    if ((req.method === 'GET' || req.method === 'HEAD') && subPath === 'items' && subId && tailPath === 'media') {
+      const usage = requestUrl.searchParams.get('usage');
+      const operation = usage === 'poster' ? 'poster' : 'media';
+      const trace = traceGroupingMediaRequest(req, res, operation, sessionId, subId);
       try {
         const media = getGroupingMediaPath(sessionId, subId);
 
@@ -693,6 +784,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
 
         streamMediaFile(req, res, media.path);
       } catch (error) {
+        trace.finish('failed', error);
         sendJson(res, 500, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not stream media.'
@@ -703,8 +795,9 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     }
 
     if (req.method === 'GET' && subPath === 'items' && subId && tailPath === 'preview') {
+      const trace = traceGroupingMediaRequest(req, res, 'preview', sessionId, subId);
       try {
-        const media = getGroupingPreviewPath(sessionId, subId);
+        const media = await getGroupingPreviewPath(sessionId, subId);
 
         if (!media || !fs.existsSync(media.path)) {
           sendJson(res, 404, { status: 'not_found' });
@@ -713,6 +806,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
 
         streamMediaFile(req, res, media.path);
       } catch (error) {
+        trace.finish('failed', error);
         if (error instanceof GroupingPreviewError) {
           sendJson(res, 422, {
             status: 'preview_unavailable',
@@ -731,6 +825,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     }
 
     if (req.method === 'GET' && subPath === 'items' && subId && tailPath === 'thumbnail') {
+      const trace = traceGroupingMediaRequest(req, res, 'thumbnail', sessionId, subId);
       try {
         const media = await getGroupingThumbnailPath(sessionId, subId);
 
@@ -741,6 +836,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
 
         streamMediaFile(req, res, media.path, 'private, max-age=86400');
       } catch (error) {
+        trace.finish('failed', error);
         if (error instanceof GroupingPreviewError) {
           sendJson(res, 422, {
             status: 'preview_unavailable',
@@ -819,7 +915,7 @@ if (isMainModule) {
     process.exit(1);
   });
 
-  server.listen(port, () => {
+  server.listen(port, '127.0.0.1', () => {
     console.log(`[backend] running at http://localhost:${port}`);
   });
 }

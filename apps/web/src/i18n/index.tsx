@@ -7,8 +7,8 @@ const STORAGE_KEY = 'mediaOrganizer.locale';
 const DEFAULT_LOCALE: Locale = 'en';
 
 export const languages: LanguageOption[] = [
-  { locale: 'en', label: 'English', shortLabel: 'EN', flag: '🇬🇧' },
-  { locale: 'es', label: 'Español', shortLabel: 'ES', flag: '🇪🇸' }
+  { locale: 'en', label: 'English', shortLabel: 'EN' },
+  { locale: 'es', label: 'Español', shortLabel: 'ES' }
 ];
 
 export const dictionaries: Record<Locale, TranslationDictionary> = {

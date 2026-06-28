@@ -512,11 +512,24 @@ const getSourceDisplayPath = (sourceDir: string | null, sourcePath: string) => {
   const relativePath = path.relative(sourceDir, sourcePath);
   const escapesSource = relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || relativePath.startsWith('../') || relativePath.startsWith('..\\');
 
-  if (!relativePath || path.isAbsolute(relativePath) || escapesSource) {
-    return sourcePath;
+  if (relativePath && !path.isAbsolute(relativePath) && !escapesSource) {
+    return relativePath.replace(/[\\/]+/g, '\\');
   }
 
-  return relativePath.replace(/[\\/]+/g, '\\');
+  const normalizedSourceDir = path.resolve(sourceDir).replace(/[\\/]+/g, '/').replace(/\/+$/u, '');
+  const normalizedSourcePath = path.resolve(sourcePath).replace(/[\\/]+/g, '/');
+  const normalizedSourceDirLower = normalizedSourceDir.toLowerCase();
+  const normalizedSourcePathLower = normalizedSourcePath.toLowerCase();
+
+  if (normalizedSourcePathLower.startsWith(`${normalizedSourceDirLower}/`)) {
+    const normalizedRelativePath = normalizedSourcePath.slice(normalizedSourceDir.length + 1);
+
+    if (normalizedRelativePath) {
+      return normalizedRelativePath.replace(/[\\/]+/g, '\\');
+    }
+  }
+
+  return sourcePath;
 };
 
 export const getCompressionProgress = (sessionId: string): CompressionProgressData | null => {

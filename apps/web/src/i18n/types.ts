@@ -10,5 +10,4 @@ export type LanguageOption = {
   locale: Locale;
   label: string;
   shortLabel: string;
-  flag: string;
 };

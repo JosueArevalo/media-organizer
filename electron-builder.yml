@@ -1,0 +1,44 @@
+appId: com.mediaorganizer.desktop
+productName: Media Organizer
+copyright: Copyright © 2026 Media Organizer contributors
+asar: true
+compression: normal
+npmRebuild: true
+files:
+  - apps/desktop/dist/**/*
+  - apps/desktop/assets/icon.png
+  - package.json
+extraResources:
+  - from: THIRD_PARTY_NOTICES.md
+    to: THIRD_PARTY_NOTICES.md
+  - from: apps/web/dist
+    to: web
+  - from: apps/backend/src/state/migrations
+    to: migrations
+    filter:
+      - "*.sql"
+  - from: apps/backend/dist
+    to: backend/dist
+  - from: apps/backend/package.json
+    to: backend/package.json
+  - from: node_modules/sharp
+    to: backend/node_modules/sharp
+  - from: node_modules/@img
+    to: backend/node_modules/@img
+  - from: node_modules/detect-libc
+    to: backend/node_modules/detect-libc
+  - from: node_modules/semver
+    to: backend/node_modules/semver
+  - from: build/worker/win-x64
+    to: worker
+win:
+  target:
+    - target: portable
+      arch:
+        - x64
+  icon: apps/desktop/assets/icon.ico
+portable:
+  artifactName: Media-Organizer-${version}-windows-x64-portable.${ext}
+directories:
+  output: release
+  buildResources: apps/desktop/assets

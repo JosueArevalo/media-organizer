@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { InfoTooltip } from '../components/InfoTooltip';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
@@ -22,6 +22,7 @@ import {
   buildGroupingMediaUrl,
   buildGroupingPreviewUrl,
   buildGroupingThumbnailUrl,
+  buildGroupingVideoPosterUrl,
   createGroupingFolderFromTemplateRequest,
   createGroupingFolderRequest,
   createGroupingTemplateRequest,
@@ -43,6 +44,7 @@ import {
   type GroupingWorkspaceItem,
   type ExecutionVerification
 } from '../services/grouping.service';
+import { generateVideoPoster, getCachedVideoPoster } from '../services/video-poster.service';
 
 const formatBytes = (value: number) => {
   if (value <= 0) return '0 B';
@@ -229,6 +231,67 @@ type MarqueeSelection = {
   isAdditive: boolean;
 };
 
+type GroupingFormDialogState =
+  | { kind: 'create-folder'; name: string }
+  | { kind: 'rename-folder'; folder: GroupingWorkspaceFolder; name: string }
+  | { kind: 'create-template'; name: string; pattern: string; patternTouched: boolean };
+
+type GroupingFormDialogProps = {
+  title: string;
+  submitLabel: string;
+  cancelLabel: string;
+  isSubmitting: boolean;
+  submitDisabled: boolean;
+  error: string | null;
+  onSubmit: () => void;
+  onCancel: () => void;
+  children: ReactNode;
+};
+
+const GroupingFormDialog = ({
+  title,
+  submitLabel,
+  cancelLabel,
+  isSubmitting,
+  submitDisabled,
+  error,
+  onSubmit,
+  onCancel,
+  children
+}: GroupingFormDialogProps) => {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isSubmitting) {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSubmitting, onCancel]);
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!submitDisabled && !isSubmitting) onSubmit();
+  };
+
+  return (
+    <div className="grouping-modal grouping-form-dialog" role="dialog" aria-modal="true" aria-labelledby="grouping-form-dialog-title">
+      <form className="grouping-form-dialog-panel" onSubmit={handleSubmit}>
+        <div className="grouping-modal-head">
+          <strong id="grouping-form-dialog-title">{title}</strong>
+        </div>
+        <div className="grouping-form-dialog-fields">{children}</div>
+        {error && <p className="grouping-form-dialog-error" role="alert">{error}</p>}
+        <div className="grouping-form-dialog-actions">
+          <button className="btn btn-secondary" type="button" onClick={onCancel} disabled={isSubmitting}>{cancelLabel}</button>
+          <button className="btn btn-primary" type="submit" disabled={submitDisabled || isSubmitting}>{submitLabel}</button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
 const formatPath = (path: string) => path.split('\\').join('/');
 
 const getPathName = (path: string) => formatPath(path).split('/').filter(Boolean).pop() ?? path;
@@ -248,7 +311,8 @@ const getFileExtensionLabel = (fileName: string, fallback: string) => {
 type GroupingMediaPreviewProps = {
   item: GroupingWorkspaceItem;
   imageThumbnailUrl: string;
-  videoMediaUrl: string;
+  videoPosterSourceUrl: string;
+  videoPosterCacheKey: string;
   hasPreviewFailed: boolean;
   previewUnavailableLabel: string;
   onPreviewFailed: (itemId: string) => void;
@@ -258,19 +322,20 @@ type GroupingMediaPreviewProps = {
 const GroupingMediaPreview = ({
   item,
   imageThumbnailUrl,
-  videoMediaUrl,
+  videoPosterSourceUrl,
+  videoPosterCacheKey,
   hasPreviewFailed,
   previewUnavailableLabel,
   onPreviewFailed,
   onOpenPreview
 }: GroupingMediaPreviewProps) => {
   const previewRef = useRef<HTMLButtonElement | null>(null);
-  const [shouldLoadVideo, setShouldLoadVideo] = useState(false);
+  const [videoPosterUrl, setVideoPosterUrl] = useState<string | null>(() => getCachedVideoPoster(videoPosterCacheKey));
   const formatLabel = getFileExtensionLabel(item.fileName, item.mediaType === 'video' ? 'VIDEO' : 'FILE');
 
   useEffect(() => {
-    setShouldLoadVideo(false);
-  }, [item.id]);
+    setVideoPosterUrl(getCachedVideoPoster(videoPosterCacheKey));
+  }, [videoPosterCacheKey]);
 
   useEffect(() => {
     if (item.mediaType !== 'video' || hasPreviewFailed) {
@@ -278,20 +343,34 @@ const GroupingMediaPreview = ({
     }
 
     const element = previewRef.current;
-
     if (!element) {
       return;
     }
 
+    let cancelled = false;
+    const controller = new AbortController();
+    const loadPoster = () => {
+      void generateVideoPoster(videoPosterCacheKey, videoPosterSourceUrl, controller.signal)
+        .then((posterUrl) => {
+          if (!cancelled) setVideoPosterUrl(posterUrl);
+        })
+        .catch(() => {
+          if (!cancelled) onPreviewFailed(item.id);
+        });
+    };
+
     if (typeof IntersectionObserver === 'undefined') {
-      setShouldLoadVideo(true);
-      return;
+      loadPoster();
+      return () => {
+        cancelled = true;
+        controller.abort();
+      };
     }
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
-          setShouldLoadVideo(true);
+          loadPoster();
           observer.disconnect();
         }
       },
@@ -300,8 +379,12 @@ const GroupingMediaPreview = ({
 
     observer.observe(element);
 
-    return () => observer.disconnect();
-  }, [hasPreviewFailed, item.mediaType]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      observer.disconnect();
+    };
+  }, [hasPreviewFailed, item.id, item.mediaType, onPreviewFailed, videoPosterCacheKey, videoPosterSourceUrl]);
 
   return (
     <button ref={previewRef} className="grouping-media-preview" type="button" onDoubleClick={onOpenPreview}>
@@ -311,8 +394,8 @@ const GroupingMediaPreview = ({
         <span>{previewUnavailableLabel}</span>
       ) : item.mediaType === 'video' && !hasPreviewFailed ? (
         <>
-          {shouldLoadVideo ? (
-            <video src={videoMediaUrl} muted playsInline preload="metadata" onError={() => onPreviewFailed(item.id)} />
+          {videoPosterUrl ? (
+            <img src={videoPosterUrl} alt={item.fileName} loading="lazy" onError={() => onPreviewFailed(item.id)} />
           ) : (
             <span>{formatLabel}</span>
           )}
@@ -463,6 +546,7 @@ export const GroupingPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const groupingMainRef = useRef<HTMLElement | null>(null);
+  const modalVideoRef = useRef<HTMLVideoElement | null>(null);
   const { sourceSelection, destinationSelection, isLoading: isLoadingFolderSelections } = useFolderSelections();
   const compressionSessionState = useCompressionSessionState();
   const groupingSessionState = useGroupingSessionState();
@@ -485,6 +569,8 @@ export const GroupingPage = () => {
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(new Set());
   const [failedThumbnailIds, setFailedThumbnailIds] = useState<Set<string>>(new Set());
+  const [formDialog, setFormDialog] = useState<GroupingFormDialogState | null>(null);
+  const [isSubmittingFormDialog, setIsSubmittingFormDialog] = useState(false);
   const [renderedItemLimit, setRenderedItemLimit] = useState(GROUPING_GRID_INITIAL_LIMIT);
   const [marqueeSelection, setMarqueeSelection] = useState<MarqueeSelection | null>(null);
   const [verification, setVerification] = useState<ExecutionVerification | null>(null);
@@ -867,35 +953,16 @@ export const GroupingPage = () => {
     changeGroupingView('review');
   };
 
-  const handleCreateFolder = async () => {
+  const handleCreateFolder = () => {
     if (!workspace || !canMutateGrouping) return;
-
-    const label = window.prompt(t('grouping.folderNamePrompt'));
-    if (!label?.trim()) return;
-
-    try {
-      await createGroupingFolderRequest(workspace.sessionId, label);
-      await refreshWorkspace(workspace.sessionId);
-      markGroupingDraftChanged();
-    } catch (error) {
-      setBackendError(error instanceof Error ? error.message : t('grouping.createFolderError'));
-    }
+    setBackendError(null);
+    setFormDialog({ kind: 'create-folder', name: '' });
   };
 
-  const handleRenameFolder = async (folder: GroupingWorkspaceFolder) => {
+  const handleRenameFolder = (folder: GroupingWorkspaceFolder) => {
     if (!workspace || !canMutateGrouping) return;
-
-    const label = window.prompt(t('grouping.newFolderNamePrompt'), folder.label);
-    if (!label?.trim() || label === folder.label) return;
-
-    try {
-      await renameGroupingFolderRequest(workspace.sessionId, folder.id, label);
-      setActiveFolderLabel(label);
-      await refreshWorkspace(workspace.sessionId);
-      markGroupingDraftChanged();
-    } catch (error) {
-      setBackendError(error instanceof Error ? error.message : t('grouping.renameFolderError'));
-    }
+    setBackendError(null);
+    setFormDialog({ kind: 'rename-folder', folder, name: folder.label });
   };
 
   const handleDeleteFolder = async (folder: GroupingWorkspaceFolder) => {
@@ -1011,13 +1078,29 @@ export const GroupingPage = () => {
     }
   };
 
-  const markPreviewFailed = (itemId: string) => {
-    setFailedPreviewIds((current) => new Set(current).add(itemId));
-  };
+  const cleanupModalVideo = useCallback(() => {
+    const video = modalVideoRef.current;
+    if (video) {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    }
+  }, []);
 
-  const markThumbnailFailed = (itemId: string) => {
+  useEffect(() => cleanupModalVideo, [cleanupModalVideo, previewItemId]);
+
+  const closePreviewModal = useCallback(() => {
+    cleanupModalVideo();
+    setPreviewItemId(null);
+  }, [cleanupModalVideo]);
+
+  const markPreviewFailed = useCallback((itemId: string) => {
+    setFailedPreviewIds((current) => new Set(current).add(itemId));
+  }, []);
+
+  const markThumbnailFailed = useCallback((itemId: string) => {
     setFailedThumbnailIds((current) => new Set(current).add(itemId));
-  };
+  }, []);
 
   const getMarqueePoint = (event: PointerEvent<HTMLElement>): Point | null => {
     const container = groupingMainRef.current;
@@ -1149,20 +1232,54 @@ export const GroupingPage = () => {
     });
   };
 
-  const handleCreateTemplate = async () => {
+  const handleCreateTemplate = () => {
     if (!canMutateGrouping) return;
+    setBackendError(null);
+    setFormDialog({ kind: 'create-template', name: '', pattern: '', patternTouched: false });
+  };
 
-    const name = window.prompt(t('grouping.templateNamePrompt'));
-    if (!name?.trim()) return;
+  const closeFormDialog = useCallback(() => {
+    setBackendError(null);
+    setFormDialog(null);
+  }, []);
 
-    const pattern = window.prompt(t('grouping.templatePatternPrompt'), name);
-    if (!pattern?.trim()) return;
+  const submitFormDialog = async () => {
+    if (!formDialog || !workspace || !canMutateGrouping || isSubmittingFormDialog) return;
 
+    setIsSubmittingFormDialog(true);
+    setBackendError(null);
     try {
-      const response = await createGroupingTemplateRequest({ name, pattern, enabled: true });
-      setWorkspace((current) => (current ? { ...current, templates: response.templates } : current));
+      if (formDialog.kind === 'create-folder') {
+        const label = formDialog.name.trim();
+        if (!label) return;
+        await createGroupingFolderRequest(workspace.sessionId, label);
+        await refreshWorkspace(workspace.sessionId);
+        markGroupingDraftChanged();
+      } else if (formDialog.kind === 'rename-folder') {
+        const label = formDialog.name.trim();
+        if (!label || label === formDialog.folder.label) return;
+        await renameGroupingFolderRequest(workspace.sessionId, formDialog.folder.id, label);
+        setActiveFolderLabel(label);
+        await refreshWorkspace(workspace.sessionId);
+        markGroupingDraftChanged();
+      } else {
+        const name = formDialog.name.trim();
+        const pattern = formDialog.pattern.trim();
+        if (!name || !pattern) return;
+        const response = await createGroupingTemplateRequest({ name, pattern, enabled: true });
+        setWorkspace((current) => (current ? { ...current, templates: response.templates } : current));
+      }
+
+      setFormDialog(null);
     } catch (error) {
-      setBackendError(error instanceof Error ? error.message : t('grouping.createTemplateError'));
+      const fallback = formDialog.kind === 'create-folder'
+        ? t('grouping.createFolderError')
+        : formDialog.kind === 'rename-folder'
+          ? t('grouping.renameFolderError')
+          : t('grouping.createTemplateError');
+      setBackendError(error instanceof Error ? error.message : fallback);
+    } finally {
+      setIsSubmittingFormDialog(false);
     }
   };
 
@@ -1214,7 +1331,7 @@ export const GroupingPage = () => {
 
       if (event.key === 'Escape') {
         event.preventDefault();
-        setPreviewItemId(null);
+        closePreviewModal();
         return;
       }
 
@@ -1239,7 +1356,7 @@ export const GroupingPage = () => {
     return () => {
       window.removeEventListener('keydown', handlePreviewKeyDown);
     };
-  }, [previewItem, showNextPreview, showPreviousPreview]);
+  }, [closePreviewModal, previewItem, showNextPreview, showPreviousPreview]);
 
   const handleApply = async () => {
     if (!workspace || !canMutateGrouping) return;
@@ -1322,6 +1439,10 @@ export const GroupingPage = () => {
       ? buildGroupingPreviewUrl(workspace.sessionId, previewItem.id)
       : buildGroupingMediaUrl(workspace.sessionId, previewItem.id)
     : null;
+  const isFormDialogSubmitDisabled = !formDialog || formDialog.kind === 'create-template'
+    ? !formDialog || !formDialog.name.trim() || !formDialog.pattern.trim()
+    : !formDialog.name.trim() || (formDialog.kind === 'rename-folder' && formDialog.name.trim() === formDialog.folder.label);
+
   const hasCopiedHeic = Boolean(workspace?.items.some((item) => /\.(heic|heif)$/i.test(item.fileName)));
 
   return (
@@ -1825,7 +1946,8 @@ export const GroupingPage = () => {
                 const isSelected = selectedIds.has(item.id);
                 const canEditItem = canMutateGrouping && !item.preservedStructure;
                 const itemThumbnailUrl = workspace ? buildGroupingThumbnailUrl(workspace.sessionId, item.id) : '';
-                const itemMediaUrl = workspace ? buildGroupingMediaUrl(workspace.sessionId, item.id) : '';
+                const itemVideoPosterUrl = workspace ? buildGroupingVideoPosterUrl(workspace.sessionId, item.id) : '';
+                const itemVideoPosterCacheKey = workspace ? `${workspace.sessionId}:${item.id}` : item.id;
                 const hasThumbnailFailed = failedThumbnailIds.has(item.id);
 
                 return (
@@ -1846,7 +1968,8 @@ export const GroupingPage = () => {
                     <GroupingMediaPreview
                       item={item}
                       imageThumbnailUrl={itemThumbnailUrl}
-                      videoMediaUrl={itemMediaUrl}
+                      videoPosterSourceUrl={itemVideoPosterUrl}
+                      videoPosterCacheKey={itemVideoPosterCacheKey}
                       hasPreviewFailed={hasThumbnailFailed}
                       previewUnavailableLabel={t('grouping.previewUnavailable')}
                       onPreviewFailed={markThumbnailFailed}
@@ -1887,7 +2010,7 @@ export const GroupingPage = () => {
                 <strong>{previewItem.fileName}</strong>
                 <span>{t('grouping.previewCounter', { current: previewIndex + 1, total: folderScopeItems.length })}</span>
               </div>
-              <button className="btn btn-secondary" type="button" onClick={() => setPreviewItemId(null)}>
+              <button className="btn btn-secondary" type="button" onClick={closePreviewModal}>
                 {t('grouping.close')}
               </button>
             </div>
@@ -1937,8 +2060,23 @@ export const GroupingPage = () => {
                 <div className="grouping-modal-unsupported">
                   {t('grouping.previewUnavailable')}
                 </div>
+              ) : previewItem.mediaType === 'video' && mediaUrl && !failedPreviewIds.has(previewItem.id) ? (
+                <video
+                  key={previewItem.id}
+                  ref={modalVideoRef}
+                  className="grouping-modal-media"
+                  src={mediaUrl}
+                  controls
+                  autoPlay
+                  onError={(event) => {
+                    console.warn('Could not decode grouping video preview.', { mediaErrorCode: event.currentTarget.error?.code ?? null });
+                    markPreviewFailed(previewItem.id);
+                  }}
+                />
               ) : previewItem.mediaType === 'video' ? (
-                <video className="grouping-modal-media" src={mediaUrl} controls autoPlay />
+                <div className="grouping-modal-unsupported">
+                  {t('grouping.videoPreviewUnavailable')}
+                </div>
               ) : (
                 <div className="grouping-modal-unsupported">
                   {previewItem.fileName.split('.').pop()?.toUpperCase() ?? 'FILE'}
@@ -1947,6 +2085,65 @@ export const GroupingPage = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {formDialog && (
+        <GroupingFormDialog
+          title={formDialog.kind === 'create-folder'
+            ? t('grouping.createFolderTitle')
+            : formDialog.kind === 'rename-folder'
+              ? t('grouping.renameTitle')
+              : t('grouping.createTemplateTitle')}
+          submitLabel={formDialog.kind === 'rename-folder' ? t('grouping.rename') : t('grouping.create')}
+          cancelLabel={t('grouping.cancel')}
+          isSubmitting={isSubmittingFormDialog}
+          submitDisabled={isFormDialogSubmitDisabled}
+          error={backendError}
+          onSubmit={() => void submitFormDialog()}
+          onCancel={closeFormDialog}
+        >
+          {formDialog.kind === 'create-template' ? (
+            <>
+              <label>
+                <span>{t('grouping.templateNamePrompt')}</span>
+                <input
+                  autoFocus
+                  value={formDialog.name}
+                  onChange={(event) => {
+                    const name = event.target.value;
+                    setFormDialog((current) => current?.kind === 'create-template'
+                      ? { ...current, name, pattern: current.patternTouched ? current.pattern : name }
+                      : current);
+                  }}
+                  disabled={isSubmittingFormDialog}
+                />
+              </label>
+              <label>
+                <span>{t('grouping.templatePatternPrompt')}</span>
+                <input
+                  value={formDialog.pattern}
+                  onChange={(event) => setFormDialog((current) => current?.kind === 'create-template'
+                    ? { ...current, pattern: event.target.value, patternTouched: true }
+                    : current)}
+                  disabled={isSubmittingFormDialog}
+                />
+              </label>
+            </>
+          ) : (
+            <label>
+              <span>{formDialog.kind === 'create-folder' ? t('grouping.folderNamePrompt') : t('grouping.newFolderNamePrompt')}</span>
+              <input
+                autoFocus
+                value={formDialog.name}
+                onChange={(event) => {
+                  const name = event.target.value;
+                  setFormDialog((current) => current && current.kind !== 'create-template' ? { ...current, name } : current);
+                }}
+                disabled={isSubmittingFormDialog}
+              />
+            </label>
+          )}
+        </GroupingFormDialog>
       )}
     </div>
   );
