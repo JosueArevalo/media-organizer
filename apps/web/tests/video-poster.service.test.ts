@@ -13,6 +13,8 @@ let frameCallbacks = 0;
 let canvasDraws = 0;
 let drawsBeforeDecodedFrame = 0;
 let forceTimeout = false;
+let suppressFrameCallback = false;
+const revokedObjectUrls: string[] = [];
 
 class FakeVideo extends EventTarget {
   muted = false;
@@ -69,6 +71,9 @@ class FakeVideo extends EventTarget {
   requestVideoFrameCallback(callback: () => void) {
     frameCallbacks += 1;
     const id = frameCallbacks;
+    if (suppressFrameCallback) {
+      return id;
+    }
     queueMicrotask(() => {
       this.decodedFrame = true;
       callback();
@@ -121,6 +126,21 @@ Object.assign(globalThis, {
     clearTimeout(handle: number) {
       globalThis.clearTimeout(handle);
     }
+  },
+  fetch(url: string) {
+    return Promise.resolve({
+      ok: !url.includes('fetch-fail'),
+      status: url.includes('fetch-fail') ? 503 : 200,
+      blob: async () => ({ sourceUrl: url })
+    });
+  },
+  URL: {
+    createObjectURL(blob: { sourceUrl?: string }) {
+      return `blob:${blob.sourceUrl ?? 'unknown'}`;
+    },
+    revokeObjectURL(url: string) {
+      revokedObjectUrls.push(url);
+    }
   }
 });
 
@@ -129,6 +149,7 @@ test('video poster generation serializes streams, waits for a decoded frame and 
   frameCallbacks = 0;
   canvasDraws = 0;
   drawsBeforeDecodedFrame = 0;
+  revokedObjectUrls.length = 0;
 
   const first = generateVideoPoster('behavior:first', '/first.mp4');
   const second = generateVideoPoster('behavior:second', '/second.mov');
@@ -141,6 +162,7 @@ test('video poster generation serializes streams, waits for a decoded frame and 
   assert.equal(drawsBeforeDecodedFrame, 0);
   assert.equal(activeVideoLoads, 0);
   assert.equal(getActiveVideoPosterTasks(), 0);
+  assert.deepEqual(revokedObjectUrls, ['blob:/first.mp4', 'blob:/second.mov']);
 
   const drawsBeforeCacheRead = canvasDraws;
   assert.equal(await generateVideoPoster('behavior:first', '/first.mp4'), getCachedVideoPoster('behavior:first'));
@@ -150,8 +172,8 @@ test('video poster generation serializes streams, waits for a decoded frame and 
 test('active and queued poster cancellations release their video resources', async () => {
   const activeController = new AbortController();
   const queuedController = new AbortController();
-  const active = generateVideoPoster('behavior:stalled', '/stalled.mp4', activeController.signal);
-  const queued = generateVideoPoster('behavior:queued', '/queued.mp4', queuedController.signal);
+  const active = generateVideoPoster('behavior:stalled', '/stalled.mp4', undefined, activeController.signal);
+  const queued = generateVideoPoster('behavior:queued', '/queued.mp4', undefined, queuedController.signal);
   queuedController.abort();
   activeController.abort();
 
@@ -171,4 +193,22 @@ test('decode errors and timeouts become failures without leaving streams open', 
   forceTimeout = false;
   assert.equal(activeVideoLoads, 0);
   assert.equal(getActiveVideoPosterTasks(), 0);
+});
+
+test('poster generation falls back to the full media URL when the poster stream fails', async () => {
+  const poster = await generateVideoPoster('behavior:fallback', '/fetch-fail-poster.mp4', '/fallback.mov');
+
+  assert.match(poster, /^data:image\/jpeg/);
+  assert.equal(getCachedVideoPoster('behavior:fallback'), poster);
+});
+
+test('poster generation falls back when requestVideoFrameCallback never delivers a frame', async () => {
+  suppressFrameCallback = true;
+
+  try {
+    const poster = await generateVideoPoster('behavior:no-frame-callback', '/no-frame-callback.mp4');
+    assert.match(poster, /^data:image\/jpeg/);
+  } finally {
+    suppressFrameCallback = false;
+  }
 });

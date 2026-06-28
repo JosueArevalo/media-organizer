@@ -525,6 +525,7 @@ export const es: TranslationDictionary = {
   'grouping.previewCounter': '{current} / {total}',
   'grouping.movePreview': 'Mover archivo',
   'grouping.previewUnavailable': 'Vista previa no disponible',
+  'grouping.loadingVideo': 'Cargando video...',
   'grouping.videoPreviewUnavailable': 'El navegador actual no puede decodificar este vídeo. El archivo no se ha modificado.',
   'grouping.heicPreviewLimited': 'Algunos originales HEIC/HEIF se copiaron sin ImageMagick. Se pueden organizar, pero no se mostrarán sus previews.',
   'grouping.deletePreviewConfirm': '{name} se quitara de la organizacion y se borrara de Destination al aplicar. Source no se tocara.',

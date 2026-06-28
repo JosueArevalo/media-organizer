@@ -2,6 +2,7 @@ type PosterTask = () => Promise<void>;
 
 const MAX_CONCURRENT_POSTERS = 1;
 const POSTER_TIMEOUT_MS = 8_000;
+const FRAME_CALLBACK_FALLBACK_MS = 250;
 
 const posterCache = new Map<string, string>();
 const failedPosterKeys = new Set<string>();
@@ -66,7 +67,7 @@ const getPosterSeekTime = (duration: number) => {
   return Math.min(Math.max(duration * 0.1, 0.1), 1, lastSafeFrame);
 };
 
-const captureVideoPosterFromUrl = (url: string, signal?: AbortSignal) =>
+const captureVideoPosterFromObjectUrl = (url: string, signal?: AbortSignal) =>
   new Promise<string>((resolve, reject) => {
     if (signal?.aborted) {
       reject(createAbortError());
@@ -76,11 +77,15 @@ const captureVideoPosterFromUrl = (url: string, signal?: AbortSignal) =>
     const video = document.createElement('video');
     let finished = false;
     let frameCallbackId: number | null = null;
+    let frameFallbackTimeoutId: number | null = null;
     let seekComplete = false;
     const settle = (complete: () => void) => {
       if (finished) return;
       finished = true;
       window.clearTimeout(timeout);
+      if (frameFallbackTimeoutId !== null) {
+        window.clearTimeout(frameFallbackTimeoutId);
+      }
       signal?.removeEventListener('abort', abort);
       if (frameCallbackId !== null && typeof video.cancelVideoFrameCallback === 'function') {
         video.cancelVideoFrameCallback(frameCallbackId);
@@ -126,7 +131,15 @@ const captureVideoPosterFromUrl = (url: string, signal?: AbortSignal) =>
       if (finished || !seekComplete || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
       if (typeof video.requestVideoFrameCallback === 'function') {
         if (frameCallbackId !== null) return;
+        frameFallbackTimeoutId = window.setTimeout(() => {
+          frameFallbackTimeoutId = null;
+          capture();
+        }, FRAME_CALLBACK_FALLBACK_MS);
         frameCallbackId = video.requestVideoFrameCallback(() => {
+          if (frameFallbackTimeoutId !== null) {
+            window.clearTimeout(frameFallbackTimeoutId);
+            frameFallbackTimeoutId = null;
+          }
           frameCallbackId = null;
           capture();
         });
@@ -158,9 +171,36 @@ const captureVideoPosterFromUrl = (url: string, signal?: AbortSignal) =>
     video.load();
   });
 
+const captureVideoPoster = async (url: string, signal?: AbortSignal) => {
+  let objectUrl: string | null = null;
+
+  try {
+    const response = await fetch(url, { signal });
+    if (!response.ok) {
+      throw new Error(`Video poster request failed with ${response.status}.`);
+    }
+
+    if (signal?.aborted) {
+      throw createAbortError();
+    }
+
+    const blob = await response.blob();
+    if (signal?.aborted) {
+      throw createAbortError();
+    }
+
+    objectUrl = URL.createObjectURL(blob);
+    return await captureVideoPosterFromObjectUrl(objectUrl, signal);
+  } finally {
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+};
+
 export const getCachedVideoPoster = (cacheKey: string) => posterCache.get(cacheKey) ?? null;
 
-export const generateVideoPoster = async (cacheKey: string, url: string, signal?: AbortSignal) => {
+export const generateVideoPoster = async (cacheKey: string, url: string, fallbackUrl?: string, signal?: AbortSignal) => {
   if (signal?.aborted) throw createAbortError();
   const cached = getCachedVideoPoster(cacheKey);
   if (cached) return cached;
@@ -168,7 +208,17 @@ export const generateVideoPoster = async (cacheKey: string, url: string, signal?
   const pending = pendingPosters.get(cacheKey);
   if (pending) return await pending;
 
-  const work = enqueuePosterTask(() => captureVideoPosterFromUrl(url, signal), signal).then((poster) => {
+  const work = enqueuePosterTask(async () => {
+    try {
+      return await captureVideoPoster(url, signal);
+    } catch (error) {
+      if (!fallbackUrl || fallbackUrl === url || isVideoPosterAbortError(error)) {
+        throw error;
+      }
+
+      return await captureVideoPoster(fallbackUrl, signal);
+    }
+  }, signal).then((poster) => {
     posterCache.set(cacheKey, poster);
     return poster;
   }).catch((error) => {
