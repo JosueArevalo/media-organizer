@@ -589,8 +589,6 @@ export const es: TranslationDictionary = {
   'export.network.exportFolderNote': 'Aqui se copiara el resultado organizado.',
   'export.network.noExportFolder': 'Elige una ubicacion guardada o introduce una ruta de carpeta.',
   'export.network.chooseFolder': 'Elegir carpeta',
-  'export.network.editPathManually': 'Editar ruta manualmente',
-  'export.network.hideManualPath': 'Ocultar ruta manual',
   'export.network.destinationPathPlaceholder': '\\\\192.0.2.10\\Archive\\2026',
   'export.network.credentialsTitle': 'Acceso',
   'export.network.credentialsNote': 'La contrasena solo se usa para autenticar con SMB de Windows. La app nunca la guarda. Si lo activas, Windows Credential Manager se encarga de recordarla.',

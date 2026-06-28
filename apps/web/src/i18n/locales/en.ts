@@ -587,8 +587,6 @@ export const en = {
   'export.network.exportFolderNote': 'This is where the organized output will be copied.',
   'export.network.noExportFolder': 'Choose a saved location or enter a folder path.',
   'export.network.chooseFolder': 'Choose folder',
-  'export.network.editPathManually': 'Edit path manually',
-  'export.network.hideManualPath': 'Hide manual path',
   'export.network.destinationPathPlaceholder': '\\\\192.0.2.10\\Archive\\2026',
   'export.network.credentialsTitle': 'Access',
   'export.network.credentialsNote': 'Passwords are used only to authenticate with Windows SMB. The app never stores them. If enabled, Windows Credential Manager handles remembering them.',

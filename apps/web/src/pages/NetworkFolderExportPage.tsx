@@ -77,7 +77,6 @@ export const NetworkFolderExportPage = () => {
   const [isDeletingDestination, setIsDeletingDestination] = useState(false);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [isAddLocationOpen, setIsAddLocationOpen] = useState(false);
-  const [isManualPathOpen, setIsManualPathOpen] = useState(false);
   const [browserResult, setBrowserResult] = useState<NetworkBrowseResult | null>(null);
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [isBrowsing, setIsBrowsing] = useState(false);
@@ -215,7 +214,6 @@ export const NetworkFolderExportPage = () => {
     setBrowserError(null);
     setNewFolderName('');
     setIsBrowserOpen(false);
-    setIsManualPathOpen(false);
     setIsAddLocationOpen(true);
   }, []);
 
@@ -261,7 +259,6 @@ export const NetworkFolderExportPage = () => {
     setBrowserError(null);
     setNewFolderName('');
     setIsBrowserOpen(false);
-    setIsManualPathOpen(false);
   };
 
   const handleToggleAddLocation = () => {
@@ -443,6 +440,11 @@ export const NetworkFolderExportPage = () => {
     } finally {
       setIsBrowsing(false);
     }
+  };
+
+  const handleCreateRemoteFolderSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleCreateRemoteFolder();
   };
 
   const handleTestTarget = async () => {
@@ -706,38 +708,29 @@ export const NetworkFolderExportPage = () => {
             <p className="page-summary-note">{t('export.network.exportFolderNote')}</p>
           </div>
 
-          <div className="network-path-summary">
-            <span>{destinationPath.trim() || t('export.network.noExportFolder')}</span>
-          </div>
+          <label className="folder-path-control">
+            <span>{t('export.destinationLabel')}</span>
+            <input
+              className="folder-path-input"
+              value={destinationPath}
+              onChange={(event) => {
+                setDestinationPath(event.target.value);
+                setTargetTest(null);
+              }}
+              placeholder={isWindows
+                ? t('export.network.destinationPathPlaceholder')
+                : runtimePlatform === 'darwin'
+                  ? t('export.network.mountedRootPathPlaceholderMac')
+                  : t('export.network.mountedRootPathPlaceholderLinux')}
+              type="text"
+            />
+          </label>
 
           <div className="network-export-tools">
             <button className="btn btn-primary" type="button" onClick={() => void openBrowser()} disabled={!canBrowseNetworkFolder}>
               {t('export.network.chooseFolder')}
             </button>
-            <button className="btn btn-secondary" type="button" onClick={() => setIsManualPathOpen((current) => !current)}>
-              {isManualPathOpen ? t('export.network.hideManualPath') : t('export.network.editPathManually')}
-            </button>
           </div>
-
-          {isManualPathOpen && (
-            <label className="folder-path-control">
-              <span>{t('export.destinationLabel')}</span>
-              <input
-                className="folder-path-input"
-                value={destinationPath}
-                onChange={(event) => {
-                  setDestinationPath(event.target.value);
-                  setTargetTest(null);
-                }}
-                placeholder={isWindows
-                  ? t('export.network.destinationPathPlaceholder')
-                  : runtimePlatform === 'darwin'
-                    ? t('export.network.mountedRootPathPlaceholderMac')
-                    : t('export.network.mountedRootPathPlaceholderLinux')}
-                type="text"
-              />
-            </label>
-          )}
         </div>}
 
         {hasSelectedDestination && <div className="export-actions network-final-actions">
@@ -899,7 +892,7 @@ export const NetworkFolderExportPage = () => {
             </div>
 
             {browserResult?.canCreateFolder && (
-              <div className="network-browser-create">
+              <form className="network-browser-create" onSubmit={handleCreateRemoteFolderSubmit}>
                 <input
                   className="folder-path-input"
                   value={newFolderName}
@@ -907,10 +900,10 @@ export const NetworkFolderExportPage = () => {
                   placeholder={t('export.network.newFolderPlaceholder')}
                   type="text"
                 />
-                <button className="btn btn-secondary" type="button" onClick={() => void handleCreateRemoteFolder()} disabled={!newFolderName.trim() || isBrowsing}>
+                <button className="btn btn-secondary" type="submit" disabled={!newFolderName.trim() || isBrowsing}>
                   {t('export.network.createFolder')}
                 </button>
-              </div>
+              </form>
             )}
 
             <div className="network-browser-list">
