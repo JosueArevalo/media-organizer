@@ -3,15 +3,21 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { resolveDesktopExecutable } from './desktop-smoke-utils.mjs';
 
 const root = process.cwd();
-const electron = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
-const executableArgumentIndex = process.argv.indexOf('--executable');
-const portableExecutable = executableArgumentIndex >= 0 ? path.resolve(process.argv[executableArgumentIndex + 1] ?? '') : null;
-const executable = portableExecutable || electron;
+const require = createRequire(import.meta.url);
+const { executable, portableExecutable, source } = resolveDesktopExecutable({
+  argv: process.argv.slice(2),
+  workingDirectory: root,
+  electronResolver: () => require('electron')
+});
 
 if (!fs.existsSync(executable)) {
-  throw new Error(`Desktop executable was not found: ${executable}`);
+  throw new Error(
+    `Desktop executable was not found: ${executable}. Pass --executable <path> to smoke a packaged build or ensure the electron package resolves a valid development executable.`
+  );
 }
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-desktop-smoke-'));
@@ -51,4 +57,4 @@ assert.equal(second.previous, 'persisted');
 assert.equal(second.rendered, true);
 assert.equal(second.bridgeAvailable, true);
 assert.equal(second.backendState?.status, 'online');
-console.log(`Desktop smoke test passed (${portableExecutable ? 'portable' : 'development'} executable).`);
+console.log(`Desktop smoke test passed (${source} executable).`);
