@@ -86,10 +86,10 @@ test('grouping setup renders one contextual strategy panel and date example', ()
   assert.match(spanish, /Los archivos sin una fecha reconocible permanecen en su carpeta actual/);
 });
 
-test('grouping folder exclusions use an actionable collapsed header', () => {
+test('grouping folder exclusions use an actionable expanded header', () => {
   const pageSource = fs.readFileSync(path.join(pagesRoot, 'GroupingPage.tsx'), 'utf8');
 
-  assert.match(pageSource, /<details className="page-card elevated grouping-exclusions grouping-setup-main">/);
+  assert.match(pageSource, /<details className="page-card elevated grouping-exclusions grouping-setup-main" open>/);
   assert.match(pageSource, /grouping\.excludedCount/);
   assert.match(pageSource, /grouping\.reviewFolders/);
   assert.match(pageSource, /grouping-exclusions-icon/);
