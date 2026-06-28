@@ -78,6 +78,20 @@ test('browse rejects relative UNC traversal before filesystem access', async () 
   );
 });
 
+test('net view parser ignores the completion message from localized command output', async () => {
+  const { parseNetViewShares } = await import('../src/pipeline/export/networkDestination.service.js');
+
+  const entries = parseNetViewShares(`
+\\NAS
+------------------------------------------------
+Backups
+Photos
+Se ha completado  el comando correctamente.
+`, 'NAS');
+
+  assert.deepEqual(entries.map((entry) => entry.name), ['Backups', 'Photos']);
+});
+
 test('create folder validates that target remains under selected UNC root', async () => {
   const { createNetworkFolder } = await import('../src/pipeline/export/networkDestination.service.js');
 
