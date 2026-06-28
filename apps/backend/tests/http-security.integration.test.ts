@@ -371,11 +371,11 @@ for (const extension of ['mp4', 'mov'] as const) {
     const expectedType = extension === 'mp4' ? 'video/mp4' : 'video/quicktime';
 
     const complete = await request({ path: `${mediaPath}?usage=poster` });
-    assert.equal(complete.statusCode, 200);
+    assert.equal(complete.statusCode, 206);
     assert.equal(complete.headers['content-type'], expectedType);
     assert.equal(complete.headers['accept-ranges'], 'bytes');
     assert.equal(complete.headers['content-length'], String(content.length));
-    assert.equal(complete.headers['content-range'], undefined);
+    assert.equal(complete.headers['content-range'], `bytes 0-15/${content.length}`);
     assert.notEqual(complete.headers.connection, 'close');
     assert.deepEqual(complete.bytes, content);
 

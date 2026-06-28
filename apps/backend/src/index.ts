@@ -54,6 +54,7 @@ import { beginGroupingMediaOperation } from './pipeline/grouping/groupingMediaDi
 const port = Number(process.env.PORT ?? 4000);
 const BACKEND_HEALTH_OFFLINE_REPORT_PATH = '/api/health/offline-report';
 const MAX_RECENT_HEALTH_PROBES = 8;
+const VIDEO_POSTER_RANGE_BYTES = 12 * 1024 * 1024;
 
 type BackendHealthOfflineReport = {
   previousStatus?: string;
@@ -233,10 +234,12 @@ const streamMediaFile = (
   req: import('node:http').IncomingMessage,
   res: import('node:http').ServerResponse,
   filePath: string,
-  cacheControl = 'private, max-age=3600'
+  cacheControl = 'private, max-age=3600',
+  options: { limitOpenEndedVideoRange?: boolean } = {}
 ) => {
   const stats = fs.statSync(filePath);
   const contentType = getMediaContentType(filePath);
+  const isVideo = contentType.startsWith('video/');
   const range = parseMediaByteRange(req.method === 'HEAD' ? undefined : req.headers.range, stats.size);
   const headersBase: Record<string, string> = {
     'Accept-Ranges': 'bytes',
@@ -263,6 +266,23 @@ const streamMediaFile = (
     });
     stream.pipe(res);
   };
+
+  if (
+    range.kind === 'full'
+    && req.method !== 'HEAD'
+    && isVideo
+    && stats.size > 0
+    && options.limitOpenEndedVideoRange
+  ) {
+    const end = Math.min(stats.size - 1, VIDEO_POSTER_RANGE_BYTES - 1);
+    res.writeHead(206, {
+      ...headersBase,
+      'Content-Length': end + 1,
+      'Content-Range': `bytes 0-${end}/${stats.size}`
+    });
+    pipeStream(fs.createReadStream(filePath, { start: 0, end }));
+    return;
+  }
 
   if (range.kind === 'unsatisfiable') {
     res.writeHead(416, {
@@ -809,7 +829,9 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
           return;
         }
 
-        streamMediaFile(req, res, media.path);
+        streamMediaFile(req, res, media.path, 'private, max-age=3600', {
+          limitOpenEndedVideoRange: usage === 'poster'
+        });
       } catch (error) {
         trace.finish('failed', error);
         sendJson(res, 500, {

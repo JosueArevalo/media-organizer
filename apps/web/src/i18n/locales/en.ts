@@ -523,6 +523,7 @@ export const en = {
   'grouping.previewCounter': '{current} / {total}',
   'grouping.movePreview': 'Move file',
   'grouping.previewUnavailable': 'Preview unavailable',
+  'grouping.loadingVideo': 'Loading video...',
   'grouping.videoPreviewUnavailable': 'This video cannot be decoded by the current browser. The file has not been changed.',
   'grouping.heicPreviewLimited': 'Some HEIC/HEIF originals were copied without ImageMagick. They remain available for organization, but previews cannot be shown.',
   'grouping.deletePreviewConfirm': '{name} will be removed from the organization and deleted from Destination when you apply. Source will not be touched.',

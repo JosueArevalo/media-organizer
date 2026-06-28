@@ -66,7 +66,7 @@ const getPosterSeekTime = (duration: number) => {
   return Math.min(Math.max(duration * 0.1, 0.1), 1, lastSafeFrame);
 };
 
-const captureVideoPosterFromUrl = (url: string, signal?: AbortSignal) =>
+const captureVideoPosterFromObjectUrl = (url: string, signal?: AbortSignal) =>
   new Promise<string>((resolve, reject) => {
     if (signal?.aborted) {
       reject(createAbortError());
@@ -158,9 +158,36 @@ const captureVideoPosterFromUrl = (url: string, signal?: AbortSignal) =>
     video.load();
   });
 
+const captureVideoPoster = async (url: string, signal?: AbortSignal) => {
+  let objectUrl: string | null = null;
+
+  try {
+    const response = await fetch(url, { signal });
+    if (!response.ok) {
+      throw new Error(`Video poster request failed with ${response.status}.`);
+    }
+
+    if (signal?.aborted) {
+      throw createAbortError();
+    }
+
+    const blob = await response.blob();
+    if (signal?.aborted) {
+      throw createAbortError();
+    }
+
+    objectUrl = URL.createObjectURL(blob);
+    return await captureVideoPosterFromObjectUrl(objectUrl, signal);
+  } finally {
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+};
+
 export const getCachedVideoPoster = (cacheKey: string) => posterCache.get(cacheKey) ?? null;
 
-export const generateVideoPoster = async (cacheKey: string, url: string, signal?: AbortSignal) => {
+export const generateVideoPoster = async (cacheKey: string, url: string, fallbackUrl?: string, signal?: AbortSignal) => {
   if (signal?.aborted) throw createAbortError();
   const cached = getCachedVideoPoster(cacheKey);
   if (cached) return cached;
@@ -168,7 +195,17 @@ export const generateVideoPoster = async (cacheKey: string, url: string, signal?
   const pending = pendingPosters.get(cacheKey);
   if (pending) return await pending;
 
-  const work = enqueuePosterTask(() => captureVideoPosterFromUrl(url, signal), signal).then((poster) => {
+  const work = enqueuePosterTask(async () => {
+    try {
+      return await captureVideoPoster(url, signal);
+    } catch (error) {
+      if (!fallbackUrl || fallbackUrl === url || isVideoPosterAbortError(error)) {
+        throw error;
+      }
+
+      return await captureVideoPoster(fallbackUrl, signal);
+    }
+  }, signal).then((poster) => {
     posterCache.set(cacheKey, poster);
     return poster;
   }).catch((error) => {

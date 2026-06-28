@@ -40,8 +40,10 @@ test('Grouping modal cleans the active video stream on close or item changes', (
   assert.match(pageSource, /const modalVideoRef = useRef<HTMLVideoElement/);
   assert.match(pageSource, /cleanupModalVideo/);
   assert.match(pageSource, /video\.removeAttribute\('src'\)/);
+  assert.match(pageSource, /modalVideoObjectUrl/);
+  assert.match(pageSource, /setModalVideoObjectUrl/);
   assert.match(pageSource, /key=\{previewItem\.id\}/);
   assert.match(pageSource, /ref=\{modalVideoRef\}/);
-  assert.match(pageSource, /src=\{mediaUrl\}/);
-  assert.doesNotMatch(pageSource, /fetch\(mediaUrl/);
+  assert.match(pageSource, /src=\{modalVideoObjectUrl\}/);
+  assert.match(pageSource, /fetch\(mediaUrl/);
 });
