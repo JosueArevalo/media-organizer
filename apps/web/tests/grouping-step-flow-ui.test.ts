@@ -26,7 +26,8 @@ test('grouping setup primary action reviews an unchanged proposal without reorga
   const setupHandlerSource = pageSource.slice(setupHandlerStart, setupHandlerEnd);
 
   assert.match(pageSource, /const hasSetupChanges = Boolean/);
-  assert.match(pageSource, /const shouldUpdateGroupingProposal = !hasGroupingProposal \|\| hasSetupChanges/);
+  assert.match(pageSource, /const \[requiresProposalRefresh, setRequiresProposalRefresh\] = useState\(false\)/);
+  assert.match(pageSource, /const shouldUpdateGroupingProposal = requiresProposalRefresh \|\| !hasGroupingProposal \|\| hasSetupChanges/);
   assert.match(setupHandlerSource, /if \(shouldUpdateGroupingProposal\) \{\s*await handleReorganize\(\);/);
   assert.match(setupHandlerSource, /changeGroupingView\('review'\)/);
 });
@@ -38,8 +39,11 @@ test('grouping reset returns the user to setup', () => {
   const resetHandlerSource = pageSource.slice(resetHandlerStart, resetHandlerEnd);
 
   assert.match(resetHandlerSource, /refreshWorkspace\(workspace\.sessionId\)/);
+  assert.match(resetHandlerSource, /setRequiresProposalRefresh\(true\)/);
   assert.match(resetHandlerSource, /changeGroupingView\('setup'\)/);
   assert.match(resetHandlerSource, /activeView: 'setup'/);
+  assert.doesNotMatch(resetHandlerSource, /setSelectedStrategy\(nextWorkspace\.strategy\)/);
+  assert.doesNotMatch(resetHandlerSource, /setPreservedDirectories\(new Set\(nextWorkspace\.preservedDirectories\)\)/);
 });
 
 test('grouping setup flow copy is localized', () => {
@@ -138,4 +142,27 @@ test('grouping review no longer locks preserved folders or media cards', () => {
   assert.doesNotMatch(styles, /\.grouping-folder-drop-preserved \{/);
   assert.doesNotMatch(english, /grouping\.preservedFolderLocked/);
   assert.doesNotMatch(spanish, /grouping\.preservedFolderLocked/);
+});
+
+test('grouping reorganize clears reset-invalidated proposals', () => {
+  const pageSource = fs.readFileSync(path.join(pagesRoot, 'GroupingPage.tsx'), 'utf8');
+  const reorganizeHandlerStart = pageSource.indexOf('const handleReorganize = async () => {');
+  const reorganizeHandlerEnd = pageSource.indexOf('const handleSetupPrimaryAction = async () => {', reorganizeHandlerStart);
+  const reorganizeHandlerSource = pageSource.slice(reorganizeHandlerStart, reorganizeHandlerEnd);
+
+  assert.match(reorganizeHandlerSource, /setRequiresProposalRefresh\(false\)/);
+});
+
+test('grouping setup tree relies on the structure toggle instead of directory badges', () => {
+  const pageSource = fs.readFileSync(path.join(pagesRoot, 'GroupingPage.tsx'), 'utf8');
+
+  assert.match(pageSource, /<div className="selection-row-head">\s*<strong>\{row\.name\}<\/strong>\s*<\/div>/);
+  assert.match(pageSource, /<p className="selection-row-note">\{row\.path\}<\/p>/);
+  assert.match(pageSource, /className=\{row\.isPreserved \? 'is-active' : ''\}/);
+  assert.match(pageSource, /onClick=\{\(\) => setDirectoryStructureMode\(row\.path, 'preserve'\)\}/);
+  assert.match(pageSource, /onClick=\{\(\) => setDirectoryStructureMode\(row\.path, 'reorganize'\)\}/);
+  assert.doesNotMatch(pageSource, /t\('grouping\.keepOverride'\)/);
+  assert.doesNotMatch(pageSource, /t\('grouping\.inherited'\)/);
+  assert.doesNotMatch(pageSource, /t\('grouping\.reorganizeOverride'\)/);
+  assert.doesNotMatch(pageSource, /t\('grouping\.reorganizeMode'\)/);
 });

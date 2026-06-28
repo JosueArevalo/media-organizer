@@ -604,6 +604,7 @@ export const GroupingPage = () => {
   const [renderedItemLimit, setRenderedItemLimit] = useState(GROUPING_GRID_INITIAL_LIMIT);
   const [marqueeSelection, setMarqueeSelection] = useState<MarqueeSelection | null>(null);
   const [verification, setVerification] = useState<ExecutionVerification | null>(null);
+  const [requiresProposalRefresh, setRequiresProposalRefresh] = useState(false);
 
   const sourcePath = sourceSelection?.path ?? '';
   const destinationPath = destinationSelection?.path ?? '';
@@ -689,6 +690,7 @@ export const GroupingPage = () => {
         setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
         setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
         setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
+        setRequiresProposalRefresh(false);
         setExpandedDirectories(new Set([nextWorkspace.sourceDir.split(/[\\/]/).filter(Boolean).pop() ?? 'Source']));
         changeGroupingView(
           groupingSessionState.activeView ?? (nextWorkspace.folders.length > 0 || nextWorkspace.strategy ? 'review' : 'setup')
@@ -892,7 +894,7 @@ export const GroupingPage = () => {
       !areSortedValuesEqual(getSortedSetValues(reorganizedDirectories), getSortedValues(workspace.reorganizedDirectories))
     )
   );
-  const shouldUpdateGroupingProposal = !hasGroupingProposal || hasSetupChanges;
+  const shouldUpdateGroupingProposal = requiresProposalRefresh || !hasGroupingProposal || hasSetupChanges;
   const canUseSetupPrimary = Boolean(workspace) &&
     !isReorganizing &&
     canMutateGrouping &&
@@ -1002,6 +1004,7 @@ export const GroupingPage = () => {
       setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
       setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
       setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
+      setRequiresProposalRefresh(false);
       setSelectedIds(new Set());
       setActiveFolderLabel('__all__');
       changeGroupingView('review');
@@ -1492,12 +1495,8 @@ export const GroupingPage = () => {
     try {
       const result = await resetGroupingWorkspaceRequest(workspace.sessionId);
       setVerification(result.verification);
-      const nextWorkspace = await refreshWorkspace(workspace.sessionId);
-      setSelectedStrategy(nextWorkspace.strategy);
-      setSingleDateHandling(nextWorkspace.dateOptions.singleDateHandling);
-      setSourceFolderMode(nextWorkspace.sourceFolderOptions.mode);
-      setPreservedDirectories(new Set(nextWorkspace.preservedDirectories));
-      setReorganizedDirectories(new Set(nextWorkspace.reorganizedDirectories));
+      await refreshWorkspace(workspace.sessionId);
+      setRequiresProposalRefresh(true);
       setSelectedIds(new Set());
       setPreviewItemId(null);
       setActiveFolderLabel('__all__');
@@ -1825,10 +1824,6 @@ export const GroupingPage = () => {
                     <div className="selection-tree-copy">
                       <div className="selection-row-head">
                         <strong>{row.name}</strong>
-                        <span className="page-chip">{row.isPreserved ? t('grouping.keepStructure') : t('grouping.reorganizeMode')}</span>
-                        {row.isPreservedOverride && <span className="page-chip">{t('grouping.keepOverride')}</span>}
-                        {row.isPreserved && !row.isPreservedOverride && <span className="page-chip">{t('grouping.inherited')}</span>}
-                        {row.isReorganizedOverride && <span className="page-chip">{t('grouping.reorganizeOverride')}</span>}
                       </div>
                       <p className="selection-row-note">{row.path}</p>
                     </div>
