@@ -232,7 +232,7 @@ const maybeAuthenticate = async (
   }
 };
 
-const parseNetViewShares = (stdout: string, host: string) => {
+export const parseNetViewShares = (stdout: string, host: string) => {
   const lines = stdout.split(/\r?\n/);
   const entries: Array<{ name: string; path: string; kind: 'share' }> = [];
   let inTable = false;
@@ -249,7 +249,7 @@ const parseNetViewShares = (stdout: string, host: string) => {
       continue;
     }
 
-    if (!inTable || /command completed|comando se complet/i.test(trimmed)) {
+    if (!inTable || /command completed|comando se complet|se ha completado\s+el comando correctamente/i.test(trimmed)) {
       continue;
     }
 

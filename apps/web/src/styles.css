@@ -4110,7 +4110,6 @@ body {
 
 .network-location-card strong,
 .network-location-card span,
-.network-path-summary span,
 .network-empty-state span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4122,8 +4121,7 @@ body {
   font-size: 12px;
 }
 
-.network-empty-state,
-.network-path-summary {
+.network-empty-state {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
