@@ -312,7 +312,6 @@ type GroupingMediaPreviewProps = {
   item: GroupingWorkspaceItem;
   imageThumbnailUrl: string;
   videoPosterSourceUrl: string;
-  videoPosterFallbackUrl: string;
   videoPosterCacheKey: string;
   hasPreviewFailed: boolean;
   previewUnavailableLabel: string;
@@ -324,7 +323,6 @@ const GroupingMediaPreview = ({
   item,
   imageThumbnailUrl,
   videoPosterSourceUrl,
-  videoPosterFallbackUrl,
   videoPosterCacheKey,
   hasPreviewFailed,
   previewUnavailableLabel,
@@ -350,8 +348,9 @@ const GroupingMediaPreview = ({
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     const loadPoster = () => {
-      void generateVideoPoster(videoPosterCacheKey, videoPosterSourceUrl, videoPosterFallbackUrl)
+      void generateVideoPoster(videoPosterCacheKey, videoPosterSourceUrl, controller.signal)
         .then((posterUrl) => {
           if (!cancelled) setVideoPosterUrl(posterUrl);
         })
@@ -364,6 +363,7 @@ const GroupingMediaPreview = ({
       loadPoster();
       return () => {
         cancelled = true;
+        controller.abort();
       };
     }
 
@@ -381,9 +381,10 @@ const GroupingMediaPreview = ({
 
     return () => {
       cancelled = true;
+      controller.abort();
       observer.disconnect();
     };
-  }, [hasPreviewFailed, item.id, item.mediaType, onPreviewFailed, videoPosterCacheKey, videoPosterFallbackUrl, videoPosterSourceUrl]);
+  }, [hasPreviewFailed, item.id, item.mediaType, onPreviewFailed, videoPosterCacheKey, videoPosterSourceUrl]);
 
   return (
     <button ref={previewRef} className="grouping-media-preview" type="button" onDoubleClick={onOpenPreview}>
@@ -568,8 +569,6 @@ export const GroupingPage = () => {
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(new Set());
   const [failedThumbnailIds, setFailedThumbnailIds] = useState<Set<string>>(new Set());
-  const [modalVideoObjectUrl, setModalVideoObjectUrl] = useState<string | null>(null);
-  const [isLoadingModalVideo, setIsLoadingModalVideo] = useState(false);
   const [formDialog, setFormDialog] = useState<GroupingFormDialogState | null>(null);
   const [isSubmittingFormDialog, setIsSubmittingFormDialog] = useState(false);
   const [renderedItemLimit, setRenderedItemLimit] = useState(GROUPING_GRID_INITIAL_LIMIT);
@@ -1086,11 +1085,6 @@ export const GroupingPage = () => {
       video.removeAttribute('src');
       video.load();
     }
-    setModalVideoObjectUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return null;
-    });
-    setIsLoadingModalVideo(false);
   }, []);
 
   useEffect(() => cleanupModalVideo, [cleanupModalVideo, previewItemId]);
@@ -1449,44 +1443,6 @@ export const GroupingPage = () => {
     ? !formDialog || !formDialog.name.trim() || !formDialog.pattern.trim()
     : !formDialog.name.trim() || (formDialog.kind === 'rename-folder' && formDialog.name.trim() === formDialog.folder.label);
 
-  useEffect(() => {
-    if (!previewItem || previewItem.mediaType !== 'video' || !mediaUrl || failedPreviewIds.has(previewItem.id)) {
-      return;
-    }
-
-    const controller = new AbortController();
-    let objectUrl: string | null = null;
-    setIsLoadingModalVideo(true);
-    setModalVideoObjectUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return null;
-    });
-
-    void fetch(mediaUrl, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Video request failed with ${response.status}.`);
-        return await response.blob();
-      })
-      .then((blob) => {
-        if (controller.signal.aborted) return;
-        objectUrl = URL.createObjectURL(blob);
-        setModalVideoObjectUrl(objectUrl);
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted) {
-          console.warn('Could not load grouping video preview.', error);
-          markPreviewFailed(previewItem.id);
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setIsLoadingModalVideo(false);
-      });
-
-    return () => {
-      controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [failedPreviewIds, markPreviewFailed, mediaUrl, previewItem]);
   const hasCopiedHeic = Boolean(workspace?.items.some((item) => /\.(heic|heif)$/i.test(item.fileName)));
 
   return (
@@ -1990,7 +1946,6 @@ export const GroupingPage = () => {
                 const isSelected = selectedIds.has(item.id);
                 const canEditItem = canMutateGrouping && !item.preservedStructure;
                 const itemThumbnailUrl = workspace ? buildGroupingThumbnailUrl(workspace.sessionId, item.id) : '';
-                const itemMediaUrl = workspace ? buildGroupingMediaUrl(workspace.sessionId, item.id) : '';
                 const itemVideoPosterUrl = workspace ? buildGroupingVideoPosterUrl(workspace.sessionId, item.id) : '';
                 const itemVideoPosterCacheKey = workspace ? `${workspace.sessionId}:${item.id}` : item.id;
                 const hasThumbnailFailed = failedThumbnailIds.has(item.id);
@@ -2014,7 +1969,6 @@ export const GroupingPage = () => {
                       item={item}
                       imageThumbnailUrl={itemThumbnailUrl}
                       videoPosterSourceUrl={itemVideoPosterUrl}
-                      videoPosterFallbackUrl={itemMediaUrl}
                       videoPosterCacheKey={itemVideoPosterCacheKey}
                       hasPreviewFailed={hasThumbnailFailed}
                       previewUnavailableLabel={t('grouping.previewUnavailable')}
@@ -2106,23 +2060,22 @@ export const GroupingPage = () => {
                 <div className="grouping-modal-unsupported">
                   {t('grouping.previewUnavailable')}
                 </div>
-              ) : previewItem.mediaType === 'video' && isLoadingModalVideo ? (
-                <div className="grouping-modal-unsupported">
-                  {t('grouping.loadingVideo')}
-                </div>
-              ) : previewItem.mediaType === 'video' && modalVideoObjectUrl && !failedPreviewIds.has(previewItem.id) ? (
+              ) : previewItem.mediaType === 'video' && mediaUrl && !failedPreviewIds.has(previewItem.id) ? (
                 <video
                   key={previewItem.id}
                   ref={modalVideoRef}
                   className="grouping-modal-media"
-                  src={modalVideoObjectUrl}
+                  src={mediaUrl}
                   controls
                   autoPlay
-                  onError={() => markPreviewFailed(previewItem.id)}
+                  onError={(event) => {
+                    console.warn('Could not decode grouping video preview.', { mediaErrorCode: event.currentTarget.error?.code ?? null });
+                    markPreviewFailed(previewItem.id);
+                  }}
                 />
               ) : previewItem.mediaType === 'video' ? (
                 <div className="grouping-modal-unsupported">
-                  {t('grouping.previewUnavailable')}
+                  {t('grouping.videoPreviewUnavailable')}
                 </div>
               ) : (
                 <div className="grouping-modal-unsupported">

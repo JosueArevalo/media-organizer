@@ -4,16 +4,18 @@ import http, { type Server } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, test } from 'node:test';
+import { after, afterEach, beforeEach, test } from 'node:test';
 import sharp from 'sharp';
 import { MAX_JSON_BODY_BYTES } from '../src/http/localAccess.js';
 import { getDb, resetDbForTests } from '../src/state/db.js';
 import { createBackendServer } from '../src/index.js';
+import { getActiveGroupingMediaOperations } from '../src/pipeline/grouping/groupingMediaDiagnostics.js';
 
 type TestResponse = {
   statusCode: number;
   headers: http.IncomingHttpHeaders;
   body: string;
+  bytes: Buffer;
 };
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-http-security-test-'));
@@ -85,10 +87,12 @@ const request = async (input: {
         });
 
         res.on('end', () => {
+          const bytes = Buffer.concat(chunks);
           resolve({
             statusCode: res.statusCode ?? 0,
             headers: res.headers,
-            body: Buffer.concat(chunks).toString('utf8')
+            body: bytes.toString('utf8'),
+            bytes
           });
         });
       }
@@ -235,6 +239,30 @@ const seedCompressionSession = (input: {
   return compressionSessionId;
 };
 
+const createGroupingVideo = async (extension: 'mp4' | 'mov', content: Buffer, label: string) => {
+  const sourceDir = path.join(tempRoot, `${label}-${extension}-source`);
+  const outputDir = path.join(tempRoot, `${label}-${extension}-output`);
+  fs.rmSync(sourceDir, { recursive: true, force: true });
+  fs.rmSync(outputDir, { recursive: true, force: true });
+  const compressionSessionId = seedCompressionSession({
+    sourceDir,
+    outputDir,
+    relativePath: `clip.${extension}`,
+    imageMagickCommand: '',
+    mediaType: 'video',
+    outputContent: content
+  });
+  const workspaceResponse = await request({
+    method: 'POST',
+    path: '/api/grouping/workspace',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceDir, outputDir, compressionSessionId })
+  });
+  assert.equal(workspaceResponse.statusCode, 201);
+  const workspace = JSON.parse(workspaceResponse.body) as { sessionId: string; items: Array<{ id: string }> };
+  return `/api/grouping/${workspace.sessionId}/items/${workspace.items[0].id}/media`;
+};
+
 beforeEach(async () => {
   process.env.MEDIA_ORGANIZER_DATA_DIR = tempDataDir;
   process.env.MEDIA_ORGANIZER_DB_PATH = tempDbPath;
@@ -249,6 +277,8 @@ afterEach(async () => {
   resetDbForTests();
   console.warn = originalConsoleWarn;
 });
+
+after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
 
 test('rejects requests from external origins', async () => {
   const response = await request({
@@ -334,119 +364,98 @@ test('grouping thumbnail endpoint returns a cached JPEG preview', async () => {
   assert.ok(Number(thumbnailResponse.headers['content-length']) > 0);
 });
 
-test('grouping video media without poster usage can stream the full file', async () => {
-  const sourceDir = path.join(tempRoot, 'video-source');
-  const outputDir = path.join(tempRoot, 'video-output');
-  fs.rmSync(sourceDir, { recursive: true, force: true });
-  fs.rmSync(outputDir, { recursive: true, force: true });
-  fs.mkdirSync(sourceDir, { recursive: true });
-  fs.mkdirSync(outputDir, { recursive: true });
+for (const extension of ['mp4', 'mov'] as const) {
+  test(`grouping ${extension.toUpperCase()} media serves complete, ranged, suffix and HEAD responses`, async () => {
+    const content = Buffer.from('0123456789abcdef');
+    const mediaPath = await createGroupingVideo(extension, content, 'video-http');
+    const expectedType = extension === 'mp4' ? 'video/mp4' : 'video/quicktime';
 
-  const content = Buffer.alloc(2 * 1024 * 1024, 'v');
-  const compressionSessionId = seedCompressionSession({
-    sourceDir,
-    outputDir,
-    relativePath: 'clip.mp4',
-    imageMagickCommand: '',
-    mediaType: 'video',
-    outputContent: content
+    const complete = await request({ path: `${mediaPath}?usage=poster` });
+    assert.equal(complete.statusCode, 200);
+    assert.equal(complete.headers['content-type'], expectedType);
+    assert.equal(complete.headers['accept-ranges'], 'bytes');
+    assert.equal(complete.headers['content-length'], String(content.length));
+    assert.equal(complete.headers['content-range'], undefined);
+    assert.notEqual(complete.headers.connection, 'close');
+    assert.deepEqual(complete.bytes, content);
+
+    const initial = await request({ path: mediaPath, headers: { Range: 'bytes=0-3' } });
+    assert.equal(initial.statusCode, 206);
+    assert.equal(initial.headers['content-length'], '4');
+    assert.equal(initial.headers['content-range'], `bytes 0-3/${content.length}`);
+    assert.deepEqual(initial.bytes, content.subarray(0, 4));
+
+    const open = await request({ path: mediaPath, headers: { Range: 'bytes=10-' } });
+    assert.equal(open.statusCode, 206);
+    assert.equal(open.headers['content-range'], `bytes 10-15/${content.length}`);
+    assert.deepEqual(open.bytes, content.subarray(10));
+
+    const suffix = await request({ path: mediaPath, headers: { Range: 'bytes=-5' } });
+    assert.equal(suffix.statusCode, 206);
+    assert.equal(suffix.headers['content-range'], `bytes 11-15/${content.length}`);
+    assert.deepEqual(suffix.bytes, content.subarray(-5));
+
+    const clamped = await request({ path: mediaPath, headers: { Range: 'bytes=12-999' } });
+    assert.equal(clamped.statusCode, 206);
+    assert.equal(clamped.headers['content-range'], `bytes 12-15/${content.length}`);
+    assert.deepEqual(clamped.bytes, content.subarray(12));
+
+    const head = await request({ method: 'HEAD', path: mediaPath });
+    assert.equal(head.statusCode, 200);
+    assert.equal(head.headers['content-type'], expectedType);
+    assert.equal(head.headers['content-length'], String(content.length));
+    assert.equal(head.bytes.length, 0);
+
+    const invalid = await request({ path: mediaPath, headers: { Range: 'bytes=99-' } });
+    assert.equal(invalid.statusCode, 416);
+    assert.equal(invalid.headers['content-range'], `bytes */${content.length}`);
+    assert.equal(invalid.headers['content-length'], '0');
+    assert.equal(invalid.bytes.length, 0);
   });
+}
 
-  const workspaceResponse = await request({
-    method: 'POST',
-    path: '/api/grouping/workspace',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sourceDir,
-      outputDir,
-      compressionSessionId
-    })
+test('backend health remains responsive while a video poster is served', async () => {
+  const mediaPath = await createGroupingVideo('mp4', Buffer.alloc(2 * 1024 * 1024, 'p'), 'poster-health');
+  const posterPromise = request({
+    path: `${mediaPath}?usage=poster`,
+    headers: { Range: 'bytes=0-1048575' }
   });
+  const startedAt = Date.now();
+  const health = await request({ path: '/api/health' });
 
-  assert.equal(workspaceResponse.statusCode, 201);
-  const workspace = JSON.parse(workspaceResponse.body) as { sessionId: string; items: Array<{ id: string }> };
-  const mediaResponse = await request({
-    path: `/api/grouping/${workspace.sessionId}/items/${workspace.items[0].id}/media`
-  });
-
-  assert.equal(mediaResponse.statusCode, 200);
-  assert.equal(mediaResponse.headers['content-type'], 'video/mp4');
-  assert.equal(mediaResponse.headers['content-length'], String(content.length));
-  assert.equal(mediaResponse.headers['content-range'], undefined);
-  assert.equal(Buffer.byteLength(mediaResponse.body), content.length);
+  assert.equal(health.statusCode, 200);
+  assert.ok(Date.now() - startedAt < 500);
+  assert.equal((await posterPromise).statusCode, 206);
 });
 
-test('grouping video poster usage bounds open-ended ranges', async () => {
-  const sourceDir = path.join(tempRoot, 'video-range-source');
-  const outputDir = path.join(tempRoot, 'video-range-output');
-  fs.rmSync(sourceDir, { recursive: true, force: true });
-  fs.rmSync(outputDir, { recursive: true, force: true });
-  fs.mkdirSync(sourceDir, { recursive: true });
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const content = Buffer.alloc(14 * 1024 * 1024, 'r');
-  const compressionSessionId = seedCompressionSession({
-    sourceDir,
-    outputDir,
-    relativePath: 'clip.mp4',
-    imageMagickCommand: '',
-    mediaType: 'video',
-    outputContent: content
+test('closing a grouping media response releases its stream and keeps health responsive', async () => {
+  const mediaPath = await createGroupingVideo('mov', Buffer.alloc(4 * 1024 * 1024, 'c'), 'video-cancel');
+  const clientRequest = http.request({
+    hostname: '127.0.0.1',
+    port: basePort,
+    path: mediaPath,
+    headers: { Host: `127.0.0.1:${basePort}` }
   });
 
-  const workspaceResponse = await request({
-    method: 'POST',
-    path: '/api/grouping/workspace',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sourceDir, outputDir, compressionSessionId })
+  const response = await new Promise<http.IncomingMessage>((resolve, reject) => {
+    clientRequest.once('response', resolve);
+    clientRequest.once('error', reject);
+    clientRequest.end();
   });
+  response.pause();
+  assert.equal(response.statusCode, 200);
+  assert.equal(getActiveGroupingMediaOperations().length, 1);
 
-  assert.equal(workspaceResponse.statusCode, 201);
-  const workspace = JSON.parse(workspaceResponse.body) as { sessionId: string; items: Array<{ id: string }> };
-  const mediaResponse = await request({
-    path: `/api/grouping/${workspace.sessionId}/items/${workspace.items[0].id}/media?usage=poster`,
-    headers: { Range: 'bytes=1048576-' }
-  });
+  const health = await request({ path: '/api/health' });
+  assert.equal(health.statusCode, 200);
 
-  assert.equal(mediaResponse.statusCode, 206);
-  assert.equal(mediaResponse.headers['content-length'], String(12 * 1024 * 1024));
-  assert.equal(mediaResponse.headers['content-range'], `bytes 1048576-${13 * 1024 * 1024 - 1}/${content.length}`);
-});
-
-test('grouping video poster usage bounds requests without Range', async () => {
-  const sourceDir = path.join(tempRoot, 'video-poster-source');
-  const outputDir = path.join(tempRoot, 'video-poster-output');
-  fs.rmSync(sourceDir, { recursive: true, force: true });
-  fs.rmSync(outputDir, { recursive: true, force: true });
-  fs.mkdirSync(sourceDir, { recursive: true });
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const content = Buffer.alloc(14 * 1024 * 1024, 'p');
-  const compressionSessionId = seedCompressionSession({
-    sourceDir,
-    outputDir,
-    relativePath: 'clip.mp4',
-    imageMagickCommand: '',
-    mediaType: 'video',
-    outputContent: content
-  });
-
-  const workspaceResponse = await request({
-    method: 'POST',
-    path: '/api/grouping/workspace',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sourceDir, outputDir, compressionSessionId })
-  });
-
-  assert.equal(workspaceResponse.statusCode, 201);
-  const workspace = JSON.parse(workspaceResponse.body) as { sessionId: string; items: Array<{ id: string }> };
-  const mediaResponse = await request({
-    path: `/api/grouping/${workspace.sessionId}/items/${workspace.items[0].id}/media?usage=poster`
-  });
-
-  assert.equal(mediaResponse.statusCode, 206);
-  assert.equal(mediaResponse.headers['content-length'], String(12 * 1024 * 1024));
-  assert.equal(mediaResponse.headers['content-range'], `bytes 0-${12 * 1024 * 1024 - 1}/${content.length}`);
+  response.destroy();
+  clientRequest.destroy();
+  const releasedBefore = Date.now() + 1_000;
+  while (getActiveGroupingMediaOperations().length > 0 && Date.now() < releasedBefore) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(getActiveGroupingMediaOperations().length, 0);
 });
 
 test('backend health offline reports are logged for local diagnostics', async () => {

@@ -53,7 +53,6 @@ import { beginGroupingMediaOperation } from './pipeline/grouping/groupingMediaDi
 const port = Number(process.env.PORT ?? 4000);
 const BACKEND_HEALTH_OFFLINE_REPORT_PATH = '/api/health/offline-report';
 const MAX_RECENT_HEALTH_PROBES = 8;
-const VIDEO_POSTER_RANGE_BYTES = 12 * 1024 * 1024;
 
 type BackendHealthOfflineReport = {
   previousStatus?: string;
@@ -192,26 +191,66 @@ const getMediaContentType = (filePath: string) => {
   return 'application/octet-stream';
 };
 
+type MediaByteRange =
+  | { kind: 'full' }
+  | { kind: 'partial'; start: number; end: number }
+  | { kind: 'unsatisfiable' };
+
+const parseMediaByteRange = (value: string | undefined, size: number): MediaByteRange => {
+  if (!value) return { kind: 'full' };
+  if (size === 0) return { kind: 'unsatisfiable' };
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return { kind: 'unsatisfiable' };
+
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return { kind: 'unsatisfiable' };
+    return {
+      kind: 'partial',
+      start: Math.max(0, size - suffixLength),
+      end: size - 1
+    };
+  }
+
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (
+    !Number.isSafeInteger(start)
+    || !Number.isSafeInteger(requestedEnd)
+    || start < 0
+    || start >= size
+    || requestedEnd < start
+  ) {
+    return { kind: 'unsatisfiable' };
+  }
+
+  return { kind: 'partial', start, end: Math.min(requestedEnd, size - 1) };
+};
+
 const streamMediaFile = (
   req: import('node:http').IncomingMessage,
   res: import('node:http').ServerResponse,
   filePath: string,
-  cacheControl = 'private, max-age=3600',
-  options: { limitOpenEndedVideoRange?: boolean } = {}
+  cacheControl = 'private, max-age=3600'
 ) => {
   const stats = fs.statSync(filePath);
-  const range = req.headers.range;
   const contentType = getMediaContentType(filePath);
-  const isVideo = contentType.startsWith('video/');
-  const headersBase = {
+  const range = parseMediaByteRange(req.method === 'HEAD' ? undefined : req.headers.range, stats.size);
+  const headersBase: Record<string, string> = {
     'Accept-Ranges': 'bytes',
     'Cache-Control': cacheControl,
     'Last-Modified': stats.mtime.toUTCString(),
     'Content-Type': contentType
   };
-
   const pipeStream = (stream: fs.ReadStream) => {
-    req.on('aborted', () => stream.destroy());
+    const destroyStream = () => stream.destroy();
+    req.once('aborted', destroyStream);
+    res.once('close', destroyStream);
+    stream.once('close', () => {
+      req.removeListener('aborted', destroyStream);
+      res.removeListener('close', destroyStream);
+    });
     stream.on('error', () => {
       if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -224,61 +263,41 @@ const streamMediaFile = (
     stream.pipe(res);
   };
 
-  if (!range && isVideo && stats.size > 0 && options.limitOpenEndedVideoRange) {
-    const end = Math.min(stats.size - 1, VIDEO_POSTER_RANGE_BYTES - 1);
-    res.writeHead(206, {
-      ...headersBase,
-      'Content-Length': end + 1,
-      'Content-Range': `bytes 0-${end}/${stats.size}`
-    });
-    pipeStream(fs.createReadStream(filePath, { start: 0, end }));
-    return;
-  }
-
-  if (!range) {
-    res.writeHead(200, {
-      ...headersBase,
-      'Content-Length': stats.size
-    });
-    pipeStream(fs.createReadStream(filePath));
-    return;
-  }
-
-  const match = range.match(/bytes=(\d*)-(\d*)/);
-
-  if (!match) {
-    res.writeHead(416, headersBase);
-    res.end();
-    return;
-  }
-
-  const start = match[1] ? Number(match[1]) : 0;
-  const requestedEnd = match[2] ? Number(match[2]) : stats.size - 1;
-  const end = isVideo && !match[2] && options.limitOpenEndedVideoRange
-    ? Math.min(stats.size - 1, start + VIDEO_POSTER_RANGE_BYTES - 1)
-    : requestedEnd;
-
-  if (start >= stats.size || end >= stats.size || start > end) {
+  if (range.kind === 'unsatisfiable') {
     res.writeHead(416, {
       ...headersBase,
+      'Content-Length': '0',
       'Content-Range': `bytes */${stats.size}`
     });
     res.end();
     return;
   }
 
+  if (range.kind === 'full') {
+    res.writeHead(200, {
+      ...headersBase,
+      'Content-Length': stats.size
+    });
+    if (req.method === 'HEAD' || stats.size === 0) {
+      res.end();
+      return;
+    }
+    pipeStream(fs.createReadStream(filePath));
+    return;
+  }
+
   res.writeHead(206, {
     ...headersBase,
-    'Content-Length': end - start + 1,
-    'Content-Range': `bytes ${start}-${end}/${stats.size}`
+    'Content-Length': range.end - range.start + 1,
+    'Content-Range': `bytes ${range.start}-${range.end}/${stats.size}`
   });
-  pipeStream(fs.createReadStream(filePath, { start, end }));
+  pipeStream(fs.createReadStream(filePath, { start: range.start, end: range.end }));
 };
 
 const traceGroupingMediaRequest = (
   req: import('node:http').IncomingMessage,
   res: import('node:http').ServerResponse,
-  operation: 'media' | 'preview' | 'thumbnail',
+  operation: 'media' | 'poster' | 'preview' | 'thumbnail',
   sessionId: string,
   itemId: string
 ) => {
@@ -327,6 +346,21 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
 
   for (const [header, value] of Object.entries(getCorsHeaders(req.headers.origin))) {
     res.setHeader(header, value);
+  }
+
+  const internalMediaMatch = requestUrl.pathname.match(/^\/internal\/grouping\/([^/]+)\/items\/([^/]+)\/media-path$/);
+  if (internalMediaMatch && req.method === 'GET') {
+    if (!process.env.MEDIA_ORGANIZER_DESKTOP_TOKEN) {
+      sendJson(res, 404, { status: 'not_found' });
+      return;
+    }
+    const media = getGroupingMediaPath(decodeURIComponent(internalMediaMatch[1]), decodeURIComponent(internalMediaMatch[2]));
+    if (!media || !fs.existsSync(media.path)) {
+      sendJson(res, 404, { status: 'not_found' });
+      return;
+    }
+    sendJson(res, 200, { path: media.path, contentType: getMediaContentType(media.path) });
+    return;
   }
 
   if (requestUrl.pathname === BACKEND_HEALTH_OFFLINE_REPORT_PATH && req.method === 'POST') {
@@ -502,7 +536,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     return;
   }
 
-  if (requestUrl.pathname.startsWith('/api/grouping/') && ['GET', 'POST', 'PATCH', 'DELETE'].includes(req.method ?? '')) {
+  if (requestUrl.pathname.startsWith('/api/grouping/') && ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'].includes(req.method ?? '')) {
     const pathSegments = requestUrl.pathname.split('/').filter(Boolean);
     const sessionId = pathSegments[2];
     const subPath = pathSegments[3];
@@ -736,8 +770,10 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
       return;
     }
 
-    if (req.method === 'GET' && subPath === 'items' && subId && tailPath === 'media') {
-      const trace = traceGroupingMediaRequest(req, res, 'media', sessionId, subId);
+    if ((req.method === 'GET' || req.method === 'HEAD') && subPath === 'items' && subId && tailPath === 'media') {
+      const usage = requestUrl.searchParams.get('usage');
+      const operation = usage === 'poster' ? 'poster' : 'media';
+      const trace = traceGroupingMediaRequest(req, res, operation, sessionId, subId);
       try {
         const media = getGroupingMediaPath(sessionId, subId);
 
@@ -746,9 +782,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
           return;
         }
 
-        streamMediaFile(req, res, media.path, 'private, max-age=3600', {
-          limitOpenEndedVideoRange: requestUrl.searchParams.get('usage') === 'poster'
-        });
+        streamMediaFile(req, res, media.path);
       } catch (error) {
         trace.finish('failed', error);
         sendJson(res, 500, {

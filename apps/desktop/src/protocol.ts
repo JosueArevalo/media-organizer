@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { net, protocol } from 'electron';
 import { createBackendProxyRequestInit, resolveBackendProxyTarget } from './backendProxy.js';
+import { createDesktopMediaResponse, resolveDesktopMediaDescriptorTarget, type DesktopMediaDescriptor } from './desktopMedia.js';
 import { normalizeWebAssetPath } from './pathSecurity.js';
 
 const APP_HOST = 'app';
@@ -62,6 +63,26 @@ export const registerAppProtocol = (input: {
           }, { status: 503 });
         }
         try {
+          const backendPort = input.getBackendPort();
+          const descriptorTarget = backendPort === null ? null : resolveDesktopMediaDescriptorTarget(backendPort, url);
+          if (descriptorTarget) {
+            try {
+              const descriptorResponse = await net.fetch(descriptorTarget, {
+                headers: { 'X-Media-Organizer-Token': input.token },
+                bypassCustomProtocolHandlers: true
+              });
+              if (!descriptorResponse.ok) {
+                return Response.json({ status: 'media_unavailable' }, { status: descriptorResponse.status });
+              }
+              const descriptor = await descriptorResponse.json() as DesktopMediaDescriptor;
+              return createDesktopMediaResponse(request, descriptor);
+            } catch (error) {
+              input.onError?.(new Error(
+                `Media protocol request ${request.method} ${url.pathname} failed: ${error instanceof Error ? error.message : String(error)}`
+              ));
+              return Response.json({ status: 'media_unavailable' }, { status: 502 });
+            }
+          }
           const init = await createBackendProxyRequestInit(request, input.token);
           return await net.fetch(target, {
             ...init,
