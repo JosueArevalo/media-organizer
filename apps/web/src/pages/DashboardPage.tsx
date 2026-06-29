@@ -11,6 +11,7 @@ import { useToolPreflight } from '../hooks/useToolPreflight';
 import { MediaToolsNotice } from '../components/MediaToolsNotice';
 import { DashboardWelcomePanel } from '../components/DashboardWelcomePanel';
 import { dismissOnboarding, shouldShowOnboarding } from '../services/dashboard-onboarding.store';
+import { formatCompressionDuration } from './dashboard-duration';
 import {
   deleteDashboardExecution,
   getBackendHealth,
@@ -38,54 +39,6 @@ const formatDateTime = (value: string | null) => {
     dateStyle: 'medium',
     timeStyle: 'short'
   }).format(date);
-};
-
-const formatDurationMs = (durationMs: number, t: (key: TranslationKey) => string) => {
-  if (!Number.isFinite(durationMs) || durationMs < 0) {
-    return '-';
-  }
-
-  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const parts: string[] = [];
-
-  if (hours > 0) {
-    parts.push(`${hours} ${t(hours === 1 ? 'dashboard.duration.hour' : 'dashboard.duration.hours')}`);
-  }
-
-  if (minutes > 0 || hours > 0) {
-    parts.push(`${minutes} ${t(minutes === 1 ? 'dashboard.duration.minute' : 'dashboard.duration.minutes')}`);
-  }
-
-  if (seconds > 0 || parts.length === 0) {
-    parts.push(`${seconds} ${t(seconds === 1 ? 'dashboard.duration.second' : 'dashboard.duration.seconds')}`);
-  }
-
-  return parts.join(' ');
-};
-
-const formatCompressionDuration = (execution: DashboardExecution, t: (key: TranslationKey) => string) => {
-  if (typeof execution.compressionActiveDurationMs === 'number') {
-    const activeStartedAtMs = execution.compressionActiveStartedAt
-      ? new Date(execution.compressionActiveStartedAt).getTime()
-      : null;
-    const activeDurationMs = activeStartedAtMs !== null && !Number.isNaN(activeStartedAtMs)
-      ? Date.now() - activeStartedAtMs
-      : 0;
-
-    return formatDurationMs(execution.compressionActiveDurationMs + activeDurationMs, t);
-  }
-
-  const startMs = new Date(execution.startedAt).getTime();
-  const endMs = execution.finishedAt ? new Date(execution.finishedAt).getTime() : Date.now();
-
-  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
-    return '-';
-  }
-
-  return formatDurationMs(endMs - startMs, t);
 };
 
 const basename = (value: string) => value.split(/[\\/]/).filter(Boolean).pop() ?? value;
