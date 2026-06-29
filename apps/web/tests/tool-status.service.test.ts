@@ -13,6 +13,7 @@ const originalFetch = globalThis.fetch;
 
 const emptySettings: EncoderSettingsSnapshot = {
   imageToolCommand: '',
+  pngToolCommand: '',
   videoToolCommand: '',
   imageMagickCommand: '',
   exifToolCommand: '',
@@ -27,6 +28,7 @@ test('Windows keeps empty tool settings unconfigured', () => {
   assert.equal(isWindowsPlatform('win32'), true);
   assert.equal(isUnixPlatform('win32'), false);
   assert.equal(getEffectiveToolCommand('image', emptySettings, 'win32'), '');
+  assert.equal(getEffectiveToolCommand('png', emptySettings, 'win32'), '');
   assert.equal(getEffectiveToolCommand('imagemagick', emptySettings, 'win32'), '');
   assert.equal(getEffectiveToolCommand('exiftool', emptySettings, 'win32'), '');
   assert.equal(getEffectiveToolCommand('video', emptySettings, 'win32'), '');
@@ -36,6 +38,7 @@ test('macOS uses commands from PATH when settings are empty', () => {
   assert.equal(isUnixPlatform('darwin'), true);
   assert.equal(getEffectiveToolCommand('image', emptySettings, 'darwin'), 'cjpeg');
   assert.equal(getEffectiveToolCommand('imagemagick', emptySettings, 'darwin'), 'magick');
+  assert.equal(getEffectiveToolCommand('png', emptySettings, 'darwin'), 'pngquant');
   assert.equal(getEffectiveToolCommand('exiftool', emptySettings, 'darwin'), 'exiftool');
   assert.equal(getEffectiveToolCommand('video', emptySettings, 'darwin'), 'HandBrakeCLI');
 });
@@ -44,6 +47,7 @@ test('Linux uses the same PATH commands as macOS', () => {
   assert.equal(isUnixPlatform('linux'), true);
   assert.equal(getEffectiveToolCommand('image', emptySettings, 'linux'), 'cjpeg');
   assert.equal(getEffectiveToolCommand('video', emptySettings, 'linux'), 'HandBrakeCLI');
+  assert.equal(getEffectiveToolCommand('png', emptySettings, 'linux'), 'pngquant');
 });
 
 test('configured commands override platform defaults', () => {
@@ -84,6 +88,7 @@ test('loadToolsStatusRequest posts encoder commands and returns the snapshot', a
   assert.equal(request?.init?.method, 'POST');
   assert.deepEqual(JSON.parse(String(request?.init?.body)), {
     imageToolCommand: '',
+    pngToolCommand: '',
     imageMagickCommand: '',
     exifToolCommand: '',
     videoToolCommand: ''

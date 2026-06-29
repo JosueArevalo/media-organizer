@@ -23,6 +23,7 @@ test('resolveToolCommand discovers known tools under a Linuxbrew prefix outside 
   const prefix = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-linuxbrew-'));
   const commands = [
     path.join(prefix, 'opt', 'mozjpeg', 'bin', 'cjpeg'),
+    path.join(prefix, 'bin', 'pngquant'),
     path.join(prefix, 'bin', 'magick'),
     path.join(prefix, 'bin', 'exiftool'),
     path.join(prefix, 'bin', 'HandBrakeCLI')
@@ -40,9 +41,10 @@ test('resolveToolCommand discovers known tools under a Linuxbrew prefix outside 
   };
 
   assert.equal(resolveToolCommand('cjpeg', options), commands[0]);
-  assert.equal(resolveToolCommand('magick', options), commands[1]);
-  assert.equal(resolveToolCommand('exiftool', options), commands[2]);
-  assert.equal(resolveToolCommand('HandBrakeCLI', options), commands[3]);
+  assert.equal(resolveToolCommand('pngquant', options), commands[1]);
+  assert.equal(resolveToolCommand('magick', options), commands[2]);
+  assert.equal(resolveToolCommand('exiftool', options), commands[3]);
+  assert.equal(resolveToolCommand('HandBrakeCLI', options), commands[4]);
 });
 
 test('resolveToolCommand supports Apple Silicon and Intel Homebrew prefixes', () => {
@@ -89,10 +91,12 @@ test('resolveToolCommand keeps Homebrew fallback disabled on Windows', () => {
 test('getToolsStatus uses Unix command defaults and keeps empty Windows tools unconfigured', () => {
   const unixStatus = getToolsStatus({}, 'darwin');
   assert.equal(unixStatus.tools.image.effectiveCommand, 'cjpeg');
+  assert.equal(unixStatus.tools.png.effectiveCommand, 'pngquant');
   assert.equal(unixStatus.tools.imagemagick.effectiveCommand, 'magick');
   assert.equal(unixStatus.tools.exiftool.effectiveCommand, 'exiftool');
   assert.equal(unixStatus.tools.video.effectiveCommand, 'HandBrakeCLI');
   assert.equal(unixStatus.tools.image.installCommand, 'brew install mozjpeg');
+  assert.equal(unixStatus.tools.png.installCommand, 'brew install pngquant');
   assert.match(unixStatus.tools.image.note ?? '', /Apple Silicon/);
 
   const linuxStatus = getToolsStatus({}, 'linux');

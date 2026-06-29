@@ -91,6 +91,7 @@ type CompressionManifestData = {
     videoPresetLabel: string;
     videoOutputFormatMode?: 'preserve' | 'mp4';
     imageToolCommand: string;
+    pngToolCommand: string;
     videoToolCommand: string;
     imageMagickCommand?: string;
     exifToolCommand?: string;
@@ -610,6 +611,7 @@ const isCompressOperation = (filePath: string, scope: SelectionScope, policy: Co
   }
 
   if (['.jpg', '.jpeg'].includes(extension)) return policy.jpeg === 'compress';
+  if (extension === '.png') return policy.png === 'compress';
   if (['.heic', '.heif'].includes(extension)) return policy.heic === 'convert';
   if (['.mp4', '.mov', '.m4v', '.avi', '.mkv'].includes(extension)) return policy.video === 'compress';
   return false;
@@ -926,6 +928,7 @@ export const executeCompressionSession = async (sessionId: string) => {
     videoPresetLabel: checkpointData.manifest.videoPresetLabel,
     videoOutputFormatMode: checkpointData.manifest.videoOutputFormatMode ?? 'preserve',
     imageToolCommand: checkpointData.manifest.imageToolCommand,
+    pngToolCommand: checkpointData.manifest.pngToolCommand ?? 'pngquant',
     videoToolCommand: checkpointData.manifest.videoToolCommand,
     imageMagickCommand: checkpointData.manifest.imageMagickCommand ?? 'magick',
     exifToolCommand: checkpointData.manifest.exifToolCommand ?? '',
@@ -946,6 +949,7 @@ export const executeCompressionSession = async (sessionId: string) => {
     videoPresetLabel: checkpointData.manifest.videoPresetLabel,
     videoOutputFormatMode: checkpointData.manifest.videoOutputFormatMode ?? 'preserve',
     imageToolCommand: checkpointData.manifest.imageToolCommand,
+    pngToolCommand: checkpointData.manifest.pngToolCommand ?? 'pngquant',
     videoToolCommand: checkpointData.manifest.videoToolCommand,
     imageMagickCommand: checkpointData.manifest.imageMagickCommand ?? 'magick',
     exifToolCommand: checkpointData.manifest.exifToolCommand ?? '',

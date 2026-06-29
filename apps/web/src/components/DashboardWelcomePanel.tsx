@@ -17,6 +17,7 @@ const ONBOARDING_TOOLS: Array<{
   descriptionKey: TranslationKey;
 }> = [
   { key: 'image', name: 'MozJPEG', monogram: 'MJ', descriptionKey: 'dashboard.onboarding.tool.mozjpeg' },
+  { key: 'png', name: 'pngquant', monogram: 'PQ', descriptionKey: 'dashboard.onboarding.tool.pngquant' },
   { key: 'imagemagick', name: 'ImageMagick', monogram: 'IM', descriptionKey: 'dashboard.onboarding.tool.imagemagick' },
   { key: 'exiftool', name: 'ExifTool', monogram: 'EX', descriptionKey: 'dashboard.onboarding.tool.exiftool' },
   { key: 'video', name: 'HandBrakeCLI', monogram: 'HB', descriptionKey: 'dashboard.onboarding.tool.handbrake' }

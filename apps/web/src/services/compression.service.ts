@@ -7,11 +7,13 @@ export type CompressionSessionRequest = {
   videoPresetLabel: string;
   videoOutputFormatMode?: 'preserve' | 'mp4';
   imageToolCommand?: string;
+  pngToolCommand?: string;
   videoToolCommand?: string;
   imageMagickCommand?: string;
   exifToolCommand?: string;
   processingPolicy?: {
     jpeg: 'compress' | 'copy';
+    png: 'compress' | 'copy';
     heic: 'convert' | 'copy';
     video: 'compress' | 'copy';
   };

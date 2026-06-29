@@ -41,6 +41,7 @@ test('loadEncoderSettings backfills new optional tool paths for old snapshots', 
   const settings = await loadEncoderSettings();
 
   assert.equal(settings.imageToolCommand, 'cjpeg-static.exe');
+  assert.equal(settings.pngToolCommand, '');
   assert.equal(settings.videoToolCommand, 'HandBrakeCLI.exe');
   assert.equal(settings.imageMagickCommand, '');
   assert.equal(settings.exifToolCommand, '');
@@ -52,6 +53,7 @@ test('saveEncoderSettings persists all four external tool paths', async () => {
 
   await saveEncoderSettings({
     imageToolCommand: 'cjpeg-static.exe',
+    pngToolCommand: 'pngquant.exe',
     videoToolCommand: 'HandBrakeCLI.exe',
     imageMagickCommand: 'magick.exe',
     exifToolCommand: 'exiftool.exe'
@@ -59,12 +61,14 @@ test('saveEncoderSettings persists all four external tool paths', async () => {
 
   const stored = JSON.parse(storage.get('encoderSettings') ?? '{}') as {
     imageToolCommand?: string;
+    pngToolCommand?: string;
     videoToolCommand?: string;
     imageMagickCommand?: string;
     exifToolCommand?: string;
   };
 
   assert.equal(stored.imageToolCommand, 'cjpeg-static.exe');
+  assert.equal(stored.pngToolCommand, 'pngquant.exe');
   assert.equal(stored.videoToolCommand, 'HandBrakeCLI.exe');
   assert.equal(stored.imageMagickCommand, 'magick.exe');
   assert.equal(stored.exifToolCommand, 'exiftool.exe');

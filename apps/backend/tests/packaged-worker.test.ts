@@ -23,9 +23,11 @@ const manifest = {
   videoOutputDir: path.join(tempRoot, 'out'),
   imageQuality: 80,
   imageToolCommand: 'cjpeg',
+  pngToolCommand: 'pngquant',
   imageMagickCommand: 'magick',
   exifToolCommand: 'exiftool',
   videoToolCommand: 'HandBrakeCLI',
+  processingPolicy: { jpeg: 'compress', png: 'compress', heic: 'convert', video: 'compress' },
   videoPresetLabel: 'Fast 1080p30',
   videoOutputFormatMode: 'preserve',
   selectionScope: { excludedDirectories: [], excludedFiles: [], includedDirectories: [], includedFiles: [], updatedAt: 0 }
@@ -38,6 +40,7 @@ test('packaged worker receives the same image and video arguments behind phase s
   assert.equal(images.command, worker);
   assert.equal(images.args[0], 'images');
   assert.ok(images.args.includes('--quality'));
+  assert.ok(images.args.includes('--png-command'));
   assert.equal(videos.command, worker);
   assert.equal(videos.args[0], 'videos');
   assert.ok(videos.args.includes('--preset'));

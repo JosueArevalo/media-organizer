@@ -30,12 +30,14 @@ import {
 
 export type CompressionProcessingPolicy = {
   jpeg: 'compress' | 'copy';
+  png: 'compress' | 'copy';
   heic: 'convert' | 'copy';
   video: 'compress' | 'copy';
 };
 
 export const DEFAULT_COMPRESSION_PROCESSING_POLICY: CompressionProcessingPolicy = {
   jpeg: 'compress',
+  png: 'compress',
   heic: 'convert',
   video: 'compress'
 };
@@ -51,6 +53,7 @@ export type CompressionSessionRequest = {
   videoPresetLabel: string;
   videoOutputFormatMode?: 'preserve' | 'mp4';
   imageToolCommand?: string;
+  pngToolCommand?: string;
   videoToolCommand?: string;
   imageMagickCommand?: string;
   exifToolCommand?: string;
@@ -76,6 +79,7 @@ export type CompressionSessionManifest = {
   videoPresetLabel: string;
   videoOutputFormatMode: 'preserve' | 'mp4';
   imageToolCommand: string;
+  pngToolCommand: string;
   videoToolCommand: string;
   imageMagickCommand: string;
   exifToolCommand: string;
@@ -264,12 +268,17 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
   }
 
   const configuredImageCommand = request.imageToolCommand?.trim() ?? '';
+  const configuredPngCommand = request.pngToolCommand?.trim() ?? '';
   const configuredVideoCommand = request.videoToolCommand?.trim() ?? '';
   const configuredImageMagickCommand = request.imageMagickCommand?.trim() ?? '';
   const requiresMozJpeg = processingPolicy.jpeg === 'compress' || processingPolicy.heic === 'convert';
 
   if (hasExplicitProcessingPolicy && requiresMozJpeg && !resolveToolCommand(configuredImageCommand)) {
     throw new CompressionToolConfigurationError('MozJPEG is required by the selected processing policy.');
+  }
+
+  if (hasExplicitProcessingPolicy && processingPolicy.png === 'compress' && !resolveToolCommand(configuredPngCommand)) {
+    throw new CompressionToolConfigurationError('pngquant is required by the selected processing policy.');
   }
 
   if (hasExplicitProcessingPolicy && processingPolicy.heic === 'convert' && !resolveToolCommand(configuredImageMagickCommand)) {
@@ -287,10 +296,12 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
   const videoOutputDir = buildCompressionVideosOutputDir(outputRoot);
   const manifestPath = buildCompressionSessionManifestPath(outputRoot);
   const imageCommandFromRequest = configuredImageCommand || (hasExplicitProcessingPolicy ? '' : 'cjpeg');
+  const pngCommandFromRequest = configuredPngCommand || (hasExplicitProcessingPolicy ? '' : 'pngquant');
   const videoCommandFromRequest = configuredVideoCommand || (hasExplicitProcessingPolicy ? '' : 'HandBrakeCLI');
   const imageMagickCommandFromRequest = configuredImageMagickCommand || (hasExplicitProcessingPolicy ? '' : 'magick');
   const exifToolCommandFromRequest = request.exifToolCommand?.trim() || '';
   const resolvedImageCommand = resolveToolCommand(imageCommandFromRequest) ?? imageCommandFromRequest;
+  const resolvedPngCommand = resolveToolCommand(pngCommandFromRequest) ?? pngCommandFromRequest;
   const resolvedVideoCommand = resolveToolCommand(videoCommandFromRequest) ?? videoCommandFromRequest;
   const resolvedImageMagickCommand = resolveToolCommand(imageMagickCommandFromRequest) ?? imageMagickCommandFromRequest;
   const resolvedExifToolCommand = exifToolCommandFromRequest
@@ -315,6 +326,7 @@ export const startCompressionSession = (request: CompressionSessionRequest): Com
     videoPresetLabel: request.videoPresetLabel,
     videoOutputFormatMode: request.videoOutputFormatMode === 'mp4' ? 'mp4' : 'preserve',
     imageToolCommand: resolvedImageCommand,
+    pngToolCommand: resolvedPngCommand,
     videoToolCommand: resolvedVideoCommand,
     imageMagickCommand: resolvedImageMagickCommand,
     exifToolCommand: resolvedExifToolCommand,

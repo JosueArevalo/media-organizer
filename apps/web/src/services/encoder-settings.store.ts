@@ -1,5 +1,6 @@
 export type EncoderSettingsSnapshot = {
   imageToolCommand: string;
+  pngToolCommand: string;
   videoToolCommand: string;
   imageMagickCommand: string;
   exifToolCommand: string;
@@ -11,6 +12,7 @@ const STORAGE_EVENT_TYPE = 'encoderSettingsChanged';
 
 const getDefaultSettings = (): EncoderSettingsSnapshot => ({
   imageToolCommand: '',
+  pngToolCommand: '',
   videoToolCommand: '',
   imageMagickCommand: '',
   exifToolCommand: '',
@@ -19,6 +21,7 @@ const getDefaultSettings = (): EncoderSettingsSnapshot => ({
 
 const normalizeSettings = (value: Partial<EncoderSettingsSnapshot> | null): EncoderSettingsSnapshot => ({
   imageToolCommand: value?.imageToolCommand ?? '',
+  pngToolCommand: value?.pngToolCommand ?? '',
   videoToolCommand: value?.videoToolCommand ?? '',
   imageMagickCommand: value?.imageMagickCommand ?? '',
   exifToolCommand: value?.exifToolCommand ?? '',

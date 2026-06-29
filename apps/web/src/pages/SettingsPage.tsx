@@ -35,7 +35,7 @@ import { useTranslation, type TranslationKey } from '../i18n';
 import { getDesktopBridge } from '../services/desktop-runtime.service';
 import '../styles/SettingsPage.css';
 
-type ToolKey = 'image' | 'video' | 'imagemagick' | 'exiftool';
+type ToolKey = 'image' | 'png' | 'video' | 'imagemagick' | 'exiftool';
 type BrowserPermissionState = NotificationPermission | 'unsupported';
 
 const notificationEventLabelKeys: Record<CompletionNotificationEventKey, {
@@ -90,6 +90,10 @@ const toolDownloadLinks: Record<ToolKey, {
     url: 'https://github.com/garyzyg/mozjpeg-windows/releases',
     ariaLabel: 'settings.downloadImageAria'
   },
+  png: {
+    url: 'https://pngquant.org/',
+    ariaLabel: 'settings.downloadPngAria'
+  },
   imagemagick: {
     url: 'https://imagemagick.org/download/',
     ariaLabel: 'settings.downloadImageMagickAria'
@@ -114,6 +118,7 @@ const SettingsPage = () => {
     : null;
   const [settings, setSettings] = useState<EncoderSettingsSnapshot>({
     imageToolCommand: '',
+    pngToolCommand: '',
     videoToolCommand: '',
     imageMagickCommand: '',
     exifToolCommand: '',
@@ -122,6 +127,7 @@ const SettingsPage = () => {
 
   const [savedSettings, setSavedSettings] = useState<EncoderSettingsSnapshot>({
     imageToolCommand: '',
+    pngToolCommand: '',
     videoToolCommand: '',
     imageMagickCommand: '',
     exifToolCommand: '',
@@ -130,11 +136,13 @@ const SettingsPage = () => {
 
   const [statuses, setStatuses] = useState<{
     image: ToolStatus;
+    png: ToolStatus;
     video: ToolStatus;
     imagemagick: ToolStatus;
     exiftool: ToolStatus;
   }>({
     image: 'unknown',
+    png: 'unknown',
     video: 'unknown',
     imagemagick: 'unknown',
     exiftool: 'unknown'
@@ -181,6 +189,7 @@ const SettingsPage = () => {
       setToolStatusSnapshot(snapshot);
       setStatuses({
         image: snapshot.tools.image.status,
+        png: snapshot.tools.png.status,
         video: snapshot.tools.video.status,
         imagemagick: snapshot.tools.imagemagick.status,
         exiftool: snapshot.tools.exiftool.status
@@ -201,6 +210,7 @@ const SettingsPage = () => {
 
     setStatuses({
       image: fallbackStatus('image'),
+      png: fallbackStatus('png'),
       video: fallbackStatus('video'),
       imagemagick: fallbackStatus('imagemagick'),
       exiftool: fallbackStatus('exiftool')
@@ -209,6 +219,7 @@ const SettingsPage = () => {
 
   const getToolField = (tool: ToolKey) => {
     if (tool === 'image') return 'imageToolCommand';
+    if (tool === 'png') return 'pngToolCommand';
     if (tool === 'video') return 'videoToolCommand';
     if (tool === 'imagemagick') return 'imageMagickCommand';
     return 'exifToolCommand';
@@ -226,6 +237,7 @@ const SettingsPage = () => {
     }
 
     if (tool === 'image') return 'cjpeg-static.exe';
+    if (tool === 'png') return 'pngquant.exe';
     if (tool === 'video') return 'HandBrakeCLI.exe';
     if (tool === 'imagemagick') return 'magick.exe';
     return 'exiftool.exe';
@@ -234,12 +246,14 @@ const SettingsPage = () => {
   const getToolLabelKey = (tool: ToolKey): TranslationKey => {
     if (isWindowsPlatform()) {
       if (tool === 'image') return 'settings.imagePathLabel';
+      if (tool === 'png') return 'settings.pngPathLabel';
       if (tool === 'video') return 'settings.videoPathLabel';
       if (tool === 'imagemagick') return 'settings.imageMagickPathLabel';
       return 'settings.exifToolPathLabel';
     }
 
     if (tool === 'image') return 'settings.imageCommandLabel';
+    if (tool === 'png') return 'settings.pngCommandLabel';
     if (tool === 'video') return 'settings.videoCommandLabel';
     if (tool === 'imagemagick') return 'settings.imageMagickCommandLabel';
     return 'settings.exifToolCommandLabel';
@@ -249,6 +263,7 @@ const SettingsPage = () => {
     if (!isWindowsPlatform()) {
       return getEffectiveToolCommand(tool, {
         imageToolCommand: '',
+        pngToolCommand: '',
         videoToolCommand: '',
         imageMagickCommand: '',
         exifToolCommand: '',
@@ -257,6 +272,7 @@ const SettingsPage = () => {
     }
 
     if (tool === 'image') return 'C:\\Program Files\\mozjpeg\\cjpeg-static.exe';
+    if (tool === 'png') return 'C:\\Program Files\\pngquant\\pngquant.exe';
     if (tool === 'video') return 'C:\\Program Files\\HandBrake\\HandBrakeCLI.exe';
     if (tool === 'imagemagick') return 'C:\\Program Files\\ImageMagick-7.1.1-Q16-HDRI\\magick.exe';
     return 'C:\\Tools\\exiftool.exe';
@@ -287,6 +303,8 @@ const SettingsPage = () => {
         title:
           tool === 'image'
             ? t('settings.chooseImageExecutable')
+            : tool === 'png'
+              ? t('settings.choosePngExecutable')
             : tool === 'video'
               ? t('settings.chooseVideoExecutable')
               : tool === 'imagemagick'
@@ -328,12 +346,14 @@ const SettingsPage = () => {
     try {
       await saveEncoderSettings({
         imageToolCommand: settings.imageToolCommand,
+        pngToolCommand: settings.pngToolCommand,
         videoToolCommand: settings.videoToolCommand,
         imageMagickCommand: settings.imageMagickCommand,
         exifToolCommand: settings.exifToolCommand
       });
       setSavedSettings({
         imageToolCommand: settings.imageToolCommand,
+        pngToolCommand: settings.pngToolCommand,
         videoToolCommand: settings.videoToolCommand,
         imageMagickCommand: settings.imageMagickCommand,
         exifToolCommand: settings.exifToolCommand,
@@ -345,6 +365,7 @@ const SettingsPage = () => {
       });
       void refreshToolStatus({
         imageToolCommand: settings.imageToolCommand,
+        pngToolCommand: settings.pngToolCommand,
         videoToolCommand: settings.videoToolCommand,
         imageMagickCommand: settings.imageMagickCommand,
         exifToolCommand: settings.exifToolCommand,
@@ -363,6 +384,7 @@ const SettingsPage = () => {
 
   const hasPendingEncoderChanges =
     settings.imageToolCommand !== savedSettings.imageToolCommand ||
+    settings.pngToolCommand !== savedSettings.pngToolCommand ||
     settings.videoToolCommand !== savedSettings.videoToolCommand ||
     settings.imageMagickCommand !== savedSettings.imageMagickCommand ||
     settings.exifToolCommand !== savedSettings.exifToolCommand;
@@ -694,6 +716,43 @@ const SettingsPage = () => {
                 )}
               </div>
               {renderToolStatus('image')}
+            </div>
+          </div>
+
+          <div className="settings-card-encoder-block">
+            <div className="card-title card-title-compact">{t('settings.pngCompression')}</div>
+            <div className="card-subtitle">{t('settings.pngSubtitle')}</div>
+
+            <div className="form-group">
+              <label className="form-label">{t(getToolLabelKey('png'))}</label>
+              <div className="path-input-group">
+                <input
+                  type="text"
+                  className="path-input"
+                  value={settings.pngToolCommand}
+                  onChange={(e) => handlePathChange('png', e.target.value)}
+                  placeholder={getToolPlaceholder('png')}
+                />
+                <button
+                  className="path-btn"
+                  onClick={() => void handleBrowse('png')}
+                  type="button"
+                >
+                  {t('settings.browse')}
+                </button>
+                {renderDownloadLink('png')}
+                {settings.pngToolCommand && (
+                  <button
+                    className="path-btn path-btn-clear"
+                    onClick={() => handleClearPath('png')}
+                    type="button"
+                    aria-label={t('settings.clearPngAria')}
+                  >
+                    âœ•
+                  </button>
+                )}
+              </div>
+              {renderToolStatus('png')}
             </div>
           </div>
 
