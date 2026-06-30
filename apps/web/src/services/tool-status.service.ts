@@ -1,7 +1,7 @@
 import type { EncoderSettingsSnapshot } from './encoder-settings.store';
 
 export type ToolStatus = 'ready' | 'missing' | 'unknown';
-export type ExternalToolKey = 'image' | 'imagemagick' | 'exiftool' | 'video';
+export type ExternalToolKey = 'image' | 'png' | 'imagemagick' | 'exiftool' | 'video';
 export type RuntimePlatform = 'win32' | 'darwin' | 'linux' | string;
 
 export type ExternalToolStatusSnapshot = {
@@ -32,6 +32,7 @@ type EncoderCommandField = Exclude<keyof EncoderSettingsSnapshot, 'updatedAt'>;
 
 const settingsFields: Record<ExternalToolKey, EncoderCommandField> = {
   image: 'imageToolCommand',
+  png: 'pngToolCommand',
   imagemagick: 'imageMagickCommand',
   exiftool: 'exifToolCommand',
   video: 'videoToolCommand'
@@ -39,6 +40,7 @@ const settingsFields: Record<ExternalToolKey, EncoderCommandField> = {
 
 const unixDefaults: Record<ExternalToolKey, string> = {
   image: 'cjpeg',
+  png: 'pngquant',
   imagemagick: 'magick',
   exiftool: 'exiftool',
   video: 'HandBrakeCLI'
@@ -89,6 +91,7 @@ export const loadToolsStatusRequest = async (
     },
     body: JSON.stringify({
       imageToolCommand: settings.imageToolCommand,
+      pngToolCommand: settings.pngToolCommand,
       imageMagickCommand: settings.imageMagickCommand,
       exifToolCommand: settings.exifToolCommand,
       videoToolCommand: settings.videoToolCommand

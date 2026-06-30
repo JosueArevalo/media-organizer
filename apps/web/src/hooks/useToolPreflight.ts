@@ -8,6 +8,7 @@ import { loadToolsStatusRequest, type ToolsStatusSnapshot } from '../services/to
 
 const emptySettings: EncoderSettingsSnapshot = {
   imageToolCommand: '',
+  pngToolCommand: '',
   videoToolCommand: '',
   imageMagickCommand: '',
   exifToolCommand: '',

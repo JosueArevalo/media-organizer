@@ -36,6 +36,7 @@ const createPreflight = (
     },
     tools: {
       image: createTool('image'),
+      png: createTool('png'),
       imagemagick: createTool('imagemagick'),
       exiftool: createTool('exiftool'),
       video: createTool('video')
@@ -46,6 +47,7 @@ const createPreflight = (
     status,
     settings: {
       imageToolCommand: '',
+      pngToolCommand: '',
       videoToolCommand: '',
       imageMagickCommand: '',
       exifToolCommand: '',
@@ -72,6 +74,7 @@ test('dashboard wires the welcome onboarding panel and persists dismissal', () =
   assert.match(panel, /to="\/import"/);
   assert.match(panel, /aria-label=\{t\('dashboard\.onboarding\.close'\)\}/);
   assert.match(panel, /MozJPEG/);
+  assert.match(panel, /pngquant/);
   assert.match(panel, /ImageMagick/);
   assert.match(panel, /ExifTool/);
   assert.match(panel, /HandBrakeCLI/);

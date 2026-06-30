@@ -27,6 +27,7 @@ export const handleCompressionRoutes: RouteHandler = ({ req, res, requestUrl }) 
               videoPresetLabel?: string;
               videoOutputFormatMode?: 'preserve' | 'mp4';
               imageToolCommand?: string;
+              pngToolCommand?: string;
               videoToolCommand?: string;
               imageMagickCommand?: string;
               exifToolCommand?: string;
@@ -55,6 +56,7 @@ export const handleCompressionRoutes: RouteHandler = ({ req, res, requestUrl }) 
           videoPresetLabel: body.videoPresetLabel,
           videoOutputFormatMode: body.videoOutputFormatMode,
           imageToolCommand: body.imageToolCommand,
+          pngToolCommand: body.pngToolCommand,
           videoToolCommand: body.videoToolCommand,
           imageMagickCommand: body.imageMagickCommand,
           exifToolCommand: body.exifToolCommand,

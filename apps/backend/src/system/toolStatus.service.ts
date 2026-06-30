@@ -1,7 +1,7 @@
 import { resolveToolCommand } from '../pipeline/compression/toolCommandResolver.js';
 import { resolvePythonRuntime, type PythonRuntimeStatusSnapshot } from '../pipeline/compression/pythonCommandResolver.js';
 
-export type ExternalToolKey = 'image' | 'imagemagick' | 'exiftool' | 'video';
+export type ExternalToolKey = 'image' | 'png' | 'imagemagick' | 'exiftool' | 'video';
 export type ToolStatus = 'ready' | 'missing' | 'unknown';
 
 export type ExternalToolStatusSnapshot = {
@@ -16,7 +16,7 @@ export type ExternalToolStatusSnapshot = {
 };
 
 export type ToolStatusRequest = Partial<Record<
-  'imageToolCommand' | 'imageMagickCommand' | 'exifToolCommand' | 'videoToolCommand',
+  'imageToolCommand' | 'pngToolCommand' | 'imageMagickCommand' | 'exifToolCommand' | 'videoToolCommand',
   string
 >>;
 
@@ -65,6 +65,13 @@ const toolDefinitions: Record<ExternalToolKey, {
     defaultCommand: 'cjpeg',
     installFormula: 'mozjpeg',
     installUrl: 'https://formulae.brew.sh/formula/mozjpeg'
+  },
+  png: {
+    label: 'pngquant',
+    field: 'pngToolCommand',
+    defaultCommand: 'pngquant',
+    installFormula: 'pngquant',
+    installUrl: 'https://pngquant.org/'
   },
   imagemagick: {
     label: 'ImageMagick',

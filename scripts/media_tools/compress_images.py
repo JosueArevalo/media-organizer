@@ -13,8 +13,11 @@ from pathlib import Path
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.gif'}
 JPEG_EXTENSIONS = {'.jpg', '.jpeg'}
+PNG_EXTENSIONS = {'.png'}
 HEIC_EXTENSIONS = {'.heic', '.heif'}
-COPY_ONLY_EXTENSIONS = {'.png', '.webp', '.gif'}
+COPY_ONLY_EXTENSIONS = {'.webp', '.gif'}
+PNGQUANT_QUALITY_RANGE = '65-85'
+PNGQUANT_SPEED = '3'
 
 
 class ToolConfigurationError(Exception):
@@ -335,6 +338,33 @@ def run_cjpeg(encoder_command: str, quality: int, source_file: Path, output_file
     return command
 
 
+def run_pngquant(png_command: str, source_file: Path, output_file: Path):
+    temp_file = build_temp_output_path(output_file)
+    command = [
+        png_command,
+        '--force',
+        '--output',
+        str(temp_file),
+        '--quality',
+        PNGQUANT_QUALITY_RANGE,
+        '--speed',
+        PNGQUANT_SPEED,
+        '--',
+        str(source_file),
+    ]
+
+    try:
+        run_external_command(command)
+        replace_output(temp_file, output_file)
+    finally:
+        try:
+            temp_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return command
+
+
 def convert_heic_to_jpeg(source_file: Path, output_file: Path, quality: int, encoder_command: str, imagemagick_command: str):
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.ppm')
     temp_path = Path(temp_file.name)
@@ -423,9 +453,11 @@ def main() -> int:
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--quality', required=True, type=int)
     parser.add_argument('--encoder-command', default='cjpeg')
+    parser.add_argument('--png-command', default='pngquant')
     parser.add_argument('--imagemagick-command', default='magick')
     parser.add_argument('--exiftool-command', default='')
     parser.add_argument('--jpeg-mode', choices=['compress', 'copy'], default='compress')
+    parser.add_argument('--png-mode', choices=['compress', 'copy'], default='compress')
     parser.add_argument('--heic-mode', choices=['convert', 'copy'], default='convert')
     parser.add_argument('--selection-scope-json', default='')
     parser.add_argument('--resume-skip-file', default='')
@@ -454,10 +486,12 @@ def main() -> int:
         extension = source_file.suffix.lower()
         selected_for_compression = selected_by_scope and (
             (extension in JPEG_EXTENSIONS and args.jpeg_mode == 'compress')
+            or (extension in PNG_EXTENSIONS and args.png_mode == 'compress')
             or (extension in HEIC_EXTENSIONS and args.heic_mode == 'convert')
         )
         forced_copy_by_policy = selected_by_scope and (
             (extension in JPEG_EXTENSIONS and args.jpeg_mode == 'copy')
+            or (extension in PNG_EXTENSIONS and args.png_mode == 'copy')
             or (extension in HEIC_EXTENSIONS and args.heic_mode == 'copy')
         )
         output_file = build_output_path(
@@ -475,7 +509,7 @@ def main() -> int:
         status = 'completed'
         error_message = None
         warning_message = None
-        operation = 'compress' if selected_for_compression and extension in JPEG_EXTENSIONS.union(HEIC_EXTENSIONS) else 'copy'
+        operation = 'compress' if selected_for_compression and extension in JPEG_EXTENSIONS.union(PNG_EXTENSIONS).union(HEIC_EXTENSIONS) else 'copy'
         skipped = False
         started_at = now_ms()
 
@@ -508,6 +542,16 @@ def main() -> int:
                 status = 'failed'
                 stderr = (error.stderr or '').strip()
                 error_message = stderr or f"Image compression failed for {source_file}"
+        elif extension in PNG_EXTENSIONS:
+            try:
+                command = run_pngquant(args.png_command, source_file, output_file)
+            except FileNotFoundError:
+                status = 'failed'
+                error_message = f"PNG encoder command not found: {args.png_command}"
+            except subprocess.CalledProcessError as error:
+                status = 'failed'
+                stderr = (error.stderr or '').strip()
+                error_message = stderr or f"PNG compression failed for {source_file}"
         elif extension in HEIC_EXTENSIONS:
             try:
                 if not heic_support_checked:

@@ -67,7 +67,7 @@ test('compression route rejects explicit compression policies when required tool
       imageQuality: 80,
       imageProfileLabel: 'Balanced',
       videoPresetLabel: 'Fast 1080p30',
-      processingPolicy: { jpeg: 'compress', heic: 'copy', video: 'copy' }
+      processingPolicy: { jpeg: 'compress', png: 'copy', heic: 'copy', video: 'copy' }
     }),
     res: response,
     requestUrl: new URL('http://localhost/api/compression/sessions')
@@ -87,7 +87,7 @@ test('compression route accepts an explicit copy-only policy with empty tool com
       imageQuality: 80,
       imageProfileLabel: 'Balanced',
       videoPresetLabel: 'Fast 1080p30',
-      processingPolicy: { jpeg: 'copy', heic: 'copy', video: 'copy' }
+      processingPolicy: { jpeg: 'copy', png: 'copy', heic: 'copy', video: 'copy' }
     }),
     res: response,
     requestUrl: new URL('http://localhost/api/compression/sessions')
@@ -97,6 +97,7 @@ test('compression route accepts an explicit copy-only policy with empty tool com
   assert.equal(captured.statusCode, 201);
   assert.deepEqual(JSON.parse(captured.body).manifest.processingPolicy, {
     jpeg: 'copy',
+    png: 'copy',
     heic: 'copy',
     video: 'copy'
   });
@@ -113,6 +114,7 @@ test('compression session route forwards optional HEIC tool commands into the ma
       videoPresetLabel: 'Fast 1080p30',
       videoOutputFormatMode: 'mp4',
       imageToolCommand: 'cjpeg-static.exe',
+      pngToolCommand: 'pngquant.exe',
       videoToolCommand: 'HandBrakeCLI.exe',
       imageMagickCommand: 'D:\\Tools\\ImageMagick\\magick.exe',
       exifToolCommand: 'D:\\Tools\\ExifTool\\exiftool.exe'
@@ -128,12 +130,14 @@ test('compression session route forwards optional HEIC tool commands into the ma
 
   const payload = JSON.parse(captured.body) as {
     manifest: {
+      pngToolCommand: string;
       imageMagickCommand: string;
       exifToolCommand: string;
       videoOutputFormatMode: string;
     };
   };
 
+  assert.equal(payload.manifest.pngToolCommand, 'pngquant.exe');
   assert.equal(payload.manifest.imageMagickCommand, 'D:\\Tools\\ImageMagick\\magick.exe');
   assert.equal(payload.manifest.exifToolCommand, 'D:\\Tools\\ExifTool\\exiftool.exe');
   assert.equal(payload.manifest.videoOutputFormatMode, 'mp4');

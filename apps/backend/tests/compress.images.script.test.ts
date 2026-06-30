@@ -79,6 +79,33 @@ done
 cp "$last" "$out"
 `);
 
+  const pngquant = process.platform === 'win32'
+    ? writeFakeTool(toolsDir, 'pngquant-fake', `@echo off
+setlocal enabledelayedexpansion
+set "out="
+set "previous="
+for %%A in (%*) do (
+  if /I "!previous!"=="--output" set "out=%%~A"
+  set "previous=%%~A"
+)
+for %%A in (%*) do set "last=%%~A"
+copy /Y "!last!" "!out!" >nul
+exit /b 0
+`)
+    : writeFakeTool(toolsDir, 'pngquant-fake', `#!/usr/bin/env sh
+out=""
+previous=""
+last=""
+for arg in "$@"; do
+  if [ "$previous" = "--output" ]; then
+    out="$arg"
+  fi
+  previous="$arg"
+  last="$arg"
+done
+cp "$last" "$out"
+`);
+
   const exiftool = process.platform === 'win32'
     ? writeFakeTool(toolsDir, 'exiftool-fake', `@echo off
 echo %* > "%EXIFTOOL_ARGS_LOG%"
@@ -88,7 +115,7 @@ exit /b 0
 printf '%s\\n' "$*" > "$EXIFTOOL_ARGS_LOG"
 `);
 
-  return { magick, cjpeg, exiftool };
+  return { magick, cjpeg, pngquant, exiftool };
 };
 
 const createFakeMozJpegTools = (toolsDir: string) => {
@@ -161,7 +188,7 @@ cp "$last" "$out"
   return { cjpeg, djpeg };
 };
 
-test('compress_images converts selected HEIC to JPG and copies PNG without compression', () => {
+test('compress_images converts selected HEIC to JPG and compresses PNG with pngquant', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-script-'));
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
@@ -188,6 +215,8 @@ test('compress_images converts selected HEIC to JPG and copies PNG without compr
       '80',
       '--encoder-command',
       tools.cjpeg,
+      '--png-command',
+      tools.pngquant,
       '--imagemagick-command',
       tools.magick,
       '--selection-scope-json',
@@ -216,10 +245,75 @@ test('compress_images converts selected HEIC to JPG and copies PNG without compr
   assert.ok(pngItemIndex > pngStartIndex);
   assert.ok(items.some((item) => item.source.endsWith('photo.heic') && item.output.endsWith('.jpg') && item.status === 'completed' && item.operation === 'compress'));
   assert.ok(items.some((item) => item.source.endsWith('photo.jpg') && item.operation === 'compress'));
-  assert.ok(items.some((item) => item.source.endsWith('graphic.png') && item.operation === 'copy' && item.warning?.includes('copied without compression')));
+  assert.ok(items.some((item) => item.source.endsWith('graphic.png') && item.operation === 'compress'));
   assert.ok(items.every((item) => typeof item.startedAt === 'number' && typeof item.finishedAt === 'number' && typeof item.durationMs === 'number'));
   assert.ok(fs.existsSync(path.join(outputDir, 'graphic.png')));
   assert.ok(items.filter((item) => path.basename(item.output).startsWith('photo') && item.output.endsWith('.jpg')).length >= 2);
+});
+
+test('compress_images copy policy preserves PNG originals without invoking pngquant', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-png-copy-policy-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'graphic.png'), 'fake-png', 'utf8');
+
+  const result = spawnSync(process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python', [
+    scriptPath,
+    '--source-dir', sourceDir,
+    '--output-dir', outputDir,
+    '--quality', '80',
+    '--png-command', '__missing_pngquant__',
+    '--png-mode', 'copy'
+  ], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  const complete = result.stdout.split(/\r?\n/).filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  assert.equal(complete?.items?.length, 1);
+  assert.equal(complete?.items?.[0].operation, 'copy');
+  assert.ok(fs.existsSync(path.join(outputDir, 'graphic.png')));
+});
+
+test('compress_images reports failed PNG compression and keeps a copied fallback output', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-png-fail-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'graphic.png'), 'fake-png', 'utf8');
+
+  const failingPngTool = process.platform === 'win32'
+    ? writeFakeTool(toolsDir, 'pngquant-fail', `@echo off
+echo png failure 1>&2
+exit /b 1
+`)
+    : writeFakeTool(toolsDir, 'pngquant-fail', `#!/usr/bin/env sh
+echo "png failure" >&2
+exit 1
+`);
+
+  const result = spawnSync(process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python', [
+    scriptPath,
+    '--source-dir', sourceDir,
+    '--output-dir', outputDir,
+    '--quality', '80',
+    '--png-command', failingPngTool
+  ], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  const complete = result.stdout.split(/\r?\n/).filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const item = complete?.items?.[0];
+
+  assert.equal(item?.status, 'failed');
+  assert.equal(item?.operation, 'compress');
+  assert.match(item?.error ?? '', /png failure|PNG compression failed/);
+  assert.ok(fs.existsSync(path.join(outputDir, 'graphic.png')));
 });
 
 test('compress_images copy policy preserves JPEG and HEIC originals without invoking tools', () => {

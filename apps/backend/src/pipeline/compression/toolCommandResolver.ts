@@ -10,6 +10,7 @@ type ToolCommandResolverOptions = {
 
 const homebrewFormulaByCommand: Record<string, string> = {
   cjpeg: 'mozjpeg',
+  pngquant: 'pngquant',
   magick: 'imagemagick',
   exiftool: 'exiftool',
   HandBrakeCLI: 'handbrake'

@@ -53,6 +53,7 @@ type MediaStats = {
   imageCount: number;
   imageBytes: number;
   jpegImageCount: number;
+  pngImageCount: number;
   heicImageCount: number;
   copyOnlyImageCount: number;
   videoCount: number;
@@ -209,6 +210,7 @@ const createEmptyMediaStats = (): MediaStats => ({
   imageCount: 0,
   imageBytes: 0,
   jpegImageCount: 0,
+  pngImageCount: 0,
   heicImageCount: 0,
   copyOnlyImageCount: 0,
   videoCount: 0,
@@ -226,8 +228,9 @@ const createImageStats = (fileName: string, sizeBytes: number): MediaStats => {
     imageCount: 1,
     imageBytes: sizeBytes,
     jpegImageCount: ['jpg', 'jpeg'].includes(extension) ? 1 : 0,
+    pngImageCount: extension === 'png' ? 1 : 0,
     heicImageCount: ['heic', 'heif'].includes(extension) ? 1 : 0,
-    copyOnlyImageCount: ['png', 'gif', 'webp'].includes(extension) ? 1 : 0,
+    copyOnlyImageCount: ['gif', 'webp'].includes(extension) ? 1 : 0,
     videoCount: 0,
     videoBytes: 0,
     copyImageCount: 0,
@@ -239,6 +242,7 @@ const createVideoStats = (sizeBytes: number): MediaStats => ({
   imageCount: 0,
   imageBytes: 0,
   jpegImageCount: 0,
+  pngImageCount: 0,
   heicImageCount: 0,
   copyOnlyImageCount: 0,
   videoCount: 1,
@@ -251,6 +255,7 @@ const createCopyStats = (kind: 'image' | 'video', sizeBytes: number): MediaStats
   imageCount: 0,
   imageBytes: 0,
   jpegImageCount: 0,
+  pngImageCount: 0,
   heicImageCount: 0,
   copyOnlyImageCount: 0,
   videoCount: 0,
@@ -389,6 +394,7 @@ const mergeMediaStats = (base: MediaStats, extra: MediaStats): MediaStats => ({
   imageCount: base.imageCount + extra.imageCount,
   imageBytes: base.imageBytes + extra.imageBytes,
   jpegImageCount: base.jpegImageCount + extra.jpegImageCount,
+  pngImageCount: base.pngImageCount + extra.pngImageCount,
   heicImageCount: base.heicImageCount + extra.heicImageCount,
   copyOnlyImageCount: base.copyOnlyImageCount + extra.copyOnlyImageCount,
   videoCount: base.videoCount + extra.videoCount,
@@ -523,6 +529,7 @@ export const CompressionPage = () => {
   const [isPausingCompression, setIsPausingCompression] = useState(false);
   const encoderSettings: EncoderSettingsSnapshot = toolPreflight.settings;
   const [jpegCopyAccepted, setJpegCopyAccepted] = useState(false);
+  const [pngCopyAccepted, setPngCopyAccepted] = useState(false);
   const [heicCopyAccepted, setHeicCopyAccepted] = useState(false);
   const [videoCopyAccepted, setVideoCopyAccepted] = useState(false);
   const [progressData, setProgressData] = useState<{
@@ -907,24 +914,29 @@ export const CompressionPage = () => {
   const toolsSnapshot = toolPreflight.snapshot;
   const pythonReady = toolsSnapshot?.python.status === 'ready';
   const hasConfiguredMozJpeg = toolsSnapshot?.tools.image.status === 'ready';
+  const hasConfiguredPngQuant = toolsSnapshot?.tools.png.status === 'ready';
   const hasConfiguredImageMagick = toolsSnapshot?.tools.imagemagick.status === 'ready';
   const hasConfiguredExifTool = toolsSnapshot?.tools.exiftool.status === 'ready';
   const hasConfiguredHandBrake = toolsSnapshot?.tools.video.status === 'ready';
   const policyResolution = resolveMediaProcessingPolicy({
     jpegCount: selectedStats.jpegImageCount,
+    pngCount: selectedStats.pngImageCount,
     heicCount: selectedStats.heicImageCount,
     videoCount: selectedStats.videoCount,
     mozJpegReady: hasConfiguredMozJpeg,
+    pngQuantReady: hasConfiguredPngQuant,
     imageMagickReady: hasConfiguredImageMagick,
     handBrakeReady: hasConfiguredHandBrake,
     jpegCopyAccepted,
+    pngCopyAccepted,
     heicCopyAccepted,
     videoCopyAccepted
   });
-  const { jpegNeedsDecision, heicNeedsDecision, videoNeedsDecision } = policyResolution;
+  const { jpegNeedsDecision, pngNeedsDecision, heicNeedsDecision, videoNeedsDecision } = policyResolution;
   const processingPolicy = policyResolution.policy;
   const policyCompressCount =
     (processingPolicy.jpeg === 'compress' ? selectedStats.jpegImageCount : 0) +
+    (processingPolicy.png === 'compress' ? selectedStats.pngImageCount : 0) +
     (processingPolicy.heic === 'convert' ? selectedStats.heicImageCount : 0) +
     (processingPolicy.video === 'compress' ? selectedStats.videoCount : 0);
   const isCopyOnlySession = estimatedProcessableMediaCount > 0 && policyCompressCount === 0;
@@ -1031,9 +1043,10 @@ export const CompressionPage = () => {
 
   useEffect(() => {
     setJpegCopyAccepted(false);
+    setPngCopyAccepted(false);
     setHeicCopyAccepted(false);
     setVideoCopyAccepted(false);
-  }, [sourcePath, encoderSettings.updatedAt, selectedStats.jpegImageCount, selectedStats.heicImageCount, selectedStats.videoCount]);
+  }, [sourcePath, encoderSettings.updatedAt, selectedStats.jpegImageCount, selectedStats.pngImageCount, selectedStats.heicImageCount, selectedStats.videoCount]);
 
   const handleStartCompression = async () => {
     if (isWorkflowReadOnly) {
@@ -1047,16 +1060,20 @@ export const CompressionPage = () => {
     const latestEncoderSettings = await loadEncoderSettings();
     const latestSnapshot = await loadToolsStatusRequest(latestEncoderSettings).catch(() => null);
     const latestMozJpegReady = latestSnapshot?.tools.image.status === 'ready';
+    const latestPngQuantReady = latestSnapshot?.tools.png.status === 'ready';
     const latestImageMagickReady = latestSnapshot?.tools.imagemagick.status === 'ready';
     const latestHandBrakeReady = latestSnapshot?.tools.video.status === 'ready';
     const latestResolution = resolveMediaProcessingPolicy({
       jpegCount: selectedStats.jpegImageCount,
+      pngCount: selectedStats.pngImageCount,
       heicCount: selectedStats.heicImageCount,
       videoCount: selectedStats.videoCount,
       mozJpegReady: latestMozJpegReady,
+      pngQuantReady: latestPngQuantReady,
       imageMagickReady: latestImageMagickReady,
       handBrakeReady: latestHandBrakeReady,
       jpegCopyAccepted,
+      pngCopyAccepted,
       heicCopyAccepted,
       videoCopyAccepted
     });
@@ -1071,6 +1088,7 @@ export const CompressionPage = () => {
     }
 
     const latestImageToolCommand = latestSnapshot.tools.image.effectiveCommand;
+    const latestPngToolCommand = latestSnapshot.tools.png.effectiveCommand;
     const latestImageMagickCommand = latestSnapshot.tools.imagemagick.effectiveCommand;
     const latestExifToolCommand = latestSnapshot.tools.exiftool.status === 'ready'
       ? latestSnapshot.tools.exiftool.effectiveCommand
@@ -1091,6 +1109,7 @@ export const CompressionPage = () => {
         videoPresetLabel: selectedVideoProfileLabel,
         videoOutputFormatMode,
         imageToolCommand: latestImageToolCommand,
+        pngToolCommand: latestPngToolCommand,
         videoToolCommand: latestVideoToolCommand,
         imageMagickCommand: latestImageMagickCommand,
         exifToolCommand: latestExifToolCommand,
@@ -1705,7 +1724,7 @@ export const CompressionPage = () => {
         </div>
       </div>
 
-      {(toolPreflight.status === 'error' || !pythonReady || jpegNeedsDecision || heicNeedsDecision || videoNeedsDecision) && (
+      {(toolPreflight.status === 'error' || !pythonReady || jpegNeedsDecision || pngNeedsDecision || heicNeedsDecision || videoNeedsDecision) && (
         <div className="page-card compression-tool-decisions">
           <p className="page-section-title">{t('compression.toolDecisionsTitle')}</p>
           {toolPreflight.status === 'error' && (
@@ -1733,6 +1752,19 @@ export const CompressionPage = () => {
                 </button>
                 <button className="btn btn-primary" type="button" onClick={() => setJpegCopyAccepted(true)} disabled={jpegCopyAccepted}>
                   {jpegCopyAccepted ? t('compression.copyChoiceAccepted') : t('compression.copyJpegOriginals')}
+                </button>
+              </div>
+            </div>
+          )}
+          {pngNeedsDecision && (
+            <div className="compression-tool-decision">
+              <p>{t('compression.missingPngQuantChoice', { count: selectedStats.pngImageCount })}</p>
+              <div className="action-row">
+                <button className="btn btn-secondary" type="button" onClick={() => navigate('/settings', { state: { returnTo: '/compression' } })}>
+                  {t('compression.openSettings')}
+                </button>
+                <button className="btn btn-primary" type="button" onClick={() => setPngCopyAccepted(true)} disabled={pngCopyAccepted}>
+                  {pngCopyAccepted ? t('compression.copyChoiceAccepted') : t('compression.copyPngOriginals')}
                 </button>
               </div>
             </div>

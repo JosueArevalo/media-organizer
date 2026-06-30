@@ -192,12 +192,14 @@ test('startCompressionSession creates a resumable session and output scaffold', 
 
   const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8')) as {
     imageToolCommand: string;
+    pngToolCommand: string;
     videoToolCommand: string;
     videoOutputFormatMode: string;
     imageMagickCommand: string;
     exifToolCommand: string;
   };
   assert.equal(manifest.imageToolCommand, 'cjpeg');
+  assert.equal(manifest.pngToolCommand, 'pngquant');
   assert.equal(manifest.videoToolCommand, 'HandBrakeCLI');
   assert.equal(manifest.videoOutputFormatMode, 'preserve');
   assert.ok(['magick', 'magick.exe'].includes(path.basename(manifest.imageMagickCommand).toLowerCase()));
@@ -267,9 +269,11 @@ test('compression resume commands use skip files instead of inline JSON argument
     videoPresetLabel: 'Fast 1080p30',
     videoOutputFormatMode: 'preserve',
     imageToolCommand: 'cjpeg',
+    pngToolCommand: 'pngquant',
     videoToolCommand: 'HandBrakeCLI',
     imageMagickCommand: 'magick',
     exifToolCommand: '',
+    processingPolicy: { jpeg: 'compress', png: 'compress', heic: 'convert', video: 'compress' },
     selectionScope: {
       excludedDirectories: [],
       excludedFiles: [],
@@ -548,7 +552,7 @@ test('explicit copy processing policy persists copy operations and progress coun
     imageQuality: 80,
     imageProfileLabel: 'Balanced',
     videoPresetLabel: 'Fast 1080p30',
-    processingPolicy: { jpeg: 'copy', heic: 'copy', video: 'copy' }
+    processingPolicy: { jpeg: 'copy', png: 'copy', heic: 'copy', video: 'copy' }
   });
   await executeCompressionSession(started.session.id);
 
