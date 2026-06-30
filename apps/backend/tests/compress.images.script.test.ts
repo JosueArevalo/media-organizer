@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import sharp from 'sharp';
 
 type ScriptItem = {
   source: string;
@@ -20,6 +21,8 @@ type ScriptItem = {
 
 const repoRoot = path.resolve(process.cwd(), '..', '..');
 const scriptPath = path.join(repoRoot, 'scripts', 'media_tools', 'compress_images.py');
+const sharpHelperCommand = path.join(repoRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx');
+const sharpHelperScript = path.join(repoRoot, 'apps', 'backend', 'src', 'pipeline', 'compression', 'orientedJpegCompression.cli.ts');
 
 const writeFakeTool = (toolsDir: string, name: string, script: string) => {
   const extension = process.platform === 'win32' ? '.cmd' : '.sh';
@@ -549,4 +552,82 @@ test('compress_images resets copied EXIF orientation after HEIC auto-orient', ()
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(fs.readFileSync(exifArgsLog, 'utf8'), /-Orientation#=1/);
+});
+
+test('compress_images uses sharp helper for JPEG files with EXIF orientation', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-jpeg-orientation-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  await sharp({
+    create: {
+      width: 720,
+      height: 480,
+      channels: 3,
+      background: { r: 32, g: 96, b: 160 }
+    }
+  })
+    .withMetadata({ orientation: 6 })
+    .jpeg({ quality: 90 })
+    .toFile(path.join(sourceDir, 'portrait.jpg'));
+
+  const result = spawnSync(process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python', [
+    scriptPath,
+    '--source-dir', sourceDir,
+    '--output-dir', outputDir,
+    '--quality', '80',
+    '--encoder-command', '__missing_cjpeg__',
+    '--imagemagick-command', '__missing_magick__',
+    '--oriented-jpeg-helper-command', sharpHelperCommand,
+    '--oriented-jpeg-helper-script', sharpHelperScript
+  ], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  const complete = result.stdout.split(/\r?\n/).filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const item = complete?.items?.[0];
+  const metadata = await sharp(path.join(outputDir, 'portrait.jpg')).metadata();
+
+  assert.equal(item?.status, 'completed');
+  assert.equal(item?.operation, 'compress');
+  assert.ok(item?.command?.includes(sharpHelperScript));
+  assert.equal(metadata.orientation, 1);
+  assert.ok((metadata.height ?? 0) > (metadata.width ?? 0));
+});
+
+test('compress_images keeps mozjpeg path for JPEG files without EXIF orientation', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-jpeg-standard-'));
+  const sourceDir = path.join(tempRoot, 'source');
+  const outputDir = path.join(tempRoot, 'output');
+  const toolsDir = path.join(tempRoot, 'tools');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(toolsDir, { recursive: true });
+
+  fs.writeFileSync(path.join(sourceDir, 'photo.jpg'), 'fake-jpg', 'utf8');
+
+  const tools = createFakeMozJpegTools(toolsDir);
+  const result = spawnSync(process.env.MEDIA_ORGANIZER_PYTHON_COMMAND ?? 'python', [
+    scriptPath,
+    '--source-dir', sourceDir,
+    '--output-dir', outputDir,
+    '--quality', '80',
+    '--encoder-command', tools.cjpeg,
+    '--oriented-jpeg-helper-command', '__missing_helper__',
+    '--oriented-jpeg-helper-script', '__missing_helper_script__'
+  ], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  const complete = result.stdout.split(/\r?\n/).filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; items?: ScriptItem[] })
+    .find((event) => event.type === 'complete');
+  const item = complete?.items?.[0];
+
+  assert.equal(item?.status, 'completed');
+  assert.equal(item?.operation, 'compress');
+  assert.ok(item?.command?.some((value) => path.basename(value).startsWith('djpeg')));
+  assert.doesNotMatch((item?.command ?? []).join(' '), /orientedJpegCompression/);
 });
