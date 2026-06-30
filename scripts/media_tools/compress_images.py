@@ -4,6 +4,7 @@ import argparse
 import shutil
 import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -338,6 +339,169 @@ def run_cjpeg(encoder_command: str, quality: int, source_file: Path, output_file
     return command
 
 
+def _read_exact(handle, size: int) -> bytes:
+    data = handle.read(size)
+
+    if len(data) != size:
+        raise ValueError('Unexpected end of file while reading JPEG metadata.')
+
+    return data
+
+
+def _parse_exif_orientation(exif_payload: bytes) -> int | None:
+    if len(exif_payload) < 8:
+        return None
+
+    endian_marker = exif_payload[:2]
+
+    if endian_marker == b'II':
+        endian = '<'
+    elif endian_marker == b'MM':
+        endian = '>'
+    else:
+        return None
+
+    def read_short(offset: int) -> int:
+        return struct.unpack_from(f'{endian}H', exif_payload, offset)[0]
+
+    def read_long(offset: int) -> int:
+        return struct.unpack_from(f'{endian}I', exif_payload, offset)[0]
+
+    if read_short(2) != 42:
+        return None
+
+    ifd_offset = read_long(4)
+
+    if ifd_offset + 2 > len(exif_payload):
+        return None
+
+    entry_count = read_short(ifd_offset)
+    type_sizes = {
+        1: 1,
+        2: 1,
+        3: 2,
+        4: 4,
+        5: 8,
+        7: 1,
+        9: 4,
+        10: 8,
+    }
+
+    for index in range(entry_count):
+        entry_offset = ifd_offset + 2 + (index * 12)
+
+        if entry_offset + 12 > len(exif_payload):
+            return None
+
+        tag = read_short(entry_offset)
+
+        if tag != 0x0112:
+            continue
+
+        field_type = read_short(entry_offset + 2)
+        component_count = read_long(entry_offset + 4)
+        component_size = type_sizes.get(field_type)
+
+        if component_size is None or component_count < 1:
+            return None
+
+        value_size = component_size * component_count
+        value_offset = entry_offset + 8
+
+        if value_size > 4:
+            data_offset = read_long(value_offset)
+
+            if data_offset + value_size > len(exif_payload):
+                return None
+
+            value_offset = data_offset
+
+        if field_type == 3:
+            value = struct.unpack_from(f'{endian}H', exif_payload, value_offset)[0]
+            return value if 1 <= value <= 8 else None
+
+        return None
+
+    return None
+
+
+def get_jpeg_orientation(source_file: Path) -> int | None:
+    try:
+        with source_file.open('rb') as handle:
+            if _read_exact(handle, 2) != b'\xff\xd8':
+                return None
+
+            while True:
+                prefix = handle.read(1)
+
+                if not prefix:
+                    return None
+
+                if prefix != b'\xff':
+                    continue
+
+                marker = handle.read(1)
+
+                while marker == b'\xff':
+                    marker = handle.read(1)
+
+                if not marker:
+                    return None
+
+                marker_code = marker[0]
+
+                if marker_code in {0xD8, 0xD9}:
+                    continue
+
+                if marker_code == 0xDA:
+                    return None
+
+                segment_length = struct.unpack('>H', _read_exact(handle, 2))[0]
+
+                if segment_length < 2:
+                    return None
+
+                segment_data = _read_exact(handle, segment_length - 2)
+
+                if marker_code == 0xE1 and segment_data.startswith(b'Exif\x00\x00'):
+                    return _parse_exif_orientation(segment_data[6:])
+    except (OSError, ValueError, struct.error):
+        return None
+
+    return None
+
+
+def run_oriented_jpeg_helper(
+    helper_command: str,
+    helper_script: str,
+    quality: int,
+    source_file: Path,
+    output_file: Path
+):
+    temp_file = build_temp_output_path(output_file)
+    command = [
+        helper_command,
+        helper_script,
+        '--input',
+        str(source_file),
+        '--output',
+        str(temp_file),
+        '--quality',
+        str(quality),
+    ]
+
+    try:
+        run_external_command(command)
+        replace_output(temp_file, output_file)
+    finally:
+        try:
+            temp_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return command
+
+
 def run_pngquant(png_command: str, source_file: Path, output_file: Path):
     temp_file = build_temp_output_path(output_file)
     command = [
@@ -456,6 +620,8 @@ def main() -> int:
     parser.add_argument('--png-command', default='pngquant')
     parser.add_argument('--imagemagick-command', default='magick')
     parser.add_argument('--exiftool-command', default='')
+    parser.add_argument('--oriented-jpeg-helper-command', default='')
+    parser.add_argument('--oriented-jpeg-helper-script', default='')
     parser.add_argument('--jpeg-mode', choices=['compress', 'copy'], default='compress')
     parser.add_argument('--png-mode', choices=['compress', 'copy'], default='compress')
     parser.add_argument('--heic-mode', choices=['convert', 'copy'], default='convert')
@@ -531,7 +697,18 @@ def main() -> int:
                 warning_message = 'Original copied because compression or conversion was disabled for this session.'
         elif extension in JPEG_EXTENSIONS:
             try:
-                command = run_cjpeg(args.encoder_command, args.quality, source_file, output_file)
+                orientation = get_jpeg_orientation(source_file)
+
+                if orientation and orientation != 1:
+                    command = run_oriented_jpeg_helper(
+                        args.oriented_jpeg_helper_command.strip(),
+                        args.oriented_jpeg_helper_script.strip(),
+                        args.quality,
+                        source_file,
+                        output_file,
+                    )
+                else:
+                    command = run_cjpeg(args.encoder_command, args.quality, source_file, output_file)
             except FileNotFoundError:
                 status = 'failed'
                 error_message = f"Image encoder command not found: {args.encoder_command}"
