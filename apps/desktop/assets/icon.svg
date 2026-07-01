@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Media Organizer temporary icon">
+  <defs>
+    <linearGradient id="bg" x1="70" y1="54" x2="438" y2="462" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bg)"/>
+  <path d="M112 167c0-22 18-40 40-40h81l34 41h93c22 0 40 18 40 40v143c0 22-18 40-40 40H152c-22 0-40-18-40-40V167Z" fill="#f8fafc"/>
+  <rect x="141" y="207" width="230" height="145" rx="26" fill="#dbeafe"/>
+  <circle cx="307" cy="248" r="24" fill="#f59e0b"/>
+  <path d="m159 332 57-66 44 47 32-30 61 49H159Z" fill="#0f766e"/>
+  <path d="M184 109h64l22 27h-86c-10 0-18-8-18-18s8-9 18-9Z" fill="#f8fafc" opacity=".95"/>
+</svg>

@@ -1,0 +1,43 @@
+{
+  "name": "media-organizer",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Local-first media organizer monorepo",
+  "main": "apps/desktop/dist/main.js",
+  "workspaces": [
+    "apps/backend",
+    "apps/web",
+    "apps/desktop"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "preinstall": "node scripts/check-node-version.mjs",
+    "setup:check": "node scripts/check-node-version.mjs",
+    "predev": "node scripts/check-node-version.mjs",
+    "dev": "node scripts/dev-all.mjs",
+    "predev:backend": "node scripts/check-node-version.mjs",
+    "dev:backend": "npm run dev --workspace apps/backend",
+    "predev:web": "node scripts/check-node-version.mjs",
+    "dev:web": "npm run dev --workspace apps/web",
+    "prebuild": "node scripts/check-node-version.mjs",
+    "build": "npm run build --workspace apps/backend && npm run build --workspace apps/web",
+    "desktop:dev": "npm run desktop:build && electron .",
+    "desktop:build": "npm run build && npm run build --workspace apps/desktop && node scripts/generate-desktop-icons.mjs",
+    "desktop:worker:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-media-worker.ps1",
+    "desktop:package:win": "node scripts/clean-desktop-release.mjs && npm run desktop:build && npm run desktop:worker:win && electron-builder --win portable --x64 --config electron-builder.yml && npm run desktop:verify:package",
+    "desktop:verify:package": "node scripts/verify-desktop-package.mjs",
+    "desktop:smoke": "node scripts/desktop-smoke.mjs",
+    "pretest": "node scripts/check-node-version.mjs",
+    "test": "npm run test --workspace apps/backend",
+    "verify:hello": "node scripts/verify-hello.mjs"
+  },
+  "devDependencies": {
+    "electron": "42.4.1",
+    "electron-builder": "26.15.3",
+    "png-to-ico": "3.0.1"
+  }
+}
