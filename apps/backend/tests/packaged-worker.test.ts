@@ -41,6 +41,9 @@ test('packaged worker receives the same image and video arguments behind phase s
   assert.equal(images.args[0], 'images');
   assert.ok(images.args.includes('--quality'));
   assert.ok(images.args.includes('--png-command'));
+  assert.ok(images.args.includes('--oriented-jpeg-helper-command'));
+  assert.ok(images.args.includes('--oriented-jpeg-helper-script'));
+  assert.ok(images.args.includes('--oriented-jpeg-helper-run-as-node'));
   assert.equal(videos.command, worker);
   assert.equal(videos.args[0], 'videos');
   assert.ok(videos.args.includes('--preset'));

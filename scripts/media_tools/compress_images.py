@@ -229,6 +229,16 @@ def run_external_command(command: list[str]):
     )
 
 
+def run_external_command_with_env(command: list[str], env: dict[str, str] | None = None):
+    subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
 def iter_image_files(source_dir: Path):
     for root, _, files in os.walk(source_dir):
         root_path = Path(root)
@@ -476,12 +486,30 @@ def run_oriented_jpeg_helper(
     helper_script: str,
     quality: int,
     source_file: Path,
-    output_file: Path
+    output_file: Path,
+    run_as_node: bool = False,
 ):
+    resolved_helper_command = helper_command.strip()
+    resolved_helper_script = helper_script.strip()
+
+    if not resolved_helper_command:
+        raise ToolConfigurationError('Oriented JPEG helper command is not configured.')
+
+    if not shutil.which(resolved_helper_command) and not Path(resolved_helper_command).is_file():
+        raise ToolConfigurationError(f'Oriented JPEG helper command not found: {resolved_helper_command}')
+
+    if not resolved_helper_script:
+        raise ToolConfigurationError('Oriented JPEG helper script is not configured.')
+
+    helper_script_path = Path(resolved_helper_script)
+
+    if not helper_script_path.is_file():
+        raise ToolConfigurationError(f'Oriented JPEG helper script not found: {resolved_helper_script}')
+
     temp_file = build_temp_output_path(output_file)
     command = [
-        helper_command,
-        helper_script,
+        resolved_helper_command,
+        str(helper_script_path),
         '--input',
         str(source_file),
         '--output',
@@ -491,7 +519,13 @@ def run_oriented_jpeg_helper(
     ]
 
     try:
-        run_external_command(command)
+        env = None
+
+        if run_as_node:
+            env = os.environ.copy()
+            env['ELECTRON_RUN_AS_NODE'] = '1'
+
+        run_external_command_with_env(command, env)
         replace_output(temp_file, output_file)
     finally:
         try:
@@ -622,6 +656,7 @@ def main() -> int:
     parser.add_argument('--exiftool-command', default='')
     parser.add_argument('--oriented-jpeg-helper-command', default='')
     parser.add_argument('--oriented-jpeg-helper-script', default='')
+    parser.add_argument('--oriented-jpeg-helper-run-as-node', choices=['0', '1'], default='0')
     parser.add_argument('--jpeg-mode', choices=['compress', 'copy'], default='compress')
     parser.add_argument('--png-mode', choices=['compress', 'copy'], default='compress')
     parser.add_argument('--heic-mode', choices=['convert', 'copy'], default='convert')
@@ -696,29 +731,43 @@ def main() -> int:
             if forced_copy_by_policy:
                 warning_message = 'Original copied because compression or conversion was disabled for this session.'
         elif extension in JPEG_EXTENSIONS:
-            try:
-                orientation = get_jpeg_orientation(source_file)
+            orientation = get_jpeg_orientation(source_file)
 
-                if orientation and orientation != 1:
+            if orientation and orientation != 1:
+                try:
                     command = run_oriented_jpeg_helper(
                         args.oriented_jpeg_helper_command.strip(),
                         args.oriented_jpeg_helper_script.strip(),
                         args.quality,
                         source_file,
                         output_file,
+                        run_as_node=args.oriented_jpeg_helper_run_as_node == '1',
                     )
-                else:
+                except FileNotFoundError as error:
+                    status = 'failed'
+                    missing_command = error.filename or args.oriented_jpeg_helper_command.strip()
+                    error_message = f"Oriented JPEG helper command not found: {missing_command}"
+                except ToolConfigurationError as error:
+                    status = 'failed'
+                    error_message = str(error)
+                except subprocess.CalledProcessError as error:
+                    status = 'failed'
+                    stderr = (error.stderr or '').strip()
+                    stdout = (error.stdout or '').strip()
+                    error_message = stderr or stdout or f"Oriented JPEG helper failed for {source_file}"
+            else:
+                try:
                     command = run_cjpeg(args.encoder_command, args.quality, source_file, output_file)
-            except FileNotFoundError:
-                status = 'failed'
-                error_message = f"Image encoder command not found: {args.encoder_command}"
-            except ToolConfigurationError as error:
-                status = 'failed'
-                error_message = str(error)
-            except subprocess.CalledProcessError as error:
-                status = 'failed'
-                stderr = (error.stderr or '').strip()
-                error_message = stderr or f"Image compression failed for {source_file}"
+                except FileNotFoundError:
+                    status = 'failed'
+                    error_message = f"Image encoder command not found: {args.encoder_command}"
+                except ToolConfigurationError as error:
+                    status = 'failed'
+                    error_message = str(error)
+                except subprocess.CalledProcessError as error:
+                    status = 'failed'
+                    stderr = (error.stderr or '').strip()
+                    error_message = stderr or f"Image compression failed for {source_file}"
         elif extension in PNG_EXTENSIONS:
             try:
                 command = run_pngquant(args.png_command, source_file, output_file)

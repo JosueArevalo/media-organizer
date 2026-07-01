@@ -581,7 +581,8 @@ test('compress_images uses sharp helper for JPEG files with EXIF orientation', a
     '--encoder-command', '__missing_cjpeg__',
     '--imagemagick-command', '__missing_magick__',
     '--oriented-jpeg-helper-command', sharpHelperCommand,
-    '--oriented-jpeg-helper-script', sharpHelperScript
+    '--oriented-jpeg-helper-script', sharpHelperScript,
+    '--oriented-jpeg-helper-run-as-node', '0'
   ], { encoding: 'utf8' });
 
   assert.equal(result.status, 0, result.stderr);

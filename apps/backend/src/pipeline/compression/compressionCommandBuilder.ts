@@ -2,7 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CompressionSessionManifest } from './compressionJob.service.js';
-import { getOrientedJpegHelperCommand, getOrientedJpegHelperScriptPath } from './orientedJpegHelper.js';
+import {
+  getOrientedJpegHelperCommand,
+  getOrientedJpegHelperScriptPath,
+  shouldRunOrientedJpegHelperAsNode
+} from './orientedJpegHelper.js';
 import { getPackagedWorkerCommand, getPythonCommand } from './pythonCommandResolver.js';
 
 const currentFile = fileURLToPath(import.meta.url);
@@ -73,6 +77,8 @@ export const buildImageCompressionCommand = (manifest: CompressionSessionManifes
     getOrientedJpegHelperCommand(),
     '--oriented-jpeg-helper-script',
     getOrientedJpegHelperScriptPath(),
+    '--oriented-jpeg-helper-run-as-node',
+    shouldRunOrientedJpegHelperAsNode() ? '1' : '0',
     '--jpeg-mode',
     manifest.processingPolicy?.jpeg ?? 'compress',
     '--png-mode',
