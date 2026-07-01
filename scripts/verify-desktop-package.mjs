@@ -11,6 +11,7 @@ assert.doesNotMatch(preloadSource, /^\s*import\s/m, 'Preload must not contain ES
 const resources = path.resolve('release', 'win-unpacked', 'resources');
 const requiredPaths = [
   'backend/dist/desktop.js',
+  'backend/dist/pipeline/compression/orientedJpegCompression.cli.js',
   'backend/package.json',
   'backend/node_modules/sharp/package.json',
   'backend/node_modules/@img/colour/package.json',
