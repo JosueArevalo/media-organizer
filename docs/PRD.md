@@ -37,15 +37,14 @@ This process:
 - Improve workflow efficiency
 - Provide a simple local interface
 - Let the user review a preview before applying changes
-- Keep V1 simple, local and testable
+- Keep the core workflow simple, local and testable
 - Support long-running workflows that can be paused and resumed safely
 
 ---
 
-## 4. Non-Goals (V1)
+## 4. Non-Goals
 
 - Full automation using AI
-- Integration with cloud providers (Google Photos API)
 - Multi-user support
 - Mobile app
 - Sync with Synology or other NAS platforms
@@ -61,7 +60,7 @@ This process:
 
 ---
 
-## 6. Core Features (V1)
+## 6. Core Features
 
 ### 6.1 Media Import
 
@@ -111,7 +110,8 @@ YYYY - Misc
 ### 6.5 Output
 
 - Generate organized folders in a user-selected output directory
-- Prepare files for backup or later export
+- Export organized output to local destinations, network destinations, or Google Photos
+- Keep cloud export explicit and user-initiated
 
 ---
 
@@ -119,7 +119,7 @@ YYYY - Misc
 
 - Persist processing jobs locally so the user can stop and resume later
 - Store scans, selections, classification, grouping edits and processing status
-- Use a minimal local SQLite database for V1 state
+- Use a minimal local SQLite database for persisted state
 - Optionally export JSON manifests for debugging or auditing
 
 Detailed contract:

@@ -39,7 +39,7 @@ Large phone exports tend to become a mix of photos, videos, screenshots, duplica
 - **One guided flow:** import, select, compress, organize, and export from a single dashboard.
 
 > [!IMPORTANT]
-> Media Organizer is an early local MVP under active development. Keep an independent backup of important media and review every preview before applying filesystem changes.
+> Media Organizer is an advanced local beta with end-to-end workflows that operate on real files. Keep an independent backup of important media and review each preview before applying filesystem changes.
 
 ## ✨ What it can do
 
@@ -50,7 +50,7 @@ Large phone exports tend to become a mix of photos, videos, screenshots, duplica
 | 🗜️ | **Compress** | Compress JPEG/HEIC images and videos with configurable quality and encoder settings. |
 | 🗂️ | **Organize** | Build and adjust folder groupings using dates and filename patterns before applying them. |
 | ⏯️ | **Pause and resume** | Continue long-running compression and grouping sessions without starting over. |
-| 📤 | **Export** | Copy organized output to local/network destinations or configure Google Photos export. |
+| 📤 | **Export** | Copy organized output to local or network destinations, or upload grouped albums through the built-in Google Photos export flow. |
 | 📊 | **Track results** | Review execution history, saved space, processing duration, and verification status. |
 
 ### The workflow
@@ -61,11 +61,15 @@ Import → Selection → Compression → Grouping → Export
 
 Every filesystem-writing step is explicit. The dashboard keeps the proposed result visible before you apply it.
 
+Google Photos export is available today for organized output uploads. It uses a local OAuth setup and the Google Photos `append-only` flow, so it is designed for uploading grouped albums created through Media Organizer rather than reorganizing an existing Google Photos library or providing two-way sync.
+
 ## 🚀 Quick Start
 
-For non-technical users, Windows x64 portable builds are published on the [Releases page](https://github.com/JosueArevalo/media-organizer/releases). Download the `Media-Organizer-*-windows-x64-portable.exe` file and open it directly; no installer, Node.js, npm, Git, or Python is required. Application data remains in `%APPDATA%\Media Organizer` when the executable is replaced.
+Media Organizer runs on Windows, macOS, and Linux for source-based development and local use. The current ready-to-download packaged release is a Windows x64 portable `.exe`; native packaged releases for macOS and Linux are planned for future iterations.
 
-The first beta builds are unsigned, so Windows SmartScreen can display an **Unknown publisher** warning. Verify the downloaded file against `SHA256SUMS.txt` from the same release. Automatic updates are not enabled; download a newer executable manually when a new release is available.
+For non-technical users on Windows, portable builds are published on the [Releases page](https://github.com/JosueArevalo/media-organizer/releases). Download the `Media-Organizer-*-windows-x64-portable.exe` file and open it directly; no installer, Node.js, npm, Git, or Python is required. Application data remains in `%APPDATA%\Media Organizer` when the executable is replaced.
+
+Current Windows portable builds are unsigned, so Windows SmartScreen can display an **Unknown publisher** warning. Verify the downloaded file against `SHA256SUMS.txt` from the same release. Automatic updates are not enabled; download a newer executable manually when a new release is available.
 
 MozJPEG, ImageMagick, ExifTool and HandBrakeCLI are intentionally not redistributed. Configure their executable paths from **Settings** when the corresponding processing feature is needed. The application can still start, select folders, inspect media and use safe copy paths when those optional tools are absent.
 
@@ -379,9 +383,9 @@ V1 is local-first and single-user:
 
 ## 🚧 Project status
 
-Media Organizer is under active development. The current focus is a dependable local MVP with preview-driven workflows, explicit filesystem writes, resumable state, and practical cross-platform setup.
+Media Organizer is an advanced local beta with a substantial end-to-end workflow already in place: import, review, compress, organize, export, resumable state, execution history, and cross-platform source-based setup are all part of the current project.
 
-Packaged Windows releases require no Docker or source checkout. Developers can still clone the repository, install a supported Node.js version, and run it locally.
+The current focus is no longer proving the basic MVP flow, but strengthening robustness, polish, packaging, and future iterations. Packaged releases are currently published as Windows x64 portable executables, while macOS and Linux remain fully supported for source-based development and local runs.
 
 ## 🤝 Contributing
 
