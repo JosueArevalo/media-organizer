@@ -173,6 +173,9 @@ export type GooglePhotosAlbumPreviewItem = {
   relativePath: string;
   sizeBytes: number;
   supported: boolean;
+  id?: string | null;
+  status?: ExportItemRecord['status'];
+  lastError?: string | null;
 };
 
 export type GooglePhotosAlbumProgress = {

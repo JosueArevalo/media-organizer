@@ -94,7 +94,7 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /checked=\{isAlbumChecked\}/);
   assert.match(pageSource, /disabled=\{!isAlbumSelectable\}/);
   assert.match(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items, isAlbumComplete\)/);
-  assert.match(pageSource, /progressItem\?\.status \?\? \(isAlbumComplete \? 'completed' : 'pending'\)/);
+  assert.match(pageSource, /progressItem\?\.status \?\? item\.status \?\? \(isAlbumComplete \? 'completed' : 'pending'\)/);
   assert.doesNotMatch(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items, album\.uploadStatus\)/);
   assert.match(pageSource, /getAlbumFailureSummary/);
   assert.match(pageSource, /item\.lastError/);
@@ -225,4 +225,14 @@ test('Google Photos item states keep distinct visual styles', () => {
   assert.doesNotMatch(stylesSource, /\.status-running,\s*\.status-pending/);
   assert.doesNotMatch(stylesSource, /#2563eb/);
   assert.doesNotMatch(stylesSource, /rgba\(59, 130, 246, 0\.16\)/);
+});
+
+test('Google Photos preview-backed item state can drive partial album results', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(pageSource, /previewAlbum\?\.items/);
+  assert.match(pageSource, /previewFailedCount > 0/);
+  assert.match(pageSource, /previewCompletedCount === previewSupportedCount/);
+  assert.match(pageSource, /id: progressItem\?\.id \?\? item\.id \?\? null/);
+  assert.match(pageSource, /lastError: progressItem\?\.lastError \?\? item\.lastError \?\? null/);
 });

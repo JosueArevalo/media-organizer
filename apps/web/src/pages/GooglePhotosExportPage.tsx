@@ -985,9 +985,22 @@ export const GooglePhotosExportPage = () => {
     const progressStatus = progressByAlbum.get(albumTitle)?.status;
     const sessionStatus = albumSessionStatuses[albumTitle];
     const previewUploadStatus = previewUploadStatusByAlbum.get(albumTitle);
+    const previewAlbum = preview?.albums.find((album) => album.albumTitle === albumTitle);
+    const previewItemStatuses = previewAlbum?.items
+      .map((item) => item.status)
+      .filter((status): status is ExportItemStatus => Boolean(status)) ?? [];
+    const previewFailedCount = previewItemStatuses.filter((status) => status === 'failed').length;
+    const previewCompletedCount = previewItemStatuses.filter((status) => status === 'completed' || status === 'skipped').length;
+    const previewSupportedCount = previewAlbum?.items.filter((item) => item.supported).length ?? 0;
+
     return progressStatus && progressStatus !== 'pending'
       ? progressStatus
-      : sessionStatus ?? (previewUploadStatus === 'completed' ? 'completed' : undefined);
+      : sessionStatus
+      ?? (previewFailedCount > 0
+        ? 'failed'
+        : previewUploadStatus === 'completed' || (previewSupportedCount > 0 && previewCompletedCount === previewSupportedCount)
+        ? 'completed'
+        : undefined);
   };
 
   const getAlbumResultLabel = (albumTitle: string) => {
@@ -1092,9 +1105,9 @@ export const GooglePhotosExportPage = () => {
       return {
         relativePath: item.relativePath,
         sizeBytes: progressItem?.sizeBytes ?? item.sizeBytes,
-        status: getItemRenderStatus(progressItem?.status ?? (isAlbumComplete ? 'completed' : 'pending')),
-        id: progressItem?.id ?? null,
-        lastError: progressItem?.lastError ?? null
+        status: getItemRenderStatus(progressItem?.status ?? item.status ?? (isAlbumComplete ? 'completed' : 'pending')),
+        id: progressItem?.id ?? item.id ?? null,
+        lastError: progressItem?.lastError ?? item.lastError ?? null
       };
     });
   };
