@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -18,6 +19,19 @@ ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
 PROCESS_POWER_THROTTLING = 4
 PROCESS_POWER_THROTTLING_CURRENT_VERSION = 1
 PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 0x1
+
+
+def configure_utf8_stdio() -> None:
+    for handle_name, errors in (('stdout', 'strict'), ('stderr', 'replace')):
+        handle = getattr(sys, handle_name, None)
+
+        if handle is None or not hasattr(handle, 'reconfigure'):
+            continue
+
+        try:
+            handle.reconfigure(encoding='utf-8', errors=errors)
+        except (ValueError, OSError):
+            continue
 
 
 def normalize_path(value: str) -> str:
@@ -378,6 +392,7 @@ def resolve_preset(encoder_command: str, requested_preset: str) -> str:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description='Compress videos into a destination folder.')
     parser.add_argument('--source-dir', required=True)
     parser.add_argument('--output-dir', required=True)
