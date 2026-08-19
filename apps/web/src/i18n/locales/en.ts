@@ -571,6 +571,7 @@ export const en = {
   'export.coverage.notStarted': 'Not started',
   'export.coverage.partial': 'Partial',
   'export.coverage.completed': 'Complete',
+  'export.coverage.attention': 'Needs attention',
   'export.coverage.items': '{covered} / {eligible} files covered',
   'export.coverage.albums': '{covered} / {eligible} albums covered',
   'export.coverage.completedJobs': '{count} complete exports',

@@ -570,6 +570,7 @@ export const es: TranslationDictionary = {
   'export.coverage.notStarted': 'No iniciado',
   'export.coverage.partial': 'Parcial',
   'export.coverage.completed': 'Completo',
+  'export.coverage.attention': 'Revisar',
   'export.coverage.items': '{covered} / {eligible} archivos cubiertos',
   'export.coverage.albums': '{covered} / {eligible} álbumes cubiertos',
   'export.coverage.completedJobs': '{count} exportaciones completas',

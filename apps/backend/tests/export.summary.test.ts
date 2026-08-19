@@ -117,6 +117,7 @@ test('provider summaries union repeated files and preserve completed coverage af
 
   const network = listExportProviderSummaries({ executionId: execution.id }).find((summary) => summary.provider === 'network-folder');
   assert.equal(network?.coverageStatus, 'completed');
+  assert.equal(network?.displayStatus, 'attention');
   assert.equal(network?.coveredItems, 2);
   assert.equal(network?.completedJobs, 1);
   assert.equal(network?.lastAttempt?.status, 'failed');
@@ -154,6 +155,7 @@ test('separate Google Photos album jobs combine into complete provider coverage'
 
   const google = listExportProviderSummaries({ groupingSessionId: 'grouping-1' }).find((summary) => summary.provider === 'google-photos');
   assert.equal(google?.coverageStatus, 'completed');
+  assert.equal(google?.displayStatus, 'completed');
   assert.equal(google?.coveredItems, 3);
   assert.equal(google?.coveredAlbums, 2);
   assert.equal(google?.completedJobs, 2);
@@ -192,6 +194,7 @@ test('Google Photos completed selected album job is complete even when other alb
 
   const google = listExportProviderSummaries({ executionId: execution.id }).find((summary) => summary.provider === 'google-photos');
   assert.equal(google?.coverageStatus, 'completed');
+  assert.equal(google?.displayStatus, 'attention');
   assert.equal(google?.eligibleItems, 2);
   assert.equal(google?.coveredItems, 2);
   assert.equal(google?.eligibleAlbums, 2);

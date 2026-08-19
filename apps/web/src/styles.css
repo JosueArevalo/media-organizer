@@ -3967,6 +3967,10 @@ body {
   border-color: rgba(245, 158, 11, 0.55);
 }
 
+.export-provider-card-attention {
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
 .export-provider-check {
   position: absolute;
   top: 12px;
@@ -3998,6 +4002,11 @@ body {
 .export-provider-status-completed {
   background: rgba(16, 185, 129, 0.14);
   color: #047857;
+}
+
+.export-provider-status-attention {
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
 }
 
 .dashboard-export-summary {

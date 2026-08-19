@@ -23,7 +23,7 @@ import {
   type ExecutionStatus,
   type ExecutionVerification
 } from '../services/dashboard.service';
-import type { ExportCoverageStatus, ExportJobStatus, ExportProviderSummary } from '../services/export.service';
+import type { ExportDisplayStatus, ExportJobStatus, ExportProviderSummary } from '../services/export.service';
 
 const formatDateTime = (value: string | null) => {
   if (!value) {
@@ -102,10 +102,11 @@ const statusClassName = (status: ExecutionStatus) => `dashboard-status dashboard
 const hasRealVerification = (verification: ExecutionVerification | null | undefined) =>
   Boolean(verification?.verifiedAt && verification.expected.total > 0);
 
-const EXPORT_COVERAGE_LABEL_KEYS: Record<ExportCoverageStatus, TranslationKey> = {
+const EXPORT_DISPLAY_LABEL_KEYS: Record<ExportDisplayStatus, TranslationKey> = {
   not_started: 'export.coverage.notStarted',
   partial: 'export.coverage.partial',
-  completed: 'export.coverage.completed'
+  completed: 'export.coverage.completed',
+  attention: 'export.coverage.attention'
 };
 
 const EXPORT_JOB_STATUS_LABEL_KEYS: Record<ExportJobStatus, TranslationKey> = {
@@ -163,8 +164,8 @@ const ExportSummary = ({ exports }: { exports: ExportProviderSummary[] }) => {
               {summary.lastAttempt?.error && <span className="error">{summary.lastAttempt.error}</span>}
             </div>
             <div className="dashboard-export-status">
-              <span className={`status-pill export-provider-status-${summary.coverageStatus}`}>
-                {t(EXPORT_COVERAGE_LABEL_KEYS[summary.coverageStatus])}
+              <span className={`status-pill export-provider-status-${summary.displayStatus}`}>
+                {t(EXPORT_DISPLAY_LABEL_KEYS[summary.displayStatus])}
               </span>
             </div>
           </div>
