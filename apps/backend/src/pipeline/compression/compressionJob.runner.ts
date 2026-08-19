@@ -528,9 +528,11 @@ const isFileCompressed = (absolutePath: string, scope: SelectionScope) => {
 const upsertMediaItem = (sessionId: string, sourcePath: string, outputRoot: string, outputPath: string) => {
   const db = getDb();
   const now = new Date().toISOString();
-  const relativePath = path.relative(outputRoot, outputPath) || path.basename(outputPath);
+  const resolvedOutputRoot = path.resolve(outputRoot);
+  const resolvedOutputPath = path.resolve(outputPath);
+  const relativePath = path.relative(resolvedOutputRoot, resolvedOutputPath) || path.basename(resolvedOutputPath);
   const mediaType = getMediaTypeFromPath(sourcePath);
-  const sizeBytes = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
+  const sizeBytes = fs.existsSync(resolvedOutputPath) ? fs.statSync(resolvedOutputPath).size : 0;
 
   db.prepare(
     `
