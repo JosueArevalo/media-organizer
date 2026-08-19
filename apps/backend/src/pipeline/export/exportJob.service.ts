@@ -291,6 +291,29 @@ const parseGooglePhotosCheckpointTarget = (payloadJson: string | null): GooglePh
   }
 };
 
+const parseCheckpointPayload = (payloadJson: string | null): {
+  target?: ExportTarget;
+  notices?: string[];
+} => {
+  if (!payloadJson) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(payloadJson) as {
+      target?: ExportTarget;
+      notices?: string[];
+    };
+  } catch {
+    return {};
+  }
+};
+
+const getCheckpointNotices = (payloadJson: string | null) => {
+  const notices = parseCheckpointPayload(payloadJson).notices;
+  return Array.isArray(notices) ? notices.filter((notice): notice is string => typeof notice === 'string' && notice.trim().length > 0) : [];
+};
+
 const getCompletedGooglePhotosSourcePaths = (input: {
   accountId: string;
   executionId: string | null;
@@ -925,8 +948,49 @@ export const getExportProgress = (jobId: string): ExportProgressData | null => {
     skipped: snapshot.job.skippedItems,
     pending: Math.max(0, snapshot.job.totalItems - snapshot.job.completedItems - snapshot.job.failedItems - snapshot.job.skippedItems),
     recentItems: snapshot.recentItems,
-    albumProgress
+    albumProgress,
+    notices: getCheckpointNotices(snapshot.checkpoint?.payloadJson ?? null)
   };
+};
+
+export const appendExportJobNotice = (jobId: string, notice: string) => {
+  runMigrations();
+  const normalizedNotice = notice.trim();
+
+  if (!normalizedNotice) {
+    return;
+  }
+
+  const db = getDb();
+  const checkpoint = db
+    .prepare('SELECT payload_json FROM export_checkpoints WHERE job_id = ?')
+    .get(jobId) as { payload_json: string | null } | undefined;
+
+  if (!checkpoint) {
+    return;
+  }
+
+  const payload = parseCheckpointPayload(checkpoint.payload_json);
+  const notices = getCheckpointNotices(checkpoint.payload_json);
+
+  if (notices.includes(normalizedNotice)) {
+    return;
+  }
+
+  db.prepare(
+    `
+      UPDATE export_checkpoints
+      SET payload_json = ?, updated_at = ?
+      WHERE job_id = ?
+    `
+  ).run(
+    JSON.stringify({
+      ...payload,
+      notices: [...notices, normalizedNotice]
+    }),
+    nowIso(),
+    jobId
+  );
 };
 
 const toAlbumProgressStatus = (row: {

@@ -1165,6 +1165,15 @@ export const GooglePhotosExportPage = () => {
       })
     : null;
   const visibleFailedItemCount = derivedVisibleAlbums.reduce((sum, album) => sum + album.failedCount, 0);
+  const googlePhotosNotices = (currentProgress?.notices ?? []).map((notice) => {
+    if (notice.startsWith('google-photos-album-recreated:')) {
+      return t('export.googlePhotos.albumRecoveredNotice', {
+        albumTitle: notice.slice('google-photos-album-recreated:'.length)
+      });
+    }
+
+    return notice;
+  });
   const isAllVisibleExportCompletedSuccessfully = Boolean(
     preview?.albums.length
       && derivedVisibleAlbums.every((album) => album.isComplete)
@@ -1197,6 +1206,9 @@ export const GooglePhotosExportPage = () => {
       {!sourceRoot && <p className="error">{t('export.unavailable')}</p>}
       {backendError && <p className="error">{backendError}</p>}
       {statusMessage && <p className="success-message">{statusMessage}</p>}
+      {googlePhotosNotices.map((notice) => (
+        <p className="success-message" key={notice}>{notice}</p>
+      ))}
 
       <section className="settings-panel export-panel google-photos-source-context">
         <p className="page-section-title">{t('export.sourceTitle')}</p>

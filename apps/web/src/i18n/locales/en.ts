@@ -791,6 +791,7 @@ export const en = {
   'export.googlePhotos.albumFailed': 'Needs attention',
   'export.googlePhotos.albumSkipped': 'Skipped',
   'export.googlePhotos.albumUploading': 'Uploading',
+  'export.googlePhotos.albumRecoveredNotice': 'The remote album "{albumTitle}" no longer existed in Google Photos. Media Organizer recreated it automatically and continued the upload.',
   'export.googleDrive.title': 'Google Drive export',
   'export.googleDrive.subtitle': 'Prepare Drive folder uploads as a future cloud backup target.',
   'export.googleDrive.note': 'Google Drive is viable for this workflow: create folders with Drive metadata, then upload files with simple or resumable uploads depending on file size.',
