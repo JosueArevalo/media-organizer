@@ -98,8 +98,8 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /checked=\{isAlbumChecked\}/);
   assert.match(pageSource, /disabled=\{!isAlbumSelectable\}/);
   assert.match(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items, isAlbumComplete\)/);
-  assert.match(pageSource, /progressItem\?\.status \?\? item\.status \?\? \(isAlbumComplete \? 'completed' : 'pending'\)/);
-  assert.match(pageSource, /jobId: progressItem \? backendJobId : item\.jobId \?\? null/);
+  assert.match(pageSource, /effectiveProgressItem\?\.status \?\? item\.status \?\? \(isAlbumComplete \? 'completed' : 'pending'\)/);
+  assert.match(pageSource, /jobId: effectiveProgressItem \? backendJobId : item\.jobId \?\? null/);
   assert.doesNotMatch(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items, album\.uploadStatus\)/);
   assert.match(pageSource, /getAlbumFailureSummary/);
   assert.match(pageSource, /item\.lastError/);
@@ -243,8 +243,13 @@ test('Google Photos preview-backed item state can drive partial album results', 
   assert.match(pageSource, /previewAlbum\?\.items/);
   assert.match(pageSource, /previewFailedCount > 0/);
   assert.match(pageSource, /previewCompletedCount === previewSupportedCount/);
-  assert.match(pageSource, /id: progressItem\?\.id \?\? item\.id \?\? null/);
+  assert.match(pageSource, /const shouldKeepPreviewState =/);
+  assert.match(pageSource, /item\.status === 'completed'/);
+  assert.match(pageSource, /progressItem\?\.status === 'failed'/);
+  assert.match(pageSource, /progressItem\.id !== item\.id/);
+  assert.match(pageSource, /const effectiveProgressItem = shouldKeepPreviewState \? null : progressItem/);
+  assert.match(pageSource, /id: effectiveProgressItem\?\.id \?\? item\.id \?\? null/);
   assert.match(pageSource, /onClick=\{\(\) => void handleRetryItem\(item\.id as string, item\.jobId\)\}/);
-  assert.match(pageSource, /lastError: progressItem\s*\?\s*progressItem\.lastError \?\? null\s*:\s*status === 'failed'/);
+  assert.match(pageSource, /lastError: effectiveProgressItem\s*\?\s*effectiveProgressItem\.lastError \?\? null\s*:\s*status === 'failed'/);
   assert.match(pageSource, /item\.status === 'failed' && item\.lastError && \(/);
 });

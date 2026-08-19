@@ -1109,16 +1109,22 @@ export const GooglePhotosExportPage = () => {
 
     return previewItems.map((item) => {
       const progressItem = progressByRelativePath.get(item.relativePath);
-      const status = getItemRenderStatus(progressItem?.status ?? item.status ?? (isAlbumComplete ? 'completed' : 'pending'));
+      const shouldKeepPreviewState =
+        item.status === 'completed'
+        && progressItem?.status === 'failed'
+        && Boolean(item.id)
+        && progressItem.id !== item.id;
+      const effectiveProgressItem = shouldKeepPreviewState ? null : progressItem;
+      const status = getItemRenderStatus(effectiveProgressItem?.status ?? item.status ?? (isAlbumComplete ? 'completed' : 'pending'));
 
       return {
         relativePath: item.relativePath,
-        sizeBytes: progressItem?.sizeBytes ?? item.sizeBytes,
+        sizeBytes: effectiveProgressItem?.sizeBytes ?? item.sizeBytes,
         status,
-        id: progressItem?.id ?? item.id ?? null,
-        jobId: progressItem ? backendJobId : item.jobId ?? null,
-        lastError: progressItem
-          ? progressItem.lastError ?? null
+        id: effectiveProgressItem?.id ?? item.id ?? null,
+        jobId: effectiveProgressItem ? backendJobId : item.jobId ?? null,
+        lastError: effectiveProgressItem
+          ? effectiveProgressItem.lastError ?? null
           : status === 'failed'
             ? item.lastError ?? null
             : null
