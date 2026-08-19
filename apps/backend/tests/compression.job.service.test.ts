@@ -604,10 +604,12 @@ test('executeCompressionSession preserves accented file names in persisted state
     .all(started.session.id) as Array<{ source_path: string; relative_path: string }>;
 
   assert.deepEqual(
-    rows.map((row) => ({
-      sourcePath: path.basename(row.source_path),
-      relativePath: row.relative_path
-    })),
+    rows
+      .map((row) => ({
+        sourcePath: path.basename(row.source_path),
+        relativePath: row.relative_path
+      }))
+      .sort((left, right) => left.relativePath.localeCompare(right.relativePath, undefined, { sensitivity: 'base' })),
     [
       { sourcePath: videoName, relativePath: videoName },
       { sourcePath: imageName, relativePath: imageName }
