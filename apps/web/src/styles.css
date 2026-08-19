@@ -4382,6 +4382,25 @@ body {
   color: var(--danger);
 }
 
+.google-photos-preview-loading {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.24);
+  border-radius: 8px;
+  color: var(--text-muted);
+  display: grid;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 14px 16px;
+}
+
+.google-photos-preview-loading strong {
+  color: var(--text);
+}
+
+.google-photos-preview-loading p {
+  margin: 0;
+}
+
 .google-photos-album-select {
   align-items: center;
   color: var(--text-muted);

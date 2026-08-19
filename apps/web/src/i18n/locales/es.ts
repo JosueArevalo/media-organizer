@@ -770,6 +770,8 @@ export const es: TranslationDictionary = {
   'export.googlePhotos.albumLimitNote': 'Google solo permite que esta app reutilice albumes que ella creo. Los albumes manuales existentes de Google Fotos no se pueden elegir como destino de subida.',
   'export.googlePhotos.preview': 'Previsualizar albumes',
   'export.googlePhotos.previewing': 'Previsualizando...',
+  'export.googlePhotos.previewLoadingTitle': 'Cargando albumes de Google Fotos...',
+  'export.googlePhotos.previewLoadingBody': 'Media Organizer esta preparando la lista completa de albumes. Los controles se activaran cuando termine la previsualizacion.',
   'export.googlePhotos.previewError': 'No se pudieron previsualizar los albumes de Google Fotos.',
   'export.googlePhotos.noPendingItems': 'No se encontraron elementos pendientes para Google Fotos. Se actualizo la lista de albumes.',
   'export.googlePhotos.uploadAllAlbums': 'Subir todos los albumes',

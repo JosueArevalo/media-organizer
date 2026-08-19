@@ -88,6 +88,10 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /isAlbumCompletedSuccessfully/);
   assert.match(pageSource, /previewUploadStatusByAlbum/);
   assert.match(pageSource, /album\.uploadStatus/);
+  assert.match(pageSource, /const shouldHideAlbumsWhilePreviewing = isPreviewing && !preview/);
+  assert.match(pageSource, /aria-busy=\{shouldHideAlbumsWhilePreviewing\}/);
+  assert.match(pageSource, /previewLoadingTitle/);
+  assert.match(pageSource, /previewLoadingBody/);
   assert.match(pageSource, /const albumTitles = albumTitle \? \[albumTitle\] : selectedPendingAlbumTitles/);
   assert.match(pageSource, /\.\.\.\(albumTitles\.length > 0 \? \{ albumTitles \} : \{\}\)/);
   assert.match(pageSource, /const isAlbumComplete = isAlbumCompletedSuccessfully\(album\.albumTitle\)/);
@@ -138,6 +142,7 @@ test('Google Photos restores full album preview after resumable or terminal jobs
   assert.match(pageSource, /getExportJobRequest\(backendJobId\)/);
   assert.match(pageSource, /setSelectedAlbumTitles\(getAlbumTitleSetForJob\(nextPreview, job\)\)/);
   assert.match(pageSource, /currentProgress\?\.albumProgress \?\? \[\]/);
+  assert.match(pageSource, /shouldHideAlbumsWhilePreviewing\s*\?\s*\[\]/);
   assert.match(pageSource, /visibleAlbums\.map/);
   assert.match(pageSource, /activeAlbum = currentProgress\.albumProgress\.find/);
   assert.match(pageSource, /openOnlySection\('albums'\)/);

@@ -771,6 +771,8 @@ export const en = {
   'export.googlePhotos.albumLimitNote': 'Google only lets this app reuse albums it created. Existing manual Google Photos albums cannot be selected as upload destinations.',
   'export.googlePhotos.preview': 'Preview albums',
   'export.googlePhotos.previewing': 'Previewing...',
+  'export.googlePhotos.previewLoadingTitle': 'Loading Google Photos albums...',
+  'export.googlePhotos.previewLoadingBody': 'Media Organizer is preparing the full album list. Controls will unlock when the preview finishes.',
   'export.googlePhotos.previewError': 'Could not preview Google Photos albums.',
   'export.googlePhotos.noPendingItems': 'No pending Google Photos items were found. The album list was refreshed.',
   'export.googlePhotos.uploadAllAlbums': 'Upload all albums',

@@ -1044,14 +1044,17 @@ export const GooglePhotosExportPage = () => {
     return status === 'completed' || status === 'skipped';
   };
 
-  const visibleAlbums = preview?.albums ?? (currentProgress?.albumProgress ?? []).map((album) => ({
-    folderName: album.albumTitle,
-    albumTitle: album.albumTitle,
-    status: 'existing' as const,
-    uploadStatus: 'pending' as const,
-    itemCount: album.total,
-    items: []
-  }));
+  const shouldHideAlbumsWhilePreviewing = isPreviewing && !preview;
+  const visibleAlbums = shouldHideAlbumsWhilePreviewing
+    ? []
+    : preview?.albums ?? (currentProgress?.albumProgress ?? []).map((album) => ({
+        folderName: album.albumTitle,
+        albumTitle: album.albumTitle,
+        status: 'existing' as const,
+        uploadStatus: 'pending' as const,
+        itemCount: album.total,
+        items: []
+      }));
   const pendingVisibleAlbums = visibleAlbums.filter((album) =>
     album.uploadStatus === 'pending' && !isAlbumCompletedSuccessfully(album.albumTitle)
   );
@@ -1318,7 +1321,7 @@ export const GooglePhotosExportPage = () => {
         <article className="export-accordion-section">
           {renderAccordionHeader('albums', t('export.googlePhotos.albumStep'), t('export.googlePhotos.albumLimitNote'), albumStatus, selectedAccount ? 'completed' : 'pending')}
           {isSectionOpen('albums') && (
-            <div className="export-accordion-body">
+            <div className="export-accordion-body" aria-busy={shouldHideAlbumsWhilePreviewing}>
               <div className="export-actions">
                 <button
                   className="btn btn-secondary"
@@ -1348,6 +1351,13 @@ export const GooglePhotosExportPage = () => {
                 <p className={`google-photos-selection-summary${selectedPendingAlbumTitles.length === 0 ? ' is-empty' : ''}`}>
                   {selectionSummary}
                 </p>
+              )}
+
+              {shouldHideAlbumsWhilePreviewing && (
+                <div className="google-photos-preview-loading" role="status" aria-live="polite">
+                  <strong>{t('export.googlePhotos.previewLoadingTitle')}</strong>
+                  <p>{t('export.googlePhotos.previewLoadingBody')}</p>
+                </div>
               )}
 
               {visibleAlbums.length > 0 && (
