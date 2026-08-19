@@ -341,7 +341,7 @@ const getGooglePhotosItemStateBySourcePath = (input: {
   sourceRoot: string;
 }) => {
   const db = getDb();
-  const rows = input.executionId
+  const rows = (input.executionId
     ? db.prepare(
         `
           SELECT
@@ -390,7 +390,7 @@ const getGooglePhotosItemStateBySourcePath = (input: {
             )
           ORDER BY datetime(export_items.updated_at) DESC, export_items.rowid DESC
         `
-      ).all(input.sourceRoot, input.accountId) as Array<{
+      ).all(input.sourceRoot, input.accountId)) as Array<{
         id: string;
         job_id: string;
         source_path: string;
