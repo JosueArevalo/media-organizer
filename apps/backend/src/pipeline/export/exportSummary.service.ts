@@ -143,6 +143,32 @@ const getCoveredAlbums = (jobIds: string[]) => {
   return row.covered;
 };
 
+const hasUnresolvedGooglePhotosFailures = (jobIds: string[]) => {
+  if (jobIds.length === 0) return false;
+  const placeholders = jobIds.map(() => '?').join(', ');
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) AS unresolved
+       FROM (
+         SELECT source_path, status
+         FROM (
+           SELECT source_path,
+                  status,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY source_path
+                    ORDER BY datetime(updated_at) DESC, rowid DESC
+                  ) AS rn
+           FROM export_items
+           WHERE job_id IN (${placeholders})
+         ) AS ranked
+         WHERE rn = 1
+           AND status = 'failed'
+       ) AS unresolved_items`
+    )
+    .get(...jobIds) as { unresolved: number };
+  return row.unresolved > 0;
+};
+
 const getCompletedDestinations = (jobs: ExportSummaryJobRow[]): ExportDestinationSummary[] => {
   const destinations = new Map<string, ExportDestinationSummary>();
 
@@ -198,7 +224,9 @@ export const listExportProviderSummaries = (input: {
     const eligibleAlbums = provider === 'google-photos'
       ? Math.max(...eligibleReferenceJobs.map((job) => job.eligible_albums), coveredAlbums ?? 0, 0)
       : null;
-    const hasFailedJob = providerJobs.some((job) => job.status === 'failed');
+    const hasFailedJob = provider === 'google-photos'
+      ? hasUnresolvedGooglePhotosFailures(jobIds)
+      : providerJobs.some((job) => job.status === 'failed');
     const lastJob = providerJobs[0];
     const lastAttempt = {
       status: lastJob.status,

@@ -66,7 +66,7 @@ test('Google Photos setup guide stays collapsed after reset', () => {
 test('Google Photos albums section owns upload progress', () => {
   const pageSource = fs.readFileSync(pagePath, 'utf8');
   const previewDisabledStart = pageSource.indexOf('const isPreviewDisabled = Boolean(');
-  const previewDisabledEnd = pageSource.indexOf('const getItemRenderStatus', previewDisabledStart);
+  const previewDisabledEnd = pageSource.indexOf('return (', previewDisabledStart);
   const previewDisabledSource = pageSource.slice(previewDisabledStart, previewDisabledEnd);
 
   assert.match(pageSource, /uploadSelectedAlbums/);
@@ -76,6 +76,7 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /selectedPendingAlbumTitles\.length > 0/);
   assert.match(pageSource, /albumSelectionSummary/);
   assert.match(pageSource, /hasPreview/);
+  assert.match(pageSource, /visibleFailedItemCount/);
   assert.match(pageSource, /activeBackendJobIdOverride/);
   assert.match(pageSource, /const backendJobId = activeBackendJobIdOverride \?\? exportJobState\.backendJobId/);
   assert.match(pageSource, /const currentProgress = progress\?\.jobId === backendJobId \? progress : null/);
@@ -85,7 +86,8 @@ test('Google Photos albums section owns upload progress', () => {
   assert.doesNotMatch(previewDisabledSource, /isAllVisibleExportCompletedSuccessfully/);
   assert.match(pageSource, /setPreview\(null\)/);
   assert.match(pageSource, /isAllVisibleExportCompletedSuccessfully/);
-  assert.match(pageSource, /isAlbumCompletedSuccessfully/);
+  assert.match(pageSource, /derivedVisibleAlbums/);
+  assert.match(pageSource, /getDerivedAlbumView/);
   assert.match(pageSource, /previewUploadStatusByAlbum/);
   assert.match(pageSource, /album\.uploadStatus/);
   assert.match(pageSource, /const shouldHideAlbumsWhilePreviewing = isPreviewing && !preview/);
@@ -94,10 +96,11 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /previewLoadingBody/);
   assert.match(pageSource, /const albumTitles = albumTitle \? \[albumTitle\] : selectedPendingAlbumTitles/);
   assert.match(pageSource, /\.\.\.\(albumTitles\.length > 0 \? \{ albumTitles \} : \{\}\)/);
-  assert.match(pageSource, /const isAlbumComplete = isAlbumCompletedSuccessfully\(album\.albumTitle\)/);
+  assert.match(pageSource, /const isAlbumComplete = album\.isComplete/);
   assert.match(pageSource, /checked=\{isAlbumChecked\}/);
   assert.match(pageSource, /disabled=\{!isAlbumSelectable\}/);
-  assert.match(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items, isAlbumComplete\)/);
+  assert.match(pageSource, /const items = getAlbumDisplayItems\(album\.albumTitle, album\.items, fallbackComplete\)/);
+  assert.match(pageSource, /const fallbackComplete = album\.uploadStatus === 'completed'/);
   assert.match(pageSource, /effectiveProgressItem\?\.status \?\? item\.status \?\? \(isAlbumComplete \? 'completed' : 'pending'\)/);
   assert.match(pageSource, /jobId: effectiveProgressItem \? backendJobId : item\.jobId \?\? null/);
   assert.doesNotMatch(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items, album\.uploadStatus\)/);
@@ -106,6 +109,7 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /progressByAlbum/);
   assert.match(pageSource, /handleRetryItem/);
   assert.match(pageSource, /retryExportItemRequest/);
+  assert.match(pageSource, /disabled=\{!backendJobId \|\| visibleFailedItemCount === 0 \|\| isAllVisibleExportCompletedSuccessfully\}/);
   assert.match(pageSource, /const effectiveJobId = itemJobId \?\? backendJobId/);
   assert.match(pageSource, /retryExportItemRequest\(effectiveJobId, itemId\)/);
   assert.match(pageSource, /setActiveBackendJobIdOverride\(effectiveJobId\)/);
@@ -240,14 +244,16 @@ test('Google Photos item states keep distinct visual styles', () => {
 test('Google Photos preview-backed item state can drive partial album results', () => {
   const pageSource = fs.readFileSync(pagePath, 'utf8');
 
-  assert.match(pageSource, /previewAlbum\?\.items/);
-  assert.match(pageSource, /previewFailedCount > 0/);
+  assert.match(pageSource, /const previewItemStatuses = album\.items/);
+  assert.match(pageSource, /previewFailedCount === 0/);
   assert.match(pageSource, /previewCompletedCount === previewSupportedCount/);
   assert.match(pageSource, /const shouldKeepPreviewState =/);
   assert.match(pageSource, /item\.status === 'completed'/);
   assert.match(pageSource, /progressItem\?\.status === 'failed'/);
   assert.match(pageSource, /progressItem\.id !== item\.id/);
   assert.match(pageSource, /const effectiveProgressItem = shouldKeepPreviewState \? null : progressItem/);
+  assert.match(pageSource, /derivedStatus: status/);
+  assert.match(pageSource, /failedCount = items\.filter\(\(item\) => item\.status === 'failed'\)\.length/);
   assert.match(pageSource, /id: effectiveProgressItem\?\.id \?\? item\.id \?\? null/);
   assert.match(pageSource, /onClick=\{\(\) => void handleRetryItem\(item\.id as string, item\.jobId\)\}/);
   assert.match(pageSource, /lastError: effectiveProgressItem\s*\?\s*effectiveProgressItem\.lastError \?\? null\s*:\s*status === 'failed'/);

@@ -194,12 +194,50 @@ test('Google Photos completed selected album job is complete even when other alb
 
   const google = listExportProviderSummaries({ executionId: execution.id }).find((summary) => summary.provider === 'google-photos');
   assert.equal(google?.coverageStatus, 'completed');
-  assert.equal(google?.displayStatus, 'attention');
+  assert.equal(google?.displayStatus, 'completed');
   assert.equal(google?.eligibleItems, 2);
   assert.equal(google?.coveredItems, 2);
   assert.equal(google?.eligibleAlbums, 2);
   assert.equal(google?.coveredAlbums, 2);
   assert.equal(google?.lastAttempt?.status, 'completed');
+});
+
+test('Google Photos summary stays in attention when the latest item state is still failed', async () => {
+  const execution = await createExecution();
+  const { listExportProviderSummaries } = await import('../src/pipeline/export/exportSummary.service.js?google-unresolved-summary=1');
+
+  insertJob({
+    id: 'google-completed-first',
+    executionId: execution.id,
+    provider: 'google-photos',
+    status: 'completed',
+    eligibleItems: 1,
+    eligibleAlbums: 1,
+    destination: 'user@example.com',
+    updatedAt: '2026-06-01T10:10:00.000Z'
+  });
+  insertItem('google-completed-first', 'retry.mp4', 'Album A', 'completed');
+
+  insertJob({
+    id: 'google-failed-later',
+    executionId: execution.id,
+    provider: 'google-photos',
+    status: 'failed',
+    eligibleItems: 1,
+    eligibleAlbums: 1,
+    destination: 'user@example.com',
+    updatedAt: '2026-06-01T10:20:00.000Z',
+    error: 'Later retry failed'
+  });
+  getDb().prepare(
+    `INSERT INTO export_items (
+      id, job_id, source_path, relative_path, destination_path, size_bytes, status, attempt_count, last_error, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 1, 'failed', 1, 'Later retry failed', '2026-06-01T10:20:00.000Z')`
+  ).run('google-failed-later:retry.mp4', 'google-failed-later', 'retry.mp4', 'retry.mp4', 'Album A');
+
+  const google = listExportProviderSummaries({ executionId: execution.id }).find((summary) => summary.provider === 'google-photos');
+  assert.equal(google?.coverageStatus, 'completed');
+  assert.equal(google?.displayStatus, 'attention');
 });
 
 test('Google Photos selected album summaries expand when another selected album is uploaded later', async () => {

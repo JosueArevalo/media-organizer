@@ -978,77 +978,6 @@ export const GooglePhotosExportPage = () => {
     : t('export.googlePhotos.noAccountConnected');
   const albumStatus = selectedAccount ? t('export.googlePhotos.ready') : t('export.googlePhotos.waitingForAccount');
 
-  const getAlbumProgressPercent = (albumProgress: GooglePhotosAlbumProgress | undefined) => {
-    if (!albumProgress?.total) {
-      return 0;
-    }
-
-    return Math.round(((albumProgress.completed + albumProgress.skipped) / albumProgress.total) * 100);
-  };
-
-  const getAlbumSessionStatus = (albumTitle: string): GooglePhotosAlbumProgress['status'] | GooglePhotosAlbumSessionStatus | undefined => {
-    const progressStatus = progressByAlbum.get(albumTitle)?.status;
-    const sessionStatus = albumSessionStatuses[albumTitle];
-    const previewUploadStatus = previewUploadStatusByAlbum.get(albumTitle);
-    const previewAlbum = preview?.albums.find((album) => album.albumTitle === albumTitle);
-    const previewItemStatuses = previewAlbum?.items
-      .map((item) => item.status)
-      .filter((status): status is ExportItemStatus => Boolean(status)) ?? [];
-    const previewFailedCount = previewItemStatuses.filter((status) => status === 'failed').length;
-    const previewCompletedCount = previewItemStatuses.filter((status) => status === 'completed' || status === 'skipped').length;
-    const previewSupportedCount = previewAlbum?.items.filter((item) => item.supported).length ?? 0;
-
-    return progressStatus && progressStatus !== 'pending'
-      ? progressStatus
-      : sessionStatus
-      ?? (previewFailedCount > 0
-        ? 'failed'
-        : previewUploadStatus === 'completed' || (previewSupportedCount > 0 && previewCompletedCount === previewSupportedCount)
-        ? 'completed'
-        : undefined);
-  };
-
-  const getAlbumResultLabel = (albumTitle: string) => {
-    const status = getAlbumSessionStatus(albumTitle);
-
-    if (status === 'completed') {
-      return t('export.googlePhotos.albumUploaded');
-    }
-
-    if (status === 'failed') {
-      return t('export.googlePhotos.albumFailed');
-    }
-
-    if (status === 'skipped') {
-      return t('export.googlePhotos.albumSkipped');
-    }
-
-    if (status === 'running') {
-      return isPaused ? t('export.itemStatus.paused') : t('export.googlePhotos.albumUploading');
-    }
-
-    if (status === 'pending' && isPaused) {
-      return t('export.itemStatus.paused');
-    }
-
-    return null;
-  };
-
-  const getAlbumResultStatus = (albumTitle: string): GooglePhotosRenderStatus => {
-    const status = getAlbumSessionStatus(albumTitle);
-
-    if (status === 'completed') return 'completed';
-    if (status === 'failed') return 'failed';
-    if (status === 'skipped') return 'skipped';
-    if (status === 'running') return isPaused ? 'paused' : 'running';
-    return 'pending';
-  };
-
-  const isAlbumCompletedSuccessfully = (albumTitle: string) => {
-    const status = getAlbumSessionStatus(albumTitle);
-    return status === 'completed' || status === 'skipped';
-  };
-
   const shouldHideAlbumsWhilePreviewing = isPreviewing && !preview;
   const visibleAlbums = shouldHideAlbumsWhilePreviewing
     ? []
@@ -1060,37 +989,6 @@ export const GooglePhotosExportPage = () => {
         itemCount: album.total,
         items: []
       }));
-  const pendingVisibleAlbums = visibleAlbums.filter((album) =>
-    album.uploadStatus === 'pending' && !isAlbumCompletedSuccessfully(album.albumTitle)
-  );
-  const selectedPendingAlbumTitles = pendingVisibleAlbums
-    .filter((album) => selectedAlbumTitles.has(album.albumTitle))
-    .map((album) => album.albumTitle);
-  const excludedPendingAlbumCount = Math.max(0, pendingVisibleAlbums.length - selectedPendingAlbumTitles.length);
-  const selectionSummary = preview
-    ? t('export.googlePhotos.albumSelectionSummary', {
-        selected: selectedPendingAlbumTitles.length,
-        excluded: excludedPendingAlbumCount
-      })
-    : null;
-
-  const isAllVisibleExportCompletedSuccessfully = Boolean(
-    preview?.albums.length
-      && visibleAlbums.every((album) => isAlbumCompletedSuccessfully(album.albumTitle))
-  );
-  const canStart = Boolean(
-    sourceRoot
-      && selectedAccountId
-      && !isStarting
-      && !isUpdatingAlbumScope
-      && (preview || isPaused)
-      && (!hasActiveUpload || isPaused)
-      && selectedPendingAlbumTitles.length > 0
-  );
-  const isPreviewDisabled = Boolean(
-    !sourceRoot || !selectedAccountId || isPreviewing || hasPreview || hasActiveUpload
-  );
-
   const getItemRenderStatus = (status: ExportItemStatus): GooglePhotosRenderStatus => {
     if (isPaused && status === 'running') {
       return 'paused';
@@ -1152,6 +1050,138 @@ export const GooglePhotosExportPage = () => {
     const uniqueErrors = new Set(failedItems.map((item) => item.lastError));
     return uniqueErrors.size === 1 ? failedItems[0].lastError : null;
   };
+
+  const getDerivedAlbumView = (album: typeof visibleAlbums[number]) => {
+    const albumProgress = progressByAlbum.get(album.albumTitle);
+    const previewItemStatuses = album.items
+      .map((item) => item.status)
+      .filter((status): status is ExportItemStatus => Boolean(status));
+    const previewFailedCount = previewItemStatuses.filter((status) => status === 'failed').length;
+    const previewCompletedCount = previewItemStatuses.filter((status) => status === 'completed' || status === 'skipped').length;
+    const previewSupportedCount = album.items.filter((item) => item.supported).length;
+    const fallbackComplete = album.uploadStatus === 'completed'
+      || (previewSupportedCount > 0 && previewFailedCount === 0 && previewCompletedCount === previewSupportedCount);
+    const items = getAlbumDisplayItems(album.albumTitle, album.items, fallbackComplete);
+
+    if (items.length === 0) {
+      const totalCount = albumProgress?.total ?? album.itemCount;
+      const completedCount = albumProgress?.completed ?? 0;
+      const skippedCount = albumProgress?.skipped ?? 0;
+      const failedCount = albumProgress?.failed ?? 0;
+      const pendingCount = Math.max(albumProgress?.pending ?? totalCount - completedCount - skippedCount - failedCount, 0);
+      const status = albumProgress?.status === 'running'
+        ? (isPaused ? 'paused' : 'running')
+        : albumProgress?.status === 'failed'
+        ? 'failed'
+        : albumProgress?.status === 'skipped'
+        ? 'skipped'
+        : fallbackComplete
+        ? 'completed'
+        : 'pending';
+
+      return {
+        ...album,
+        albumType: album.status,
+        albumProgress,
+        items,
+        totalCount,
+        completedCount,
+        skippedCount,
+        failedCount,
+        pendingCount,
+        derivedStatus: status,
+        isComplete: status === 'completed' || status === 'skipped',
+        progressPercent: totalCount > 0 ? Math.round(((completedCount + skippedCount) / totalCount) * 100) : 0,
+        failureSummary: null
+      };
+    }
+
+    const totalCount = album.itemCount;
+    const completedCount = items.filter((item) => item.status === 'completed').length;
+    const skippedCount = items.filter((item) => item.status === 'skipped').length;
+    const failedCount = items.filter((item) => item.status === 'failed').length;
+    const runningCount = items.filter((item) => item.status === 'running' || item.status === 'paused').length;
+    const pendingCount = Math.max(totalCount - completedCount - skippedCount - failedCount - runningCount, 0);
+    const status: GooglePhotosRenderStatus = failedCount > 0
+      ? 'failed'
+      : runningCount > 0
+      ? (isPaused ? 'paused' : 'running')
+      : totalCount > 0 && completedCount + skippedCount >= totalCount
+      ? (skippedCount === totalCount ? 'skipped' : 'completed')
+      : 'pending';
+
+    return {
+      ...album,
+      albumType: album.status,
+      albumProgress,
+      items,
+      totalCount,
+      completedCount,
+      skippedCount,
+      failedCount,
+      pendingCount,
+      derivedStatus: status,
+      isComplete: status === 'completed' || status === 'skipped',
+      progressPercent: totalCount > 0 ? Math.round(((completedCount + skippedCount) / totalCount) * 100) : 0,
+      failureSummary: getAlbumFailureSummary(items)
+    };
+  };
+
+  const getAlbumResultLabel = (album: ReturnType<typeof getDerivedAlbumView>) => {
+    if (album.derivedStatus === 'completed') {
+      return t('export.googlePhotos.albumUploaded');
+    }
+
+    if (album.derivedStatus === 'failed') {
+      return t('export.googlePhotos.albumFailed');
+    }
+
+    if (album.derivedStatus === 'skipped') {
+      return t('export.googlePhotos.albumSkipped');
+    }
+
+    if (album.derivedStatus === 'running') {
+      return isPaused ? t('export.itemStatus.paused') : t('export.googlePhotos.albumUploading');
+    }
+
+    if (album.derivedStatus === 'pending' && isPaused) {
+      return t('export.itemStatus.paused');
+    }
+
+    return null;
+  };
+
+  const derivedVisibleAlbums = visibleAlbums.map((album) => getDerivedAlbumView(album));
+  const pendingVisibleAlbums = derivedVisibleAlbums.filter((album) =>
+    album.uploadStatus === 'pending' && !album.isComplete
+  );
+  const selectedPendingAlbumTitles = pendingVisibleAlbums
+    .filter((album) => selectedAlbumTitles.has(album.albumTitle))
+    .map((album) => album.albumTitle);
+  const excludedPendingAlbumCount = Math.max(0, pendingVisibleAlbums.length - selectedPendingAlbumTitles.length);
+  const selectionSummary = preview
+    ? t('export.googlePhotos.albumSelectionSummary', {
+        selected: selectedPendingAlbumTitles.length,
+        excluded: excludedPendingAlbumCount
+      })
+    : null;
+  const visibleFailedItemCount = derivedVisibleAlbums.reduce((sum, album) => sum + album.failedCount, 0);
+  const isAllVisibleExportCompletedSuccessfully = Boolean(
+    preview?.albums.length
+      && derivedVisibleAlbums.every((album) => album.isComplete)
+  );
+  const canStart = Boolean(
+    sourceRoot
+      && selectedAccountId
+      && !isStarting
+      && !isUpdatingAlbumScope
+      && (preview || isPaused)
+      && (!hasActiveUpload || isPaused)
+      && selectedPendingAlbumTitles.length > 0
+  );
+  const isPreviewDisabled = Boolean(
+    !sourceRoot || !selectedAccountId || isPreviewing || hasPreview || hasActiveUpload
+  );
 
   return (
     <div className="page-stack export-page">
@@ -1359,7 +1389,7 @@ export const GooglePhotosExportPage = () => {
                 <button className="btn btn-secondary" type="button" onClick={() => void handlePause()} disabled={!backendJobId || !isRunning || isAllVisibleExportCompletedSuccessfully}>
                   {t('export.pause')}
                 </button>
-                <button className="btn btn-secondary" type="button" onClick={() => void handleRetryFailed()} disabled={!backendJobId || !currentProgress?.failed || isAllVisibleExportCompletedSuccessfully}>
+                <button className="btn btn-secondary" type="button" onClick={() => void handleRetryFailed()} disabled={!backendJobId || visibleFailedItemCount === 0 || isAllVisibleExportCompletedSuccessfully}>
                   {t('export.retryFailed')}
                 </button>
               </div>
@@ -1381,28 +1411,30 @@ export const GooglePhotosExportPage = () => {
                 <>
                   {visibleAlbums.length > 0 && (
                     <div className="google-photos-album-list">
-                      {visibleAlbums.map((album) => {
+                      {derivedVisibleAlbums.map((album) => {
                         const isAlbumOpen = expandedAlbumTitles.has(album.albumTitle);
-                        const albumProgress = progressByAlbum.get(album.albumTitle);
-                        const isAlbumComplete = isAlbumCompletedSuccessfully(album.albumTitle);
+                        const isAlbumComplete = album.isComplete;
                         const hasAlbumProcessingStarted = Boolean(
-                          albumProgress
+                          album.completedCount > 0
+                          || album.failedCount > 0
+                          || album.skippedCount > 0
+                          || album.derivedStatus === 'running'
+                          || album.derivedStatus === 'paused'
+                          || (
+                            album.albumProgress
                             && (
-                              albumProgress.completed > 0
-                              || albumProgress.failed > 0
-                              || albumProgress.skipped > 0
-                              || albumProgress.status === 'running'
+                              album.albumProgress.completed > 0
+                              || album.albumProgress.failed > 0
+                              || album.albumProgress.skipped > 0
+                              || album.albumProgress.status === 'running'
                             )
+                          )
                         );
                         const isAlbumPending = album.uploadStatus === 'pending' && !isAlbumComplete;
                         const isAlbumSelected = selectedAlbumTitles.has(album.albumTitle);
                         const isAlbumChecked = isAlbumComplete || isAlbumSelected;
                         const isAlbumSelectable = isAlbumPending && !isRunning && !isUpdatingAlbumScope && (!isPaused || !hasAlbumProcessingStarted);
-                        const albumItems = getAlbumDisplayItems(album.albumTitle, album.items, isAlbumComplete);
-                        const albumFailureSummary = getAlbumFailureSummary(albumItems);
-                        const albumPercent = getAlbumProgressPercent(albumProgress);
-                        const resultLabel = getAlbumResultLabel(album.albumTitle);
-                        const resultStatus = getAlbumResultStatus(album.albumTitle);
+                        const resultLabel = getAlbumResultLabel(album);
 
                         return (
                           <article className="google-photos-album-panel" key={album.albumTitle}>
@@ -1435,11 +1467,11 @@ export const GooglePhotosExportPage = () => {
                                 </span>
                               </button>
                               <div className="google-photos-album-actions">
-                                <span className={`status-pill status-${album.status === 'existing' ? 'completed' : 'pending'}`}>
-                                  {album.status === 'existing' ? t('export.googlePhotos.albumExisting') : t('export.googlePhotos.albumNew')}
+                                <span className={`status-pill status-${album.albumType === 'existing' ? 'completed' : 'pending'}`}>
+                                  {album.albumType === 'existing' ? t('export.googlePhotos.albumExisting') : t('export.googlePhotos.albumNew')}
                                 </span>
                                 {resultLabel && (
-                                  <span className={`status-pill status-${resultStatus}`}>{resultLabel}</span>
+                                  <span className={`status-pill status-${album.derivedStatus}`}>{resultLabel}</span>
                                 )}
                                 <button
                                   className="btn btn-primary btn-compact google-photos-upload-action"
@@ -1454,39 +1486,39 @@ export const GooglePhotosExportPage = () => {
 
                             {isAlbumOpen && (
                               <div className="google-photos-album-body">
-                                {albumProgress ? (
+                                {(album.items.length > 0 || album.albumProgress) ? (
                                   <>
                                     <div className="progress-track" aria-label={t('export.progressAria')}>
-                                      <div className="export-progress-fill" style={{ width: `${albumPercent}%` }} />
+                                      <div className="export-progress-fill" style={{ width: `${album.progressPercent}%` }} />
                                     </div>
                                     <div className="export-stats">
                                       <div>
-                                        <strong>{albumProgress.total}</strong>
+                                        <strong>{album.totalCount}</strong>
                                         <span>{t('export.total')}</span>
                                       </div>
                                       <div>
-                                        <strong>{albumProgress.completed}</strong>
+                                        <strong>{album.completedCount}</strong>
                                         <span>{t('export.completed')}</span>
                                       </div>
                                       <div>
-                                        <strong>{albumProgress.skipped}</strong>
+                                        <strong>{album.skippedCount}</strong>
                                         <span>{t('export.skipped')}</span>
                                       </div>
                                       <div>
-                                        <strong>{albumProgress.failed}</strong>
+                                        <strong>{album.failedCount}</strong>
                                         <span>{t('export.failed')}</span>
                                       </div>
                                     </div>
                                   </>
                                 ) : null}
 
-                                {albumFailureSummary && (
-                                  <p className="google-photos-album-error-summary">{albumFailureSummary}</p>
+                                {album.failureSummary && (
+                                  <p className="google-photos-album-error-summary">{album.failureSummary}</p>
                                 )}
 
-                                {albumItems.length > 0 && (
+                                {album.items.length > 0 && (
                                   <div className="export-item-list">
-                                    {albumItems.map((item) => (
+                                    {album.items.map((item) => (
                                       <div key={item.relativePath} className="export-item-row">
                                         <div>
                                           <strong title={item.relativePath}>{item.relativePath}</strong>
