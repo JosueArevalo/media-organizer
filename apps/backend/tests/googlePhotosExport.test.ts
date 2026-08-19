@@ -666,10 +666,93 @@ test('Google Photos preview returns supported items per album', async () => {
     {
       relativePath: path.join('2026.04 - Trip', 'photo-a.jpg'),
       sizeBytes: 7,
-      supported: true
+      supported: true,
+      id: null,
+      jobId: null,
+      status: undefined,
+      lastError: null
     }
   ]);
   assert.equal(preview.albums[0]?.uploadStatus, 'pending');
+});
+
+test('Google Photos preview exposes persisted item states for partial albums', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-b.jpg'), 'image-b');
+
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+
+    if (url.includes('/albums') && init?.method !== 'POST') {
+      return new Response(JSON.stringify({ albums: [] }), { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  const { createExportJob, previewGooglePhotosExport } = await import('../src/pipeline/export/exportJob.service.js?google-preview-persisted-items=1');
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1' }
+  });
+  const db = getDb();
+  const rows = db
+    .prepare('SELECT id, source_path, relative_path FROM export_items WHERE job_id = ? ORDER BY relative_path ASC')
+    .all(job.job.id) as Array<{ id: string; source_path: string; relative_path: string }>;
+
+  db.prepare("UPDATE export_items SET status = 'completed', last_error = NULL WHERE id = ?").run(rows[0].id);
+  db.prepare("UPDATE export_items SET status = 'failed', last_error = 'Temporary Google Photos failure' WHERE id = ?").run(rows[1].id);
+  db.prepare(
+    `
+      UPDATE export_google_photos_items
+      SET phase = 'created',
+          upload_token = 'upload-token-a',
+          upload_token_created_at = '2026-08-18T15:00:00.000Z',
+          media_item_id = 'media-a',
+          updated_at = '2026-08-18T15:00:00.000Z'
+      WHERE item_id = ?
+    `
+  ).run(rows[0].id);
+  db.prepare(
+    `
+      UPDATE export_google_photos_items
+      SET phase = 'uploaded',
+          upload_token = 'upload-token-b',
+          upload_token_created_at = '2026-08-18T15:05:00.000Z',
+          media_item_id = NULL,
+          updated_at = '2026-08-18T15:05:00.000Z'
+      WHERE item_id = ?
+    `
+  ).run(rows[1].id);
+
+  const preview = await previewGooglePhotosExport('account-1', sourceRoot);
+  assert.equal(preview.albums[0]?.uploadStatus, 'pending');
+  assert.deepEqual(
+    preview.albums[0]?.items.map((item) => ({
+      relativePath: item.relativePath,
+      id: item.id ?? null,
+      jobId: item.jobId ?? null,
+      status: item.status ?? null,
+      lastError: item.lastError ?? null
+    })),
+    [
+      {
+        relativePath: path.join('2026.04 - Trip', 'photo-a.jpg'),
+        id: rows[0].id,
+        jobId: job.job.id,
+        status: 'completed',
+        lastError: null
+      },
+      {
+        relativePath: path.join('2026.04 - Trip', 'photo-b.jpg'),
+        id: rows[1].id,
+        jobId: job.job.id,
+        status: 'failed',
+        lastError: 'Temporary Google Photos failure'
+      }
+    ]
+  );
 });
 
 test('Google Photos export progress groups items by album', async () => {

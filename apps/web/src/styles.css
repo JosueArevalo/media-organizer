@@ -3967,6 +3967,10 @@ body {
   border-color: rgba(245, 158, 11, 0.55);
 }
 
+.export-provider-card-attention {
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
 .export-provider-check {
   position: absolute;
   top: 12px;
@@ -3998,6 +4002,11 @@ body {
 .export-provider-status-completed {
   background: rgba(16, 185, 129, 0.14);
   color: #047857;
+}
+
+.export-provider-status-attention {
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
 }
 
 .dashboard-export-summary {
@@ -4371,6 +4380,25 @@ body {
 
 .google-photos-selection-summary.is-empty {
   color: var(--danger);
+}
+
+.google-photos-preview-loading {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.24);
+  border-radius: 8px;
+  color: var(--text-muted);
+  display: grid;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 14px 16px;
+}
+
+.google-photos-preview-loading strong {
+  color: var(--text);
+}
+
+.google-photos-preview-loading p {
+  margin: 0;
 }
 
 .google-photos-album-select {

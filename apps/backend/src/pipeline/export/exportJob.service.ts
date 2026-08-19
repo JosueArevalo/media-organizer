@@ -335,6 +335,95 @@ const isGooglePhotosAlbumCompleted = (
   return supportedItems.length > 0 && supportedItems.every((item) => completedSourcePaths.has(item.sourcePath));
 };
 
+const getGooglePhotosItemStateBySourcePath = (input: {
+  accountId: string;
+  executionId: string | null;
+  sourceRoot: string;
+}) => {
+  const db = getDb();
+  const rows = (input.executionId
+    ? db.prepare(
+        `
+          SELECT
+            export_items.id,
+            export_items.job_id,
+            export_items.source_path,
+            export_items.status,
+            export_items.last_error,
+            export_items.updated_at
+          FROM export_items
+          JOIN export_jobs ON export_jobs.id = export_items.job_id
+          JOIN export_google_photos_items ON export_google_photos_items.item_id = export_items.id
+          WHERE export_jobs.target_type = 'google-photos'
+            AND export_jobs.execution_id = ?
+            AND export_google_photos_items.account_id = ?
+            AND (
+              export_items.status <> 'pending'
+              OR export_google_photos_items.phase IN ('uploaded', 'created')
+              OR export_google_photos_items.upload_token IS NOT NULL
+              OR export_google_photos_items.media_item_id IS NOT NULL
+            )
+          ORDER BY datetime(export_items.updated_at) DESC, export_items.rowid DESC
+        `
+      ).all(input.executionId, input.accountId)
+    : db.prepare(
+        `
+          SELECT
+            export_items.id,
+            export_items.job_id,
+            export_items.source_path,
+            export_items.status,
+            export_items.last_error,
+            export_items.updated_at
+          FROM export_items
+          JOIN export_jobs ON export_jobs.id = export_items.job_id
+          JOIN export_google_photos_items ON export_google_photos_items.item_id = export_items.id
+          WHERE export_jobs.target_type = 'google-photos'
+            AND export_jobs.execution_id IS NULL
+            AND export_jobs.source_root = ?
+            AND export_google_photos_items.account_id = ?
+            AND (
+              export_items.status <> 'pending'
+              OR export_google_photos_items.phase IN ('uploaded', 'created')
+              OR export_google_photos_items.upload_token IS NOT NULL
+              OR export_google_photos_items.media_item_id IS NOT NULL
+            )
+          ORDER BY datetime(export_items.updated_at) DESC, export_items.rowid DESC
+        `
+      ).all(input.sourceRoot, input.accountId)) as Array<{
+        id: string;
+        job_id: string;
+        source_path: string;
+        status: ExportItemRecord['status'];
+        last_error: string | null;
+        updated_at: string;
+      }>;
+
+  const entries = new Map<string, {
+    id: string;
+    jobId: string;
+    status: ExportItemRecord['status'];
+    lastError: string | null;
+    updatedAt: string;
+  }>();
+
+  for (const row of rows) {
+    if (entries.has(row.source_path)) {
+      continue;
+    }
+
+    entries.set(row.source_path, {
+      id: row.id,
+      jobId: row.job_id,
+      status: row.status,
+      lastError: row.last_error,
+      updatedAt: row.updated_at
+    });
+  }
+
+  return entries;
+};
+
 const assertExportJobRequest = (request: ExportJobRequest) => {
   assertExistingSourceRoot(request.sourceRoot);
 
@@ -1127,9 +1216,15 @@ export const previewGooglePhotosExport = async (
   await listGooglePhotosAppCreatedAlbums(accountId);
   const plannedItems = collectGooglePhotosFilePlan(sourceRoot);
   const supportedItems = plannedItems.filter((item) => item.supported);
+  const executionId = resolveExecutionId(groupingSessionId, sourceRoot);
   const completedSourcePaths = getCompletedGooglePhotosSourcePaths({
     accountId,
-    executionId: resolveExecutionId(groupingSessionId, sourceRoot),
+    executionId,
+    sourceRoot
+  });
+  const itemStateBySourcePath = getGooglePhotosItemStateBySourcePath({
+    accountId,
+    executionId,
     sourceRoot
   });
   const albumMap = new Map<string, {
@@ -1137,7 +1232,15 @@ export const previewGooglePhotosExport = async (
     albumTitle: string;
     itemCount: number;
     sourceItems: Array<{ sourcePath: string; supported: boolean }>;
-    items: Array<{ relativePath: string; sizeBytes: number; supported: boolean }>;
+      items: Array<{
+        relativePath: string;
+        sizeBytes: number;
+        supported: boolean;
+        id?: string | null;
+        jobId?: string | null;
+        status?: ExportItemRecord['status'];
+        lastError?: string | null;
+      }>;
   }>();
 
   for (const item of supportedItems) {
@@ -1153,10 +1256,15 @@ export const previewGooglePhotosExport = async (
       sourcePath: item.sourcePath,
       supported: item.supported
     });
+    const historicalState = itemStateBySourcePath.get(item.sourcePath);
     existing.items.push({
       relativePath: item.relativePath,
       sizeBytes: item.sizeBytes,
-      supported: item.supported
+      supported: item.supported,
+      id: historicalState?.id ?? null,
+      jobId: historicalState?.jobId ?? null,
+      status: historicalState?.status,
+      lastError: historicalState?.lastError ?? null
     });
     albumMap.set(item.albumTitle, existing);
   }

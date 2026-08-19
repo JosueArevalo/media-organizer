@@ -8,10 +8,11 @@ const hooksRoot = path.resolve(process.cwd(), 'src', 'hooks');
 
 test('export hub only renders the completion check for complete coverage', () => {
   const source = fs.readFileSync(path.join(pagesRoot, 'ExportPage.tsx'), 'utf8');
-  assert.match(source, /coverage === 'completed'/);
+  assert.match(source, /displayStatus === 'completed'/);
   assert.match(source, /export-provider-check/);
   assert.match(source, /export\.coverage\.items/);
   assert.match(source, /export\.coverage\.albums/);
+  assert.match(source, /export\.coverage\.attention/);
 });
 
 test('dashboard renders persisted provider summaries and completed destinations', () => {
@@ -20,6 +21,7 @@ test('dashboard renders persisted provider summaries and completed destinations'
   assert.match(source, /completedDestinations\.slice/);
   assert.match(source, /dashboard\.exportLastAttempt/);
   assert.match(source, /dashboard-export-row/);
+  assert.match(source, /summary\.displayStatus/);
   assert.doesNotMatch(source, /destination\.completedJobs/);
   assert.doesNotMatch(source, /dashboard-export-provider dashboard-export-provider-/);
 });
