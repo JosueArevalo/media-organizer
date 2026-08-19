@@ -113,6 +113,12 @@ type OperationCounts = {
   retainedOriginalBecauseLargerCount: number;
 };
 
+const buildCompressionChildEnv = () => ({
+  ...process.env,
+  PYTHONUTF8: '1',
+  PYTHONIOENCODING: 'utf-8'
+});
+
 const getFileSize = (filePath: string) => {
   try {
     return fs.statSync(filePath).size;
@@ -147,7 +153,8 @@ const executeCommand = async (
   return await new Promise<ScriptResultPayload>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: process.cwd(),
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: buildCompressionChildEnv()
     });
     registerCompressionProcess(sessionId, child);
 

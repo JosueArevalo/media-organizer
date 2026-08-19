@@ -261,6 +261,47 @@ test('getGroupingPreviewPath serves web-safe images without conversion', async (
   assert.equal(preview.mediaType, 'image');
 });
 
+test('createGroupingWorkspace preserves accented file names and keeps previews available', async () => {
+  const imageName = '20251129_203031_pruebíta.jpg';
+  const videoName = '20251129_184550_pruebéta.mp4';
+  const { compressionSessionId, items } = seedCompressionSession([imageName, videoName]);
+  const imageItem = items.find((item) => item.relativePath === imageName);
+  const videoItem = items.find((item) => item.relativePath === videoName);
+
+  assert.ok(imageItem);
+  assert.ok(videoItem);
+  await writeTestImage(imageItem.outputPath);
+
+  const { createGroupingWorkspace, getGroupingMediaPath, getGroupingThumbnailPath } = await import(
+    '../src/pipeline/grouping/groupingWorkspace.service.js'
+  );
+  const workspace = createGroupingWorkspace({ sourceDir, outputDir, compressionSessionId });
+
+  assert.deepEqual(
+    workspace.items.map((item) => ({
+      relativePath: item.relativePath,
+      fileName: item.fileName,
+      outputName: path.basename(item.outputPath)
+    })),
+    [
+      { relativePath: videoName, fileName: videoName, outputName: videoName },
+      { relativePath: imageName, fileName: imageName, outputName: imageName }
+    ].sort((left, right) => left.relativePath.localeCompare(right.relativePath, undefined, { sensitivity: 'base' }))
+  );
+  assert.equal(workspace.items.some((item) => item.fileName.includes('�') || item.relativePath.includes('�')), false);
+
+  const thumbnail = await getGroupingThumbnailPath(workspace.sessionId, imageItem.itemId);
+  const imageMedia = getGroupingMediaPath(workspace.sessionId, imageItem.itemId);
+  const videoMedia = getGroupingMediaPath(workspace.sessionId, videoItem.itemId);
+
+  assert.ok(thumbnail);
+  assert.ok(imageMedia);
+  assert.ok(videoMedia);
+  assert.equal(path.basename(thumbnail.path), `${imageItem.itemId}-thumb.jpg`);
+  assert.equal(path.basename(imageMedia.path), imageName);
+  assert.equal(path.basename(videoMedia.path), videoName);
+});
+
 test('getGroupingThumbnailPath generates and reuses web-safe thumbnails without ImageMagick', async () => {
   const { compressionSessionId, items } = seedCompressionSession(['photo.jpg']);
   await writeTestImage(items[0].outputPath);
