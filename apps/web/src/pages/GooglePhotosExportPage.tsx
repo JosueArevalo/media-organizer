@@ -1109,14 +1109,19 @@ export const GooglePhotosExportPage = () => {
 
     return previewItems.map((item) => {
       const progressItem = progressByRelativePath.get(item.relativePath);
+      const status = getItemRenderStatus(progressItem?.status ?? item.status ?? (isAlbumComplete ? 'completed' : 'pending'));
 
       return {
         relativePath: item.relativePath,
         sizeBytes: progressItem?.sizeBytes ?? item.sizeBytes,
-        status: getItemRenderStatus(progressItem?.status ?? item.status ?? (isAlbumComplete ? 'completed' : 'pending')),
+        status,
         id: progressItem?.id ?? item.id ?? null,
         jobId: progressItem ? backendJobId : item.jobId ?? null,
-        lastError: progressItem?.lastError ?? item.lastError ?? null
+        lastError: progressItem
+          ? progressItem.lastError ?? null
+          : status === 'failed'
+            ? item.lastError ?? null
+            : null
       };
     });
   };
@@ -1480,7 +1485,7 @@ export const GooglePhotosExportPage = () => {
                                         <div>
                                           <strong title={item.relativePath}>{item.relativePath}</strong>
                                           <span>{formatBytes(item.sizeBytes)}</span>
-                                          {item.lastError && (
+                                          {item.status === 'failed' && item.lastError && (
                                             <details className="export-item-error">
                                               <summary>{getShortErrorMessage(item.lastError)}</summary>
                                               <span>{item.lastError}</span>

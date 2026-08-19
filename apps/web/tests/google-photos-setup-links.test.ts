@@ -245,5 +245,6 @@ test('Google Photos preview-backed item state can drive partial album results', 
   assert.match(pageSource, /previewCompletedCount === previewSupportedCount/);
   assert.match(pageSource, /id: progressItem\?\.id \?\? item\.id \?\? null/);
   assert.match(pageSource, /onClick=\{\(\) => void handleRetryItem\(item\.id as string, item\.jobId\)\}/);
-  assert.match(pageSource, /lastError: progressItem\?\.lastError \?\? item\.lastError \?\? null/);
+  assert.match(pageSource, /lastError: progressItem\s*\?\s*progressItem\.lastError \?\? null\s*:\s*status === 'failed'/);
+  assert.match(pageSource, /item\.status === 'failed' && item\.lastError && \(/);
 });
