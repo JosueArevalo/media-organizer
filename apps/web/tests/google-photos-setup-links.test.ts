@@ -99,12 +99,17 @@ test('Google Photos albums section owns upload progress', () => {
   assert.match(pageSource, /disabled=\{!isAlbumSelectable\}/);
   assert.match(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items, isAlbumComplete\)/);
   assert.match(pageSource, /progressItem\?\.status \?\? item\.status \?\? \(isAlbumComplete \? 'completed' : 'pending'\)/);
+  assert.match(pageSource, /jobId: progressItem \? backendJobId : item\.jobId \?\? null/);
   assert.doesNotMatch(pageSource, /getAlbumDisplayItems\(album\.albumTitle, album\.items, album\.uploadStatus\)/);
   assert.match(pageSource, /getAlbumFailureSummary/);
   assert.match(pageSource, /item\.lastError/);
   assert.match(pageSource, /progressByAlbum/);
   assert.match(pageSource, /handleRetryItem/);
   assert.match(pageSource, /retryExportItemRequest/);
+  assert.match(pageSource, /const effectiveJobId = itemJobId \?\? backendJobId/);
+  assert.match(pageSource, /retryExportItemRequest\(effectiveJobId, itemId\)/);
+  assert.match(pageSource, /setActiveBackendJobIdOverride\(effectiveJobId\)/);
+  assert.match(pageSource, /startExportJobRequest\(effectiveJobId\)/);
   assert.match(pageSource, /export\.retryItem/);
   assert.match(pageSource, /updateGooglePhotosExportJobScopeRequest/);
   assert.match(pageSource, /isUpdatingAlbumScope/);
@@ -239,5 +244,6 @@ test('Google Photos preview-backed item state can drive partial album results', 
   assert.match(pageSource, /previewFailedCount > 0/);
   assert.match(pageSource, /previewCompletedCount === previewSupportedCount/);
   assert.match(pageSource, /id: progressItem\?\.id \?\? item\.id \?\? null/);
+  assert.match(pageSource, /onClick=\{\(\) => void handleRetryItem\(item\.id as string, item\.jobId\)\}/);
   assert.match(pageSource, /lastError: progressItem\?\.lastError \?\? item\.lastError \?\? null/);
 });

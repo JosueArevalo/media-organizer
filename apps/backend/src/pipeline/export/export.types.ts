@@ -176,6 +176,7 @@ export type GooglePhotosAlbumPreviewItem = {
   sizeBytes: number;
   supported: boolean;
   id?: string | null;
+  jobId?: string | null;
   status?: ExportItemRecord['status'];
   lastError?: string | null;
 };

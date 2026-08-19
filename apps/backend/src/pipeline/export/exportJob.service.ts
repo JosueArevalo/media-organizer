@@ -346,6 +346,7 @@ const getGooglePhotosItemStateBySourcePath = (input: {
         `
           SELECT
             export_items.id,
+            export_items.job_id,
             export_items.source_path,
             export_items.status,
             export_items.last_error,
@@ -369,6 +370,7 @@ const getGooglePhotosItemStateBySourcePath = (input: {
         `
           SELECT
             export_items.id,
+            export_items.job_id,
             export_items.source_path,
             export_items.status,
             export_items.last_error,
@@ -390,6 +392,7 @@ const getGooglePhotosItemStateBySourcePath = (input: {
         `
       ).all(input.sourceRoot, input.accountId) as Array<{
         id: string;
+        job_id: string;
         source_path: string;
         status: ExportItemRecord['status'];
         last_error: string | null;
@@ -398,6 +401,7 @@ const getGooglePhotosItemStateBySourcePath = (input: {
 
   const entries = new Map<string, {
     id: string;
+    jobId: string;
     status: ExportItemRecord['status'];
     lastError: string | null;
     updatedAt: string;
@@ -410,6 +414,7 @@ const getGooglePhotosItemStateBySourcePath = (input: {
 
     entries.set(row.source_path, {
       id: row.id,
+      jobId: row.job_id,
       status: row.status,
       lastError: row.last_error,
       updatedAt: row.updated_at
@@ -1227,14 +1232,15 @@ export const previewGooglePhotosExport = async (
     albumTitle: string;
     itemCount: number;
     sourceItems: Array<{ sourcePath: string; supported: boolean }>;
-    items: Array<{
-      relativePath: string;
-      sizeBytes: number;
-      supported: boolean;
-      id?: string | null;
-      status?: ExportItemRecord['status'];
-      lastError?: string | null;
-    }>;
+      items: Array<{
+        relativePath: string;
+        sizeBytes: number;
+        supported: boolean;
+        id?: string | null;
+        jobId?: string | null;
+        status?: ExportItemRecord['status'];
+        lastError?: string | null;
+      }>;
   }>();
 
   for (const item of supportedItems) {
@@ -1256,6 +1262,7 @@ export const previewGooglePhotosExport = async (
       sizeBytes: item.sizeBytes,
       supported: item.supported,
       id: historicalState?.id ?? null,
+      jobId: historicalState?.jobId ?? null,
       status: historicalState?.status,
       lastError: historicalState?.lastError ?? null
     });

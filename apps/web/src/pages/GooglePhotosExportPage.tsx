@@ -905,15 +905,18 @@ export const GooglePhotosExportPage = () => {
     }
   };
 
-  const handleRetryItem = async (itemId: string) => {
-    if (!backendJobId || isRunning) return;
+  const handleRetryItem = async (itemId: string, itemJobId?: string | null) => {
+    const effectiveJobId = itemJobId ?? backendJobId;
+
+    if (!effectiveJobId || isRunning) return;
 
     setRetryingItemId(itemId);
 
     try {
-      const job = await retryExportItemRequest(backendJobId, itemId);
+      const job = await retryExportItemRequest(effectiveJobId, itemId);
+      setActiveBackendJobIdOverride(effectiveJobId);
       saveExportJobSnapshot({
-        backendJobId,
+        backendJobId: effectiveJobId,
         status: job.job.status,
         sourceRoot,
         groupingSessionId: groupingSessionState.backendSessionId,
@@ -926,8 +929,10 @@ export const GooglePhotosExportPage = () => {
         errorMessage: null,
         updatedAt: Date.now()
       });
-      await startExportJobRequest(backendJobId);
-      await refreshProgress();
+      await startExportJobRequest(effectiveJobId);
+      const nextProgress = await getExportProgressRequest(effectiveJobId);
+      setProgress(nextProgress);
+      syncSnapshot(nextProgress);
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.retryError'));
     } finally {
@@ -1110,6 +1115,7 @@ export const GooglePhotosExportPage = () => {
         sizeBytes: progressItem?.sizeBytes ?? item.sizeBytes,
         status: getItemRenderStatus(progressItem?.status ?? item.status ?? (isAlbumComplete ? 'completed' : 'pending')),
         id: progressItem?.id ?? item.id ?? null,
+        jobId: progressItem ? backendJobId : item.jobId ?? null,
         lastError: progressItem?.lastError ?? item.lastError ?? null
       };
     });
@@ -1486,7 +1492,7 @@ export const GooglePhotosExportPage = () => {
                                             <button
                                               className="btn btn-secondary btn-compact"
                                               type="button"
-                                              onClick={() => void handleRetryItem(item.id as string)}
+                                              onClick={() => void handleRetryItem(item.id as string, item.jobId)}
                                               disabled={isRunning || retryingItemId === item.id}
                                             >
                                               {retryingItemId === item.id ? t('export.retrying') : t('export.retryItem')}

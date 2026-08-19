@@ -668,6 +668,7 @@ test('Google Photos preview returns supported items per album', async () => {
       sizeBytes: 7,
       supported: true,
       id: null,
+      jobId: null,
       status: undefined,
       lastError: null
     }
@@ -731,6 +732,7 @@ test('Google Photos preview exposes persisted item states for partial albums', a
     preview.albums[0]?.items.map((item) => ({
       relativePath: item.relativePath,
       id: item.id ?? null,
+      jobId: item.jobId ?? null,
       status: item.status ?? null,
       lastError: item.lastError ?? null
     })),
@@ -738,12 +740,14 @@ test('Google Photos preview exposes persisted item states for partial albums', a
       {
         relativePath: path.join('2026.04 - Trip', 'photo-a.jpg'),
         id: rows[0].id,
+        jobId: job.job.id,
         status: 'completed',
         lastError: null
       },
       {
         relativePath: path.join('2026.04 - Trip', 'photo-b.jpg'),
         id: rows[1].id,
+        jobId: job.job.id,
         status: 'failed',
         lastError: 'Temporary Google Photos failure'
       }
