@@ -525,12 +525,20 @@ const isFileCompressed = (absolutePath: string, scope: SelectionScope) => {
   return includedFiles.has(normalizedPath);
 };
 
-const upsertMediaItem = (sessionId: string, sourcePath: string, outputRoot: string, outputPath: string) => {
+const upsertMediaItem = (
+  sessionId: string,
+  sourcePath: string,
+  outputRoot: string,
+  outputPath: string,
+  relativePathHint?: string
+) => {
   const db = getDb();
   const now = new Date().toISOString();
   const resolvedOutputRoot = path.resolve(outputRoot);
   const resolvedOutputPath = path.resolve(outputPath);
-  const relativePath = path.relative(resolvedOutputRoot, resolvedOutputPath) || path.basename(resolvedOutputPath);
+  const relativePath = relativePathHint && !path.isAbsolute(relativePathHint)
+    ? relativePathHint.replace(/[\\/]+/g, '\\')
+    : path.relative(resolvedOutputRoot, resolvedOutputPath) || path.basename(resolvedOutputPath);
   const mediaType = getMediaTypeFromPath(sourcePath);
   const sizeBytes = fs.existsSync(resolvedOutputPath) ? fs.statSync(resolvedOutputPath).size : 0;
 
@@ -819,7 +827,7 @@ const persistCompressionItem = (
   scope: SelectionScope,
   policy: CompressionProcessingPolicy
 ) => {
-  const itemId = upsertMediaItem(sessionId, item.source, outputRoot, item.output);
+  const itemId = upsertMediaItem(sessionId, item.source, outputRoot, item.output, item.displayPath);
   const operation = item.operation ?? (isCompressOperation(item.source, scope, policy) ? 'compress' : 'copy');
   const selectedForCompression = operation === 'compress';
   upsertDecision(sessionId, itemId, selectedForCompression);
