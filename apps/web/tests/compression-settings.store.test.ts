@@ -30,7 +30,7 @@ test('loadCompressionSettings returns defaults without localStorage data', () =>
   assert.equal(settings.imagePreset, 'balanced');
   assert.equal(settings.customQuality, 72);
   assert.equal(settings.videoPreset, 'Fast 1080p30');
-  assert.equal(settings.videoOutputFormatMode, 'preserve');
+  assert.equal(settings.videoOutputFormatMode, 'mp4');
   assert.equal(settings.updatedAt, 0);
 });
 
@@ -67,5 +67,21 @@ test('loadCompressionSettings normalizes invalid custom quality values', () => {
   assert.equal(settings.imagePreset, 'custom');
   assert.equal(settings.customQuality, 100);
   assert.equal(settings.videoPreset, 'Fast 720p30');
+  assert.equal(settings.videoOutputFormatMode, 'mp4');
+});
+
+test('loadCompressionSettings preserves a previously saved preserve video format choice', () => {
+  installLocalStorage();
+  storage.set('media-organizer-compression-settings', JSON.stringify({
+    imagePreset: 'balanced',
+    customQuality: 72,
+    videoPreset: 'Fast 1080p30',
+    videoOutputFormatMode: 'preserve',
+    updatedAt: 123
+  }));
+
+  const settings = loadCompressionSettings();
+
   assert.equal(settings.videoOutputFormatMode, 'preserve');
+  assert.equal(settings.updatedAt, 123);
 });
