@@ -790,6 +790,7 @@ export const es: TranslationDictionary = {
   'export.googlePhotos.albumFailed': 'Revisar',
   'export.googlePhotos.albumSkipped': 'Omitido',
   'export.googlePhotos.albumUploading': 'Subiendo',
+  'export.googlePhotos.albumRecoveredNotice': 'El album remoto "{albumTitle}" ya no existia en Google Fotos. Media Organizer lo recreo automaticamente y continuo la subida.',
   'export.googleDrive.title': 'Exportación a Google Drive',
   'export.googleDrive.subtitle': 'Prepara subidas a carpetas de Drive como futuro destino de backup cloud.',
   'export.googleDrive.note': 'Google Drive es viable para este flujo: crear carpetas con metadata de Drive y subir archivos con subida simple o resumible según tamaño.',

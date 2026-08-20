@@ -16,6 +16,38 @@ const GOOGLE_ERROR_BODY_LIMIT = 4000;
 
 const nowIso = () => new Date().toISOString();
 
+type GooglePhotosErrorBody = {
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
+  };
+};
+
+export class GooglePhotosApiError extends Error {
+  httpStatus: number;
+  googleStatus: string | null;
+  googleCode: number | null;
+  googleMessage: string | null;
+
+  constructor(
+    message: string,
+    input: {
+      httpStatus: number;
+      googleStatus?: string | null;
+      googleCode?: number | null;
+      googleMessage?: string | null;
+    }
+  ) {
+    super(message);
+    this.name = 'GooglePhotosApiError';
+    this.httpStatus = input.httpStatus;
+    this.googleStatus = input.googleStatus ?? null;
+    this.googleCode = input.googleCode ?? null;
+    this.googleMessage = input.googleMessage ?? null;
+  }
+}
+
 export const inferGooglePhotosContentType = (filePath: string) => {
   const dotIndex = filePath.lastIndexOf('.');
   const extension = dotIndex >= 0 ? filePath.slice(dotIndex).toLocaleLowerCase() : '';
@@ -90,6 +122,20 @@ const formatGooglePhotosHttpError = (fallbackMessage: string, body: string) => {
   return googleBody ? `${fallbackMessage} Google response: ${googleBody}` : fallbackMessage;
 };
 
+const parseGooglePhotosErrorBody = (body: string): GooglePhotosErrorBody | null => {
+  const trimmed = body.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmed) as GooglePhotosErrorBody;
+  } catch {
+    return null;
+  }
+};
+
 export const normalizeGooglePhotosAlbumTitle = (title: string) => title.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 
 const toAlbumRecord = (row: {
@@ -149,8 +195,14 @@ const requestJson = async <T>(accountId: string, url: string, fallbackMessage: s
 
   if (!response.ok) {
     const message = formatGooglePhotosHttpError(fallbackMessage, body);
+    const googleError = parseGooglePhotosErrorBody(body)?.error;
     console.warn(`${GOOGLE_PHOTOS_LOG_PREFIX} HTTP request failed endpoint=${getGooglePhotosEndpointLabel(url)} status=${response.status} message="${message}"`);
-    throw new Error(message);
+    throw new GooglePhotosApiError(message, {
+      httpStatus: response.status,
+      googleStatus: googleError?.status ?? null,
+      googleCode: googleError?.code ?? null,
+      googleMessage: googleError?.message ?? null
+    });
   }
 
   return JSON.parse(body) as T;
@@ -195,8 +247,29 @@ export const getCachedGooglePhotosAlbumByTitle = (accountId: string, title: stri
   return row ? toAlbumRecord(row) : null;
 };
 
+export const invalidateCachedGooglePhotosAlbumById = (accountId: string, googleAlbumId: string) => {
+  runMigrations();
+  const db = getDb();
+  return db
+    .prepare('DELETE FROM google_photos_albums WHERE account_id = ? AND google_album_id = ?')
+    .run(accountId, googleAlbumId)
+    .changes > 0;
+};
+
+export const invalidateCachedGooglePhotosAlbumByTitle = (accountId: string, title: string) => {
+  runMigrations();
+  const db = getDb();
+  return db
+    .prepare('DELETE FROM google_photos_albums WHERE account_id = ? AND normalized_title = ?')
+    .run(accountId, normalizeGooglePhotosAlbumTitle(title))
+    .changes > 0;
+};
+
 export const listGooglePhotosAppCreatedAlbums = async (accountId: string): Promise<GooglePhotosAlbumRecord[]> => {
+  runMigrations();
+  const db = getDb();
   const albums: GooglePhotosAlbumRecord[] = [];
+  const remoteAlbumIds = new Set<string>();
   let pageToken: string | undefined;
 
   do {
@@ -212,11 +285,21 @@ export const listGooglePhotosAppCreatedAlbums = async (accountId: string): Promi
     );
 
     for (const album of body.albums ?? []) {
+      remoteAlbumIds.add(album.id);
       albums.push(cacheGooglePhotosAlbum(accountId, album));
     }
 
     pageToken = body.nextPageToken;
   } while (pageToken);
+
+  if (remoteAlbumIds.size === 0) {
+    db.prepare('DELETE FROM google_photos_albums WHERE account_id = ?').run(accountId);
+  } else {
+    const placeholders = Array.from({ length: remoteAlbumIds.size }, () => '?').join(', ');
+    db.prepare(
+      `DELETE FROM google_photos_albums WHERE account_id = ? AND google_album_id NOT IN (${placeholders})`
+    ).run(accountId, ...remoteAlbumIds);
+  }
 
   return albums;
 };
@@ -385,3 +468,8 @@ export const createGooglePhotosMediaItems = async (
 
   return body.newMediaItemResults ?? [];
 };
+
+export const isGooglePhotosAlbumMissingError = (error: unknown) =>
+  error instanceof GooglePhotosApiError
+  && error.httpStatus === 404
+  && error.googleStatus === 'NOT_FOUND';

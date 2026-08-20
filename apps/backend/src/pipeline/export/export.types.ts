@@ -113,6 +113,7 @@ export type ExportProgressData = {
   pending: number;
   recentItems: ExportItemRecord[];
   albumProgress?: GooglePhotosAlbumProgress[];
+  notices?: string[];
 };
 
 export type ExportTargetTestRequest = {

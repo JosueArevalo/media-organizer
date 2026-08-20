@@ -270,3 +270,12 @@ test('Google Photos preview-backed item state can drive partial album results', 
   assert.match(pageSource, /lastError: effectiveProgressItem\s*\?\s*effectiveProgressItem\.lastError \?\? null\s*:\s*status === 'failed'/);
   assert.match(pageSource, /item\.status === 'failed' && item\.lastError && \(/);
 });
+
+test('Google Photos progress notices surface automatic album recreation warnings', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(pageSource, /const googlePhotosNotices = \(currentProgress\?\.notices \?\? \[\]\)\.map/);
+  assert.match(pageSource, /notice\.startsWith\('google-photos-album-recreated:'\)/);
+  assert.match(pageSource, /export\.googlePhotos\.albumRecoveredNotice/);
+  assert.match(pageSource, /googlePhotosNotices\.map\(\(notice\) => \(/);
+});

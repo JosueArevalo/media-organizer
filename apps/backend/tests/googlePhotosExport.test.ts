@@ -676,6 +676,35 @@ test('Google Photos preview returns supported items per album', async () => {
   assert.equal(preview.albums[0]?.uploadStatus, 'pending');
 });
 
+test('Google Photos preview reconciles deleted remote albums and marks them as new', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+
+  const { cacheGooglePhotosAlbum, getCachedGooglePhotosAlbumByTitle } = await import(
+    '../src/pipeline/export/googlePhotosApi.service.js?google-preview-reconcile=1'
+  );
+  const { previewGooglePhotosExport } = await import('../src/pipeline/export/exportJob.service.js?google-preview-reconcile=1');
+
+  cacheGooglePhotosAlbum('account-1', {
+    id: 'album-stale',
+    title: '2026.04 - Trip'
+  });
+
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+
+    if (url.includes('/albums') && init?.method !== 'POST') {
+      return new Response(JSON.stringify({ albums: [] }), { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  const preview = await previewGooglePhotosExport('account-1', sourceRoot);
+  assert.equal(preview.albums[0]?.status, 'new');
+  assert.equal(getCachedGooglePhotosAlbumByTitle('account-1', '2026.04 - Trip'), null);
+});
+
 test('Google Photos preview exposes persisted item states for partial albums', async () => {
   await insertGooglePhotosAccount();
   fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
@@ -882,6 +911,105 @@ test('Google Photos export persists partial failures and does not retry complete
   } finally {
     console.warn = originalWarn;
   }
+});
+
+test('Google Photos export recreates a remotely deleted cached album after batchCreate returns NOT_FOUND', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+
+  const { cacheGooglePhotosAlbum, getCachedGooglePhotosAlbumByTitle } = await import(
+    '../src/pipeline/export/googlePhotosApi.service.js?google-album-recovery=1'
+  );
+  const { createExportJob, getExportProgress, previewGooglePhotosExport } = await import(
+    '../src/pipeline/export/exportJob.service.js?google-album-recovery=1'
+  );
+  const { executeGooglePhotosExportJob } = await import(
+    '../src/pipeline/export/googlePhotosExport.runner.js?google-album-recovery=1'
+  );
+
+  cacheGooglePhotosAlbum('account-1', {
+    id: 'album-old',
+    title: '2026.04 - Trip'
+  });
+
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+
+    if (url.includes('/albums') && init?.method !== 'POST') {
+      return new Response(JSON.stringify({
+        albums: [{ id: 'album-old', title: '2026.04 - Trip' }]
+      }), { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  const preview = await previewGooglePhotosExport('account-1', sourceRoot);
+  assert.equal(preview.albums[0]?.status, 'existing');
+
+  let uploadCount = 0;
+  let albumCreateCount = 0;
+  const batchAlbumIds: string[] = [];
+
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+
+    if (url.includes('/albums') && init?.method !== 'POST') {
+      return new Response(JSON.stringify({ albums: [] }), { status: 200 });
+    }
+
+    if (url.endsWith('/uploads')) {
+      uploadCount += 1;
+      return new Response(`upload-token-${uploadCount}`, { status: 200 });
+    }
+
+    if (url.endsWith('/albums') && init?.method === 'POST') {
+      albumCreateCount += 1;
+      return new Response(JSON.stringify({ id: 'album-new', title: '2026.04 - Trip' }), { status: 200 });
+    }
+
+    if (url.endsWith('/mediaItems:batchCreate')) {
+      const body = JSON.parse(String(init?.body)) as {
+        albumId: string;
+        newMediaItems: Array<{ simpleMediaItem: { uploadToken: string } }>;
+      };
+      batchAlbumIds.push(body.albumId);
+
+      if (body.albumId === 'album-old') {
+        return new Response(JSON.stringify({
+          error: {
+            code: 404,
+            message: 'The provided ID does not match any albums.',
+            status: 'NOT_FOUND'
+          }
+        }), { status: 404 });
+      }
+
+      return new Response(JSON.stringify({
+        newMediaItemResults: body.newMediaItems.map((item) => ({
+          uploadToken: item.simpleMediaItem.uploadToken,
+          mediaItem: { id: 'media-1' }
+        }))
+      }), { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  const job = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1' }
+  });
+
+  await executeGooglePhotosExportJob(job.job.id);
+
+  const progress = getExportProgress(job.job.id);
+  assert.equal(progress?.status, 'completed');
+  assert.equal(progress?.completed, 1);
+  assert.equal(albumCreateCount, 1);
+  assert.deepEqual(batchAlbumIds, ['album-old', 'album-new']);
+  assert.deepEqual(progress?.notices, ['google-photos-album-recreated:2026.04 - Trip']);
+  assert.equal(getCachedGooglePhotosAlbumByTitle('account-1', '2026.04 - Trip')?.googleAlbumId, 'album-new');
 });
 
 test('Google Photos pause during media creation stops before the next item and resumes remaining work', async () => {
