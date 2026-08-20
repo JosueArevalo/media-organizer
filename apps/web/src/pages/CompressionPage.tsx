@@ -800,6 +800,7 @@ export const CompressionPage = () => {
         }
 
         const status = session.session.status;
+        setBackendError(null);
 
         if (status === 'completed') {
           completeCompressionSession();
@@ -1129,7 +1130,8 @@ export const CompressionPage = () => {
         try {
           // First, try to get progress
           const progress = await getCompressionProgressRequest(started.session.id);
-          
+
+          setBackendError(null);
           syncProgressData(progress);
 
           const status = progress.status;
@@ -1234,6 +1236,7 @@ export const CompressionPage = () => {
           }
 
           const progress = await getCompressionProgressRequest(sessionId);
+          setBackendError(null);
           syncProgressData(progress);
 
           const status = progress.status;
