@@ -3457,6 +3457,59 @@ body {
   background: rgba(245, 158, 11, 0.08);
 }
 
+.grouping-trash-drop {
+  border: 1px solid rgba(209, 67, 67, 0.48);
+  border-radius: 8px;
+  background: rgba(209, 67, 67, 0.07);
+  overflow: hidden;
+}
+
+.grouping-trash-drop.is-active {
+  border-color: #d14343;
+  background: rgba(209, 67, 67, 0.14);
+  box-shadow: inset 3px 0 0 #d14343;
+}
+
+.grouping-trash-button {
+  color: color-mix(in srgb, #d14343 78%, var(--text) 22%);
+}
+
+.grouping-folder-button > .grouping-trash-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+}
+
+.grouping-trash-label svg {
+  width: 17px;
+  height: 17px;
+  display: block;
+  flex: 0 0 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.grouping-migration-notice {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-light) 72%, var(--surface));
+  color: var(--text);
+}
+
+.grouping-migration-notice.is-warning {
+  border-color: rgba(245, 158, 11, 0.48);
+  background: rgba(245, 158, 11, 0.08);
+}
+
 .grouping-folder-button {
   width: 100%;
   min-height: 44px;
