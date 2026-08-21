@@ -25,8 +25,8 @@ import {
   createGroupingTemplate,
   createGroupingWorkspace,
   deleteGroupingFolder,
-  deleteGroupingItems,
   deleteGroupingTemplate,
+  getGroupingBaselineMigrationStatus,
   getGroupingMediaPath,
   getGroupingPreviewPath,
   getGroupingThumbnailPath,
@@ -37,6 +37,8 @@ import {
   renameGroupingFolder,
   renamePreservedGroupingFolderScope,
   resetGroupingWorkspace,
+  startGroupingBaselineMigration,
+  trashGroupingItems,
   updateGroupingTemplate
 } from './pipeline/grouping/groupingWorkspace.service.js';
 import { handleSourceTreeRoutes } from './pipeline/source/sourceTree.routes.js';
@@ -593,6 +595,20 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
       return;
     }
 
+    if (req.method === 'POST' && subPath === 'legacy-baselines' && subId === 'migrate') {
+      try {
+        sendJson(res, 202, startGroupingBaselineMigration(sessionId));
+      } catch (error) {
+        sendCaughtError(res, error, 'Could not start legacy baseline migration.');
+      }
+      return;
+    }
+
+    if (req.method === 'GET' && subPath === 'legacy-baselines' && subId === 'migration') {
+      sendJson(res, 200, getGroupingBaselineMigrationStatus(sessionId));
+      return;
+    }
+
     if (req.method === 'POST' && subPath === 'folders') {
       void (async () => {
         try {
@@ -671,14 +687,27 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
     if (req.method === 'POST' && subPath === 'items' && subId === 'assign') {
       void (async () => {
         try {
-          const body = (await readRequestJson(req)) as { itemIds?: string[]; targetGroupLabel?: string } | null;
+          const body = (await readRequestJson(req)) as {
+            itemIds?: string[];
+            targetGroupLabel?: string;
+            targetPreservedScopePath?: string;
+          } | null;
 
-          if (!Array.isArray(body?.itemIds) || !body.targetGroupLabel) {
+          if (
+            !Array.isArray(body?.itemIds)
+            || typeof body.targetGroupLabel !== 'string'
+            || !body.targetGroupLabel
+            || (body.targetPreservedScopePath !== undefined && typeof body.targetPreservedScopePath !== 'string')
+          ) {
             sendJson(res, 400, { status: 'invalid_request', message: 'itemIds and targetGroupLabel are required.' });
             return;
           }
 
-          sendJson(res, 200, assignGroupingItems(sessionId, body.itemIds, body.targetGroupLabel));
+          sendJson(
+            res,
+            200,
+            assignGroupingItems(sessionId, body.itemIds, body.targetGroupLabel, body.targetPreservedScopePath)
+          );
         } catch (error) {
           sendCaughtError(res, error, 'Could not assign items.');
         }
@@ -758,7 +787,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
       return;
     }
 
-    if (req.method === 'POST' && subPath === 'items' && subId === 'delete') {
+    if (req.method === 'POST' && subPath === 'items' && subId === 'trash') {
       void (async () => {
         try {
           const body = (await readRequestJson(req)) as { itemIds?: string[] } | null;
@@ -768,9 +797,9 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
             return;
           }
 
-          sendJson(res, 200, deleteGroupingItems(sessionId, body.itemIds));
+          sendJson(res, 200, trashGroupingItems(sessionId, body.itemIds));
         } catch (error) {
-          sendCaughtError(res, error, 'Could not delete items.');
+          sendCaughtError(res, error, 'Could not move items to grouping trash.');
         }
       })();
 

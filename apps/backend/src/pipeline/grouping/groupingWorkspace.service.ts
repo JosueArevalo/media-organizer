@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { createTaskQueue, runCommand } from './previewExecution.js';
 import { getDb } from '../../state/db.js';
@@ -80,7 +80,17 @@ export type GroupingWorkspace = {
   reorganizedDirectories: string[];
   folders: GroupingWorkspaceFolder[];
   items: GroupingWorkspaceItem[];
+  trashItems: GroupingWorkspaceItem[];
   templates: GroupingWorkspaceTemplate[];
+};
+
+export type GroupingBaselineMigrationStatus = {
+  status: 'not_needed' | 'not_started' | 'running' | 'completed' | 'completed_with_warnings' | 'failed';
+  totalFiles: number;
+  processedFiles: number;
+  reclaimedBytes: number;
+  migratedToTrash: number;
+  warnings: string[];
 };
 
 type MediaRow = {
@@ -238,6 +248,12 @@ const getGroupingBaselineRoot = (outputDir: string, sessionId: string) =>
 
 const getGroupingBaselinePath = (outputDir: string, sessionId: string, relativePath: string) =>
   path.join(getGroupingBaselineRoot(outputDir, sessionId), relativePath);
+
+const getGroupingTrashRoot = (outputDir: string, sessionId: string) =>
+  path.join(outputDir, '.media-organizer', 'trash', sessionId);
+
+const getGroupingTrashPath = (outputDir: string, sessionId: string, initialRelativePath: string) =>
+  path.join(getGroupingTrashRoot(outputDir, sessionId), initialRelativePath);
 
 const createEmptyVerificationCounts = (): VerificationCounts => ({
   total: 0,
@@ -565,48 +581,172 @@ const ensureGroupingBaselines = (groupingSessionId: string, sourceSessionId: str
   }
 };
 
-const copyBaselineBackupIfMissing = (input: {
-  outputDir: string;
-  groupingSessionId: string;
-  baselineRelativePath: string;
-  currentPath: string;
-}) => {
-  if (!isPathInside(input.outputDir, input.currentPath)) {
-    throw new Error('Refusing to back up media outside the destination folder.');
-  }
+const baselineMigrationStatuses = new Map<string, GroupingBaselineMigrationStatus>();
 
-  const backupPath = getGroupingBaselinePath(input.outputDir, input.groupingSessionId, input.baselineRelativePath);
+const listFilesRecursively = (rootPath: string): string[] => {
+  if (!fs.existsSync(rootPath)) return [];
 
-  if (!isPathInside(getGroupingBaselineRoot(input.outputDir, input.groupingSessionId), backupPath)) {
-    throw new Error('Refusing to write grouping backup outside the baseline folder.');
-  }
-
-  if (fs.existsSync(backupPath) || !fs.existsSync(input.currentPath)) {
-    return;
-  }
-
-  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
-  fs.copyFileSync(input.currentPath, backupPath);
+  const files: string[] = [];
+  const walk = (directoryPath: string) => {
+    for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
+      const entryPath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) walk(entryPath);
+      else if (entry.isFile()) files.push(entryPath);
+    }
+  };
+  walk(rootPath);
+  return files;
 };
 
-const ensureGroupingBaselineBackups = (
-  groupingSessionId: string,
-  outputDir: string,
-  rows: MediaRow[],
-  baselines: Map<string, GroupingBaselineRow>
-) => {
-  for (const row of rows) {
-    const baseline = baselines.get(row.id);
-    if (!baseline) {
-      continue;
-    }
+const hashFile = (filePath: string) => new Promise<string>((resolve, reject) => {
+  const hash = createHash('sha256');
+  const stream = fs.createReadStream(filePath);
+  stream.on('error', reject);
+  stream.on('data', (chunk) => hash.update(chunk));
+  stream.on('end', () => resolve(hash.digest('hex')));
+});
 
-    copyBaselineBackupIfMissing({
-      outputDir,
-      groupingSessionId,
-      baselineRelativePath: baseline.initial_relative_path,
-      currentPath: getOutputPath(outputDir, row.relative_path)
+const removeEmptyTree = (directoryPath: string, rootPath: string) => {
+  if (!fs.existsSync(directoryPath)) return;
+  for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
+    if (entry.isDirectory()) removeEmptyTree(path.join(directoryPath, entry.name), rootPath);
+  }
+  if (normalizePath(directoryPath) !== normalizePath(rootPath) && fs.readdirSync(directoryPath).length === 0) {
+    fs.rmdirSync(directoryPath);
+  }
+};
+
+export const getGroupingBaselineMigrationStatus = (sessionId: string): GroupingBaselineMigrationStatus => {
+  const existing = baselineMigrationStatuses.get(sessionId);
+  if (existing) return { ...existing, warnings: [...existing.warnings] };
+
+  const session = getSessionRow(sessionId);
+  const baselineRoot = session ? getGroupingBaselineRoot(session.output_dir, sessionId) : '';
+  const files = baselineRoot ? listFilesRecursively(baselineRoot) : [];
+  return {
+    status: files.length > 0 ? 'not_started' : 'not_needed',
+    totalFiles: files.length,
+    processedFiles: 0,
+    reclaimedBytes: 0,
+    migratedToTrash: 0,
+    warnings: []
+  };
+};
+
+const migrateGroupingBaselines = async (sessionId: string, status: GroupingBaselineMigrationStatus) => {
+  const db = getDb();
+  const session = getSessionRow(sessionId);
+  if (!session) throw new Error('Grouping session not found.');
+
+  const sourceSessionId = getCompressionSourceSessionId(sessionId) ?? sessionId;
+  const baselineRoot = getGroupingBaselineRoot(session.output_dir, sessionId);
+  const knownBackupPaths = new Set<string>();
+  const rows = db.prepare(
+    `SELECT baseline.item_id, baseline.initial_relative_path, media.relative_path,
+            COALESCE(decision.selected_for_output, 1) AS selected_for_output
+     FROM grouping_item_baselines baseline
+     JOIN media_items media ON media.id = baseline.item_id AND media.session_id = baseline.source_session_id
+     LEFT JOIN item_decisions decision ON decision.item_id = baseline.item_id AND decision.session_id = baseline.source_session_id
+     WHERE baseline.grouping_session_id = ?`
+  ).all(sessionId) as Array<{
+    item_id: string;
+    initial_relative_path: string;
+    relative_path: string;
+    selected_for_output: number;
+  }>;
+
+  for (const row of rows) {
+    const backupPath = getGroupingBaselinePath(session.output_dir, sessionId, row.initial_relative_path);
+    knownBackupPaths.add(normalizePath(backupPath));
+    if (!fs.existsSync(backupPath)) continue;
+
+    try {
+      const currentPath = getOutputPath(session.output_dir, row.relative_path);
+      if (!isPathInside(baselineRoot, backupPath) || !isPathInside(session.output_dir, currentPath)) {
+        throw new Error('Unsafe path found in legacy grouping metadata.');
+      }
+
+      if (fs.existsSync(currentPath) && normalizePath(currentPath) !== normalizePath(backupPath)) {
+        const [backupHash, currentHash] = await Promise.all([hashFile(backupPath), hashFile(currentPath)]);
+        if (backupHash === currentHash) {
+          const size = fs.statSync(backupPath).size;
+          fs.rmSync(backupPath, { force: true });
+          status.reclaimedBytes += size;
+        } else {
+          status.warnings.push(`Baseline differs from current media: ${row.initial_relative_path}`);
+        }
+      } else if (!fs.existsSync(currentPath) && row.selected_for_output === 0) {
+        const trashPath = getGroupingTrashPath(session.output_dir, sessionId, row.initial_relative_path);
+        if (!isPathInside(getGroupingTrashRoot(session.output_dir, sessionId), trashPath)) {
+          throw new Error('Unsafe trash path found in legacy grouping metadata.');
+        }
+
+        fs.mkdirSync(path.dirname(trashPath), { recursive: true });
+        if (fs.existsSync(trashPath)) {
+          const [backupHash, trashHash] = await Promise.all([hashFile(backupPath), hashFile(trashPath)]);
+          if (backupHash !== trashHash) throw new Error('Trash target already exists with different content.');
+          status.reclaimedBytes += fs.statSync(backupPath).size;
+          fs.rmSync(backupPath, { force: true });
+        } else {
+          fs.renameSync(backupPath, trashPath);
+        }
+        db.prepare('UPDATE media_items SET relative_path = ?, updated_at = ? WHERE session_id = ? AND id = ?').run(
+          path.relative(session.output_dir, trashPath), nowIso(), sourceSessionId, row.item_id
+        );
+        status.migratedToTrash += 1;
+      } else {
+        status.warnings.push(`Could not reconcile legacy baseline: ${row.initial_relative_path}`);
+      }
+    } catch (error) {
+      status.warnings.push(`${row.initial_relative_path}: ${error instanceof Error ? error.message : 'Migration failed.'}`);
+    } finally {
+      status.processedFiles += 1;
+    }
+  }
+
+  for (const filePath of listFilesRecursively(baselineRoot)) {
+    if (!knownBackupPaths.has(normalizePath(filePath))) {
+      status.warnings.push(`Unknown legacy baseline preserved: ${path.relative(baselineRoot, filePath)}`);
+      status.processedFiles += 1;
+    }
+  }
+
+  removeEmptyTree(baselineRoot, path.dirname(baselineRoot));
+  status.status = status.warnings.length > 0 ? 'completed_with_warnings' : 'completed';
+};
+
+export const startGroupingBaselineMigration = (sessionId: string): GroupingBaselineMigrationStatus => {
+  runMigrations();
+  const current = baselineMigrationStatuses.get(sessionId);
+  if (current) return { ...current, warnings: [...current.warnings] };
+
+  const session = getSessionRow(sessionId);
+  if (!session) throw new Error('Grouping session not found.');
+  const files = listFilesRecursively(getGroupingBaselineRoot(session.output_dir, sessionId));
+  const status: GroupingBaselineMigrationStatus = {
+    status: files.length > 0 ? 'running' : 'not_needed',
+    totalFiles: files.length,
+    processedFiles: 0,
+    reclaimedBytes: 0,
+    migratedToTrash: 0,
+    warnings: []
+  };
+  baselineMigrationStatuses.set(sessionId, status);
+
+  if (files.length > 0) {
+    void migrateGroupingBaselines(sessionId, status).catch((error) => {
+      status.status = 'failed';
+      status.warnings.push(error instanceof Error ? error.message : 'Legacy baseline migration failed.');
     });
+  }
+
+  return { ...status, warnings: [...status.warnings] };
+};
+
+const assertBaselineMigrationIdle = (sessionId: string) => {
+  const status = getGroupingBaselineMigrationStatus(sessionId).status;
+  if (status === 'running' || status === 'not_started') {
+    throw new Error('Legacy grouping baselines are still being migrated.');
   }
 };
 
@@ -715,6 +855,7 @@ const upsertDecisionLabel = (sessionId: string, itemId: string, label: string, u
         updated_at
       ) VALUES (?, ?, ?, 0, 1, ?, ?, ?)
       ON CONFLICT(session_id, item_id) DO UPDATE SET
+        selected_for_output = 1,
         target_group_label = excluded.target_group_label,
         user_overridden = excluded.user_overridden,
         updated_at = excluded.updated_at
@@ -990,7 +1131,58 @@ const getTemplateRows = (): GroupingWorkspaceTemplate[] => {
   }));
 };
 
-const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => {
+const getPreservedScopeLabel = (scopePath: string) => {
+  const normalized = scopePath.replace(/[\\/]+$/g, '').replace(/[\\/]/g, path.sep);
+  return path.basename(normalized);
+};
+
+const reconcilePromotedPreservedFolders = (workspace: GroupingWorkspace) => {
+  const foldersByLabel = new Map(
+    workspace.folders
+      .filter((folder) => folder.itemCount > 0)
+      .map((folder) => [folder.label.toLocaleLowerCase(), folder] as const)
+  );
+  const scopesByLabel = new Map<string, string[]>();
+
+  for (const scopePath of workspace.preservedDirectories) {
+    const label = sanitizeFolderLabel(getPreservedScopeLabel(scopePath));
+    const scopes = scopesByLabel.get(label.toLocaleLowerCase()) ?? [];
+    scopes.push(scopePath);
+    scopesByLabel.set(label.toLocaleLowerCase(), scopes);
+  }
+
+  const promotions: Array<{ label: string; itemIds: string[] }> = [];
+  for (const [normalizedLabel, scopes] of scopesByLabel) {
+    const folder = foldersByLabel.get(normalizedLabel);
+    if (!folder || scopes.length !== 1) continue;
+
+    const itemIds = workspace.items
+      .filter((item) => isWorkspaceItemInPreservedFolderScope(item, scopes[0], workspace.sourceDir))
+      .map((item) => item.id);
+    if (itemIds.length > 0) promotions.push({ label: folder.label, itemIds });
+  }
+
+  if (promotions.length === 0) return false;
+
+  const db = getDb();
+  const sourceSessionId = workspace.compressionSessionId ?? workspace.sessionId;
+  db.exec('BEGIN TRANSACTION');
+  try {
+    for (const promotion of promotions) {
+      for (const itemId of promotion.itemIds) {
+        upsertDecisionLabel(sourceSessionId, itemId, promotion.label, true);
+      }
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return true;
+};
+
+const buildWorkspace = (groupingSessionId: string, reconcilePreservedFolders = true): GroupingWorkspace | null => {
   runMigrations();
 
   const session = getSessionRow(groupingSessionId);
@@ -1009,6 +1201,7 @@ const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => 
   const sourceFolderOptions = groupingManifest?.sourceFolderOptions ?? DEFAULT_SOURCE_FOLDER_OPTIONS;
   const sourceSessionId = compressionSessionId ?? groupingSessionId;
   const mediaRows = listMediaRows(sourceSessionId);
+  const trashRows = listDeletedMediaRows(sourceSessionId);
   const folders = getFolderRows(groupingSessionId);
   const counts = new Map<string, number>();
 
@@ -1018,7 +1211,26 @@ const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => 
     }
   }
 
-  return {
+  const toWorkspaceItem = (row: MediaRow): GroupingWorkspaceItem => {
+    const outputPath = getOutputPath(session.output_dir, row.relative_path);
+    const captureDate = getCaptureDate(outputPath, row.relative_path);
+    const preservedStructure = row.target_group_label === null &&
+      isRowPreserved(session.source_dir, row, preservedDirectories, reorganizedDirectories);
+    return {
+      id: row.id,
+      sourcePath: row.source_path,
+      relativePath: row.relative_path,
+      outputPath,
+      fileName: path.basename(row.relative_path),
+      mediaType: row.media_type,
+      sizeBytes: row.size_bytes,
+      captureDate: captureDate ? formatDateLabel(captureDate).dateKey : row.capture_time,
+      targetGroupLabel: row.target_group_label,
+      preservedStructure
+    };
+  };
+
+  const workspace: GroupingWorkspace = {
     sessionId: groupingSessionId,
     sourceDir: session.source_dir,
     outputDir: session.output_dir,
@@ -1035,26 +1247,16 @@ const buildWorkspace = (groupingSessionId: string): GroupingWorkspace | null => 
       kind: folder.kind,
       itemCount: counts.get(folder.label) ?? 0
     })),
-    items: mediaRows.map((row) => {
-      const outputPath = getOutputPath(session.output_dir, row.relative_path);
-      const captureDate = getCaptureDate(outputPath, row.relative_path);
-      const preservedStructure = row.target_group_label === null &&
-        isRowPreserved(session.source_dir, row, preservedDirectories, reorganizedDirectories);
-      return {
-        id: row.id,
-        sourcePath: row.source_path,
-        relativePath: row.relative_path,
-        outputPath,
-        fileName: path.basename(row.relative_path),
-        mediaType: row.media_type,
-        sizeBytes: row.size_bytes,
-        captureDate: captureDate ? formatDateLabel(captureDate).dateKey : row.capture_time,
-        targetGroupLabel: row.target_group_label,
-        preservedStructure
-      };
-    }),
+    items: mediaRows.map(toWorkspaceItem),
+    trashItems: trashRows.map(toWorkspaceItem),
     templates: getTemplateRows()
   };
+
+  if (reconcilePreservedFolders && reconcilePromotedPreservedFolders(workspace)) {
+    return buildWorkspace(groupingSessionId, false);
+  }
+
+  return workspace;
 };
 
 export const createGroupingWorkspace = (request: GroupingWorkspaceRequest): GroupingWorkspace => {
@@ -1151,6 +1353,9 @@ export const reorganizeGroupingWorkspace = (sessionId: string, request: Grouping
 
 export const getGroupingWorkspace = (groupingSessionId: string) => buildWorkspace(groupingSessionId);
 
+const findGroupingWorkspaceItem = (workspace: GroupingWorkspace, itemId: string) =>
+  [...workspace.items, ...workspace.trashItems].find((candidate) => candidate.id === itemId);
+
 export const createGroupingFolder = (sessionId: string, label: string, kind: FolderKind = 'manual') => {
   runMigrations();
   return upsertFolder(sessionId, label, kind);
@@ -1230,20 +1435,61 @@ export const deleteGroupingFolder = (sessionId: string, folderId: string) => {
   return true;
 };
 
-export const assignGroupingItems = (sessionId: string, itemIds: string[], targetGroupLabel: string) => {
+export const assignGroupingItems = (
+  sessionId: string,
+  itemIds: string[],
+  targetGroupLabel: string,
+  targetPreservedScopePath?: string
+) => {
   runMigrations();
   const safeLabel = sanitizeFolderLabel(targetGroupLabel);
-  const sourceSessionId = getCompressionSourceSessionId(sessionId) ?? sessionId;
-  upsertFolder(sessionId, safeLabel, 'manual');
+  const workspace = buildWorkspace(sessionId);
 
-  for (const itemId of itemIds) {
-    upsertDecisionLabel(sourceSessionId, itemId, safeLabel, true);
+  if (!workspace) {
+    throw new Error('Grouping session not found.');
+  }
+
+  const assignedItemIds = new Set(itemIds);
+  if (targetPreservedScopePath) {
+    const requestedScope = resolveScopePath(workspace.sourceDir, targetPreservedScopePath);
+    const matchingScopes = workspace.preservedDirectories.filter(
+      (scopePath) => resolveScopePath(workspace.sourceDir, scopePath) === requestedScope
+    );
+
+    if (matchingScopes.length !== 1) {
+      throw new Error('Preserved destination folder not found in this grouping session.');
+    }
+
+    const scopeLabel = sanitizeFolderLabel(getPreservedScopeLabel(matchingScopes[0]));
+    if (scopeLabel.toLocaleLowerCase() !== safeLabel.toLocaleLowerCase()) {
+      throw new Error('Preserved destination folder does not match the requested album.');
+    }
+
+    for (const item of workspace.items) {
+      if (isWorkspaceItemInPreservedFolderScope(item, matchingScopes[0], workspace.sourceDir)) {
+        assignedItemIds.add(item.id);
+      }
+    }
+  }
+
+  const db = getDb();
+  const sourceSessionId = workspace.compressionSessionId ?? sessionId;
+  db.exec('BEGIN TRANSACTION');
+  try {
+    upsertFolder(sessionId, safeLabel, 'manual');
+    for (const itemId of assignedItemIds) {
+      upsertDecisionLabel(sourceSessionId, itemId, safeLabel, true);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
 
   return getGroupingWorkspace(sessionId);
 };
 
-export const deleteGroupingItems = (sessionId: string, itemIds: string[]) => {
+export const trashGroupingItems = (sessionId: string, itemIds: string[]) => {
   runMigrations();
 
   if (itemIds.length === 0) {
@@ -1452,6 +1698,7 @@ const removeEmptyDirectories = (directoryPath: string, rootPath: string) => {
 
 export const applyGroupingWorkspace = (sessionId: string) => {
   runMigrations();
+  assertBaselineMigrationIdle(sessionId);
   const db = getDb();
   const workspace = getGroupingWorkspace(sessionId);
 
@@ -1461,45 +1708,57 @@ export const applyGroupingWorkspace = (sessionId: string) => {
 
   const timestamp = nowIso();
   const moved: Array<{ itemId: string; from: string; to: string }> = [];
-  const deleted: Array<{ itemId: string; path: string }> = [];
+  const trashed: Array<{ itemId: string; from: string; to: string }> = [];
   const sourceSessionId = workspace.compressionSessionId ?? sessionId;
   ensureGroupingBaselines(sessionId, sourceSessionId);
   const baselines = getGroupingBaselines(sessionId);
   const deletedRows = listDeletedMediaRows(sourceSessionId);
   const targetPathPlan = buildGroupingTargetPathPlan(workspace, baselines);
-  ensureGroupingBaselineBackups(sessionId, workspace.outputDir, [...workspace.items.map((item) => ({
-    id: item.id,
-    source_path: item.sourcePath,
-    relative_path: item.relativePath,
-    media_type: item.mediaType,
-    size_bytes: item.sizeBytes,
-    capture_time: item.captureDate,
-    target_group_label: item.targetGroupLabel
-  })), ...deletedRows], baselines);
 
   for (const row of deletedRows) {
-    const deletedPath = getOutputPath(workspace.outputDir, row.relative_path);
+    const baseline = baselines.get(row.id);
+    const sourcePath = getOutputPath(workspace.outputDir, row.relative_path);
+    const targetPath = getGroupingTrashPath(
+      workspace.outputDir,
+      sessionId,
+      baseline?.initial_relative_path ?? row.relative_path
+    );
+    const trashRoot = getGroupingTrashRoot(workspace.outputDir, sessionId);
 
-    if (!isPathInside(workspace.outputDir, deletedPath)) {
-      throw new Error('Refusing to delete media outside the destination folder.');
+    if (!isPathInside(workspace.outputDir, sourcePath) || !isPathInside(trashRoot, targetPath)) {
+      throw new Error('Refusing to move media outside the grouping trash folder.');
     }
 
-    if (fs.existsSync(deletedPath)) {
-      fs.rmSync(deletedPath, { force: true });
-      deleted.push({ itemId: row.id, path: deletedPath });
+    let errorMessage: string | null = null;
+    if (normalizePath(sourcePath) !== normalizePath(targetPath)) {
+      if (fs.existsSync(sourcePath) && fs.existsSync(targetPath)) {
+        errorMessage = 'Grouping trash target already exists.';
+      } else if (fs.existsSync(sourcePath)) {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.renameSync(sourcePath, targetPath);
+        trashed.push({ itemId: row.id, from: sourcePath, to: targetPath });
+      } else if (!fs.existsSync(targetPath)) {
+        errorMessage = 'Output file not found.';
+      }
     }
 
     db.prepare(
       `
         INSERT INTO item_stage_status (id, session_id, item_id, stage, status, attempt_count, last_error, updated_at)
-        VALUES (?, ?, ?, 'group', 'skipped', 1, NULL, ?)
+        VALUES (?, ?, ?, 'group', ?, 1, ?, ?)
         ON CONFLICT(session_id, item_id, stage) DO UPDATE SET
           status = excluded.status,
           attempt_count = item_stage_status.attempt_count + 1,
           last_error = excluded.last_error,
           updated_at = excluded.updated_at
       `
-    ).run(randomUUID(), sessionId, row.id, timestamp);
+    ).run(randomUUID(), sessionId, row.id, errorMessage ? 'failed' : 'skipped', errorMessage, timestamp);
+
+    if (!errorMessage) {
+      db.prepare('UPDATE media_items SET relative_path = ?, updated_at = ? WHERE session_id = ? AND id = ?').run(
+        path.relative(workspace.outputDir, targetPath), timestamp, sourceSessionId, row.id
+      );
+    }
   }
 
   for (const item of workspace.items) {
@@ -1617,7 +1876,7 @@ export const applyGroupingWorkspace = (sessionId: string) => {
       },
       summary: {
         movedItems: moved.length,
-        deletedItems: deleted.length,
+        trashedItems: trashed.length,
         failedItems: failed.total
       }
     }),
@@ -1657,7 +1916,7 @@ export const applyGroupingWorkspace = (sessionId: string) => {
     sessionId,
     status: nextStatus,
     movedItems: moved.length,
-    deletedItems: deleted.length,
+    trashedItems: trashed.length,
     failedItems: failed.total,
     sourceSessionId,
     verification
@@ -1666,6 +1925,7 @@ export const applyGroupingWorkspace = (sessionId: string) => {
 
 export const resetGroupingWorkspace = (sessionId: string) => {
   runMigrations();
+  assertBaselineMigrationIdle(sessionId);
   const db = getDb();
   const workspace = getGroupingWorkspace(sessionId);
 
@@ -1723,7 +1983,7 @@ export const resetGroupingWorkspace = (sessionId: string) => {
         throw new Error('Refusing to restore media from outside the baseline folder.');
       }
 
-      fs.copyFileSync(backupPath, targetPath);
+      fs.renameSync(backupPath, targetPath);
       restoredItems += 1;
     } else {
       errors.push({
@@ -1865,7 +2125,7 @@ export const getGroupingMediaPath = (sessionId: string, itemId: string) => {
     return null;
   }
 
-  const item = workspace.items.find((candidate) => candidate.id === itemId);
+  const item = findGroupingWorkspaceItem(workspace, itemId);
 
   if (!item || !MEDIA_EXTENSIONS.has(path.extname(item.outputPath).toLowerCase())) {
     return null;
@@ -2030,7 +2290,7 @@ export const getGroupingPreviewPath = async (sessionId: string, itemId: string) 
     return null;
   }
 
-  const item = workspace.items.find((candidate) => candidate.id === itemId);
+  const item = findGroupingWorkspaceItem(workspace, itemId);
 
   if (!item || item.mediaType !== 'image') {
     return null;
@@ -2086,7 +2346,7 @@ export const getGroupingThumbnailPath = async (sessionId: string, itemId: string
     return null;
   }
 
-  const item = workspace.items.find((candidate) => candidate.id === itemId);
+  const item = findGroupingWorkspaceItem(workspace, itemId);
 
   if (!item || item.mediaType !== 'image') {
     return null;

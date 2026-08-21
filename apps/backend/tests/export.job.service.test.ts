@@ -17,9 +17,11 @@ const resetFolders = () => {
   fs.rmSync(destinationRoot, { recursive: true, force: true });
   fs.mkdirSync(path.join(sourceRoot, '2026.04 - Trip'), { recursive: true });
   fs.mkdirSync(path.join(sourceRoot, '.media-organizer'), { recursive: true });
+  fs.mkdirSync(path.join(sourceRoot, '.media-organizer', 'trash', 'session'), { recursive: true });
   fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
   fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'video-a.mp4'), 'video-a');
   fs.writeFileSync(path.join(sourceRoot, '.media-organizer', 'manifest.json'), '{}');
+  fs.writeFileSync(path.join(sourceRoot, '.media-organizer', 'trash', 'session', 'discarded.jpg'), 'discarded');
 };
 
 beforeEach(() => {
@@ -35,8 +37,8 @@ afterEach(() => {
   resetDbForTests();
 });
 
-test('collectExportFilePlan preserves nested relative paths and ignores internal manifests', async () => {
-  const { collectExportFilePlan } = await import('../src/pipeline/export/exportJob.service.js');
+test('export plans preserve nested relative paths and ignore internal manifests and trash', async () => {
+  const { collectExportFilePlan, collectGooglePhotosFilePlan } = await import('../src/pipeline/export/exportJob.service.js');
 
   const plan = collectExportFilePlan(sourceRoot, destinationRoot);
 
@@ -46,6 +48,7 @@ test('collectExportFilePlan preserves nested relative paths and ignores internal
     path.join('2026.04 - Trip', 'video-a.mp4')
   ]);
   assert.ok(plan.every((item) => item.destinationPath.startsWith(destinationRoot)));
+  assert.equal(collectGooglePhotosFilePlan(sourceRoot).length, 2);
 });
 
 test('createExportJob links the grouping execution and stores stable coverage metadata', async () => {
