@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { InfoTooltip } from '../components/InfoTooltip';
+import { GroupingMoveMenu, type GroupingMoveDestination } from '../components/GroupingMoveMenu';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
@@ -122,12 +123,6 @@ type GroupingSidebarEntry =
       activeLabel: string;
       folder: GroupingWorkspaceFolder;
     };
-
-type GroupingMoveDestination = {
-  key: string;
-  label: string;
-  preservedScopePath?: string;
-};
 
 const getPreservedFolderActiveLabel = (path: string) => `${PRESERVED_FOLDER_PREFIX}${path}`;
 
@@ -2174,23 +2169,12 @@ export const GroupingPage = () => {
           {selectedItems.length > 0 && (
             <div className="grouping-selection-bar">
               <strong>{t('grouping.selected', { count: selectedItems.length })}</strong>
-              <select
-                className="grouping-select"
-                value=""
-                onChange={(event) => {
-                  if (event.target.value) {
-                    void handleMoveSelected(event.target.value);
-                  }
-                }}
+              <GroupingMoveMenu
+                destinations={moveDestinationEntries}
+                label={t('grouping.moveSelected')}
                 disabled={!workspace || !canMutateGrouping}
-              >
-                <option value="">{t('grouping.moveSelected')}</option>
-                {moveDestinationEntries.map((entry) => (
-                  <option key={entry.key} value={entry.key}>
-                    {entry.label}
-                  </option>
-                ))}
-              </select>
+                onSelect={(destination) => handleMoveSelected(destination.key)}
+              />
               {activeFolderLabel !== TRASH_FOLDER_LABEL && (
                 <button className="btn btn-danger-secondary" type="button" onClick={() => void handleTrashSelected()} disabled={!canMutateGrouping}>
                   {t('grouping.moveToTrash')}
@@ -2311,24 +2295,12 @@ export const GroupingPage = () => {
               <button className="btn btn-secondary" type="button" onClick={showNextPreview} disabled={!canShowNextPreview}>
                 {t('grouping.previewNext')}
               </button>
-              <select
-                className="grouping-select"
-                value=""
-                onChange={(event) => {
-                  if (event.target.value) {
-                    void handleMovePreviewItem(event.target.value);
-                  }
-                }}
-                disabled={!canMutateGrouping || moveDestinationEntries.length === 0}
-                aria-label={t('grouping.movePreview')}
-              >
-                <option value="">{t('grouping.movePreview')}</option>
-                {moveDestinationEntries.map((entry) => (
-                  <option key={entry.key} value={entry.key}>
-                    {entry.label}
-                  </option>
-                ))}
-              </select>
+              <GroupingMoveMenu
+                destinations={moveDestinationEntries}
+                label={t('grouping.movePreview')}
+                disabled={!canMutateGrouping}
+                onSelect={(destination) => handleMovePreviewItem(destination.key)}
+              />
               {activeFolderLabel !== TRASH_FOLDER_LABEL && (
                 <button
                   className="btn btn-danger-secondary"

@@ -2907,13 +2907,86 @@ body {
 }
 
 .grouping-search,
-.grouping-select {
+.grouping-move-menu-trigger {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
   color: var(--text);
   padding: 9px 10px;
   font-size: 13px;
+}
+
+.grouping-move-menu {
+  position: relative;
+  min-width: 190px;
+}
+
+.grouping-move-menu-trigger {
+  width: 100%;
+  min-height: 35px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+}
+
+.grouping-move-menu-trigger:hover:not(:disabled),
+.grouping-move-menu-trigger:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.grouping-move-menu-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.grouping-move-menu-chevron {
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  flex: 0 0 auto;
+  transform: rotate(45deg) translate(-2px, 2px);
+}
+
+.grouping-move-menu-options {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  min-width: 100%;
+  max-width: min(360px, 80vw);
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--soft-shadow);
+  padding: 5px;
+}
+
+.grouping-move-menu-option {
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  display: block;
+  padding: 9px 10px;
+  text-align: left;
+  white-space: normal;
+}
+
+.grouping-move-menu-option:hover,
+.grouping-move-menu-option:focus-visible {
+  background: var(--accent-light);
+  color: var(--text);
+  outline: none;
 }
 
 .grouping-search {
@@ -3955,7 +4028,7 @@ body {
   flex-wrap: wrap;
 }
 
-.grouping-modal-actions .grouping-select {
+.grouping-modal-actions .grouping-move-menu {
   min-width: 190px;
   margin-left: auto;
 }
@@ -5064,11 +5137,18 @@ body {
   }
 
   .grouping-search,
-  .grouping-select,
+  .grouping-move-menu,
   .grouping-header-actions .btn,
   .grouping-selection-bar .btn,
   .grouping-toolbar .btn {
     width: 100%;
+  }
+
+  .grouping-move-menu-options {
+    left: 0;
+    right: auto;
+    width: 100%;
+    max-width: none;
   }
 
   .grouping-selection-bar strong {

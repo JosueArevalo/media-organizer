@@ -13,6 +13,8 @@ pnpm-debug.log*
 # Build and tooling caches
 *.tsbuildinfo
 coverage/
+.playwright-results/
+playwright-report/
 apps/**/.vite/
 build/
 release/
