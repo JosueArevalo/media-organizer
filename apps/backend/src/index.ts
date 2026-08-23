@@ -858,7 +858,7 @@ export const createBackendServer = (appliedMigrations = runMigrations()) => {
           return;
         }
 
-        streamMediaFile(req, res, media.path, 'private, max-age=3600', {
+        streamMediaFile(req, res, media.path, 'no-store', {
           limitOpenEndedVideoRange: usage === 'poster'
         });
       } catch (error) {

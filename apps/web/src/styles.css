@@ -3969,12 +3969,24 @@ body {
   overflow: hidden;
 }
 
+.grouping-modal-stage > * {
+  grid-area: 1 / 1;
+}
+
 .grouping-modal-media {
   max-width: 100%;
   max-height: 78vh;
   margin: 0 auto;
   display: block;
   background: #000000;
+}
+
+.grouping-modal-media.is-loading {
+  visibility: hidden;
+}
+
+.grouping-modal-loading {
+  z-index: 1;
 }
 
 .grouping-modal-unsupported {

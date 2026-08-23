@@ -374,6 +374,7 @@ for (const extension of ['mp4', 'mov'] as const) {
     assert.equal(complete.statusCode, 206);
     assert.equal(complete.headers['content-type'], expectedType);
     assert.equal(complete.headers['accept-ranges'], 'bytes');
+    assert.equal(complete.headers['cache-control'], 'no-store');
     assert.equal(complete.headers['content-length'], String(content.length));
     assert.equal(complete.headers['content-range'], `bytes 0-15/${content.length}`);
     assert.notEqual(complete.headers.connection, 'close');
@@ -382,6 +383,7 @@ for (const extension of ['mp4', 'mov'] as const) {
     const initial = await request({ path: mediaPath, headers: { Range: 'bytes=0-3' } });
     assert.equal(initial.statusCode, 206);
     assert.equal(initial.headers['content-length'], '4');
+    assert.equal(initial.headers['cache-control'], 'no-store');
     assert.equal(initial.headers['content-range'], `bytes 0-3/${content.length}`);
     assert.deepEqual(initial.bytes, content.subarray(0, 4));
 
@@ -413,6 +415,22 @@ for (const extension of ['mp4', 'mov'] as const) {
     assert.equal(invalid.bytes.length, 0);
   });
 }
+
+test('grouping poster requests without a range are capped at 12 MiB', async () => {
+  const posterLimit = 12 * 1024 * 1024;
+  const mediaPath = await createGroupingVideo(
+    'mp4',
+    Buffer.alloc(posterLimit + 1024, 'p'),
+    'poster-limit'
+  );
+  const response = await request({ path: `${mediaPath}?usage=poster` });
+
+  assert.equal(response.statusCode, 206);
+  assert.equal(response.headers['cache-control'], 'no-store');
+  assert.equal(response.headers['content-length'], String(posterLimit));
+  assert.equal(response.headers['content-range'], `bytes 0-${posterLimit - 1}/${posterLimit + 1024}`);
+  assert.equal(response.bytes.length, posterLimit);
+});
 
 test('backend health remains responsive while a video poster is served', async () => {
   const mediaPath = await createGroupingVideo('mp4', Buffer.alloc(2 * 1024 * 1024, 'p'), 'poster-health');

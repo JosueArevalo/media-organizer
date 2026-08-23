@@ -24,6 +24,9 @@ test('Grouping grid uses thumbnails and avoids persistent video streams', () => 
   assert.match(pageSource, /grouping-media-type-badge/);
   assert.match(posterServiceSource, /MAX_CONCURRENT_POSTERS = 1/);
   assert.match(posterServiceSource, /cleanupVideo/);
+  assert.doesNotMatch(posterServiceSource, /response\.blob\(\)/);
+  assert.doesNotMatch(posterServiceSource, /createObjectURL/);
+  assert.doesNotMatch(posterServiceSource, /fallbackUrl/);
 
   const previewComponentStart = pageSource.indexOf('const GroupingMediaPreview =');
   const previewComponentEnd = pageSource.indexOf('const ensureDirectoryNode', previewComponentStart);
@@ -40,10 +43,12 @@ test('Grouping modal cleans the active video stream on close or item changes', (
   assert.match(pageSource, /const modalVideoRef = useRef<HTMLVideoElement/);
   assert.match(pageSource, /cleanupModalVideo/);
   assert.match(pageSource, /video\.removeAttribute\('src'\)/);
-  assert.match(pageSource, /modalVideoObjectUrl/);
-  assert.match(pageSource, /setModalVideoObjectUrl/);
   assert.match(pageSource, /key=\{previewItem\.id\}/);
   assert.match(pageSource, /ref=\{modalVideoRef\}/);
-  assert.match(pageSource, /src=\{modalVideoObjectUrl\}/);
-  assert.match(pageSource, /fetch\(mediaUrl/);
+  assert.match(pageSource, /src=\{mediaUrl\}/);
+  assert.match(pageSource, /preload="metadata"/);
+  assert.match(pageSource, /onLoadedData/);
+  assert.doesNotMatch(pageSource, /response\.blob\(\)/);
+  assert.doesNotMatch(pageSource, /createObjectURL/);
+  assert.doesNotMatch(pageSource, /modalVideoObjectUrl/);
 });
