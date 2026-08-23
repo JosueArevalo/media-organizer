@@ -378,6 +378,20 @@ On Windows PowerShell, replace `npm` with `npm.cmd` if script execution is restr
 
 </details>
 
+<details>
+<summary><strong>Build the Windows executable</strong></summary>
+<br>
+
+From the repository root on Windows, build the portable x64 executable with:
+
+```powershell
+npm.cmd run desktop:package:win
+```
+
+The command builds the backend, frontend, desktop application, and packaged media worker, then verifies the result. The generated executable is written to `release/` as `Media-Organizer-<version>-windows-x64-portable.exe`. The existing contents of `release/` are removed before packaging.
+
+</details>
+
 ## 🔐 Security model
 
 V1 is local-first and single-user:
