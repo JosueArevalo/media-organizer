@@ -300,6 +300,25 @@ Do not run `npm audit fix --force` as part of normal setup. It can introduce maj
 
 </details>
 
+<details>
+<summary><strong>Inspect detailed Grouping media traces</strong></summary>
+<br>
+
+Routine video range requests are quiet by default. To troubleshoot poster or playback streaming, set `MEDIA_ORGANIZER_MEDIA_TRACE=1` before starting the application:
+
+```bash
+MEDIA_ORGANIZER_MEDIA_TRACE=1 npm run dev
+```
+
+In PowerShell:
+
+```powershell
+$env:MEDIA_ORGANIZER_MEDIA_TRACE = '1'
+npm.cmd run dev
+```
+
+</details>
+
 ## 🏗️ Architecture
 
 Media Organizer is a TypeScript modular monolith with a deliberately simple flow:
