@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { createDesktopMediaResponse, resolveDesktopMediaDescriptorTarget } from '../src/desktopMedia.js';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-desktop-media-'));
+const tempRoot = createTrackedTestTempDirectory('media-organizer-desktop-media-');
 const content = Buffer.from('0123456789abcdef');
 const mediaPaths = {
   mp4: path.join(tempRoot, 'video.mp4'),
@@ -14,7 +14,7 @@ const mediaPaths = {
 fs.writeFileSync(mediaPaths.mp4, content);
 fs.writeFileSync(mediaPaths.mov, content);
 
-after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+after(() => cleanupTrackedTestTempDirectories());
 
 test('resolves only grouping media requests to the private descriptor endpoint', () => {
   assert.equal(

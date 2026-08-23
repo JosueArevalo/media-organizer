@@ -46,15 +46,19 @@ const run = (name, value, expected = '') => new Promise((resolve, reject) => {
   });
 });
 
-const first = await run('first', 'persisted');
-assert.equal(first.status, 200);
-assert.equal(first.runtime.mode, 'desktop');
-assert.equal(first.rendered, true);
-assert.equal(first.bridgeAvailable, true);
-assert.equal(first.backendState?.status, 'online');
-const second = await run('second', 'persisted', 'persisted');
-assert.equal(second.previous, 'persisted');
-assert.equal(second.rendered, true);
-assert.equal(second.bridgeAvailable, true);
-assert.equal(second.backendState?.status, 'online');
-console.log(`Desktop smoke test passed (${source} executable).`);
+try {
+  const first = await run('first', 'persisted');
+  assert.equal(first.status, 200);
+  assert.equal(first.runtime.mode, 'desktop');
+  assert.equal(first.rendered, true);
+  assert.equal(first.bridgeAvailable, true);
+  assert.equal(first.backendState?.status, 'online');
+  const second = await run('second', 'persisted', 'persisted');
+  assert.equal(second.previous, 'persisted');
+  assert.equal(second.rendered, true);
+  assert.equal(second.bridgeAvailable, true);
+  assert.equal(second.backendState?.status, 'online');
+  console.log(`Desktop smoke test passed (${source} executable).`);
+} finally {
+  fs.rmSync(temp, { recursive: true, force: true });
+}

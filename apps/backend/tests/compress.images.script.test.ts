@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import sharp from 'sharp';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
+
+after(() => cleanupTrackedTestTempDirectories());
 
 type ScriptItem = {
   source: string;
@@ -192,7 +194,7 @@ cp "$last" "$out"
 };
 
 test('compress_images converts selected HEIC to JPG and compresses PNG with pngquant', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-script-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-script-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -255,7 +257,7 @@ test('compress_images converts selected HEIC to JPG and compresses PNG with pngq
 });
 
 test('compress_images copy policy preserves PNG originals without invoking pngquant', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-png-copy-policy-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-png-copy-policy-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   fs.mkdirSync(sourceDir, { recursive: true });
@@ -280,7 +282,7 @@ test('compress_images copy policy preserves PNG originals without invoking pngqu
 });
 
 test('compress_images reports failed PNG compression and keeps a copied fallback output', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-png-fail-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-png-fail-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -320,7 +322,7 @@ exit 1
 });
 
 test('compress_images copy policy preserves JPEG and HEIC originals without invoking tools', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-copy-policy-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-copy-policy-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   fs.mkdirSync(sourceDir, { recursive: true });
@@ -349,7 +351,7 @@ test('compress_images copy policy preserves JPEG and HEIC originals without invo
 });
 
 test('compress_images marks excluded selected-scope files as copy operations', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-script-scope-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-script-scope-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -404,7 +406,7 @@ test('compress_images marks excluded selected-scope files as copy operations', (
 });
 
 test('compress_images decodes JPEG through djpeg when cjpeg rejects JPEG input', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-djpeg-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-djpeg-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -452,7 +454,7 @@ test('compress_images decodes JPEG through djpeg when cjpeg rejects JPEG input',
 });
 
 test('compress_images skips unchanged copy-through outputs', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-script-copy-skip-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-script-copy-skip-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -509,7 +511,7 @@ test('compress_images skips unchanged copy-through outputs', () => {
 });
 
 test('compress_images resets copied EXIF orientation after HEIC auto-orient', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-orientation-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-orientation-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -555,7 +557,7 @@ test('compress_images resets copied EXIF orientation after HEIC auto-orient', ()
 });
 
 test('compress_images uses sharp helper for JPEG files with EXIF orientation', async () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-jpeg-orientation-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-jpeg-orientation-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   fs.mkdirSync(sourceDir, { recursive: true });
@@ -600,7 +602,7 @@ test('compress_images uses sharp helper for JPEG files with EXIF orientation', a
 });
 
 test('compress_images keeps mozjpeg path for JPEG files without EXIF orientation', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-jpeg-standard-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-jpeg-standard-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');

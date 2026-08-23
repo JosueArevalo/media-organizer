@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http, { type Server } from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { after, afterEach, beforeEach, test } from 'node:test';
@@ -10,6 +9,7 @@ import { MAX_JSON_BODY_BYTES } from '../src/http/localAccess.js';
 import { getDb, resetDbForTests } from '../src/state/db.js';
 import { createBackendServer } from '../src/index.js';
 import { getActiveGroupingMediaOperations } from '../src/pipeline/grouping/groupingMediaDiagnostics.js';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
 
 type TestResponse = {
   statusCode: number;
@@ -18,7 +18,7 @@ type TestResponse = {
   bytes: Buffer;
 };
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-http-security-test-'));
+const tempRoot = createTrackedTestTempDirectory('media-organizer-http-security-test-');
 const tempDataDir = path.join(tempRoot, 'data');
 const tempDbPath = path.join(tempDataDir, 'test.sqlite');
 const migrationsDir = path.resolve(process.cwd(), 'src', 'state', 'migrations');
@@ -278,7 +278,7 @@ afterEach(async () => {
   console.warn = originalConsoleWarn;
 });
 
-after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+after(() => cleanupTrackedTestTempDirectories());
 
 test('rejects requests from external origins', async () => {
   const response = await request({

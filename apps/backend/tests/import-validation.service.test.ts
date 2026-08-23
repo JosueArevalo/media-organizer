@@ -1,21 +1,28 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, test } from 'node:test';
+import { after, afterEach, beforeEach, test } from 'node:test';
 import { validateImportFolders } from '../src/pipeline/import/importValidation.service.js';
+import {
+  cleanupTrackedTestTempDirectory,
+  cleanupTrackedTestTempDirectories,
+  createTrackedTestTempDirectory
+} from '../../../test-utils/tempDirectory.js';
 
 let tempRoot = '';
 
 beforeEach(() => {
-  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-import-validation-test-'));
+  tempRoot = createTrackedTestTempDirectory('media-organizer-import-validation-test-');
 });
 
 afterEach(() => {
   if (tempRoot) {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
+    cleanupTrackedTestTempDirectory(tempRoot);
+    tempRoot = '';
   }
 });
+
+after(() => cleanupTrackedTestTempDirectories());
 
 test('validateImportFolders rejects a missing source', async () => {
   const destinationDir = path.join(tempRoot, 'Output');

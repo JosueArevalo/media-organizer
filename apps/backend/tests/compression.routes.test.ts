@@ -1,19 +1,37 @@
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { beforeEach, test } from 'node:test';
+import { after, beforeEach, test } from 'node:test';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleCompressionRoutes } from '../src/pipeline/compression/compression.routes.js';
 import { resetDbForTests } from '../src/state/db.js';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-compression-routes-test-'));
+const tempRoot = createTrackedTestTempDirectory('media-organizer-compression-routes-test-');
+after(() => {
+  resetDbForTests();
+  cleanupTrackedTestTempDirectories();
+});
 const tempDataDir = path.join(tempRoot, 'data');
 const tempDbPath = path.join(tempDataDir, 'test.sqlite');
 const migrationsDir = path.resolve(process.cwd(), 'src', 'state', 'migrations');
 const sourceDir = path.join(tempRoot, 'source');
 const outputDir = path.join(tempRoot, 'output');
+
+const waitForCompressionSessionToSettle = async (sessionId: string) => {
+  const { getCompressionSession } = await import('../src/pipeline/compression/compressionJob.service.js');
+  const deadline = Date.now() + 5000;
+
+  while (Date.now() < deadline) {
+    if (getCompressionSession(sessionId)?.session.status !== 'running') {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error(`Compression session ${sessionId} did not settle before test teardown.`);
+};
 
 type CapturedResponse = {
   statusCode: number;
@@ -95,12 +113,17 @@ test('compression route accepts an explicit copy-only policy with empty tool com
 
   const captured = await responsePromise;
   assert.equal(captured.statusCode, 201);
-  assert.deepEqual(JSON.parse(captured.body).manifest.processingPolicy, {
+  const payload = JSON.parse(captured.body) as {
+    session: { id: string };
+    manifest: { processingPolicy: Record<string, string> };
+  };
+  assert.deepEqual(payload.manifest.processingPolicy, {
     jpeg: 'copy',
     png: 'copy',
     heic: 'copy',
     video: 'copy'
   });
+  await waitForCompressionSessionToSettle(payload.session.id);
 });
 
 test('compression session route forwards optional HEIC tool commands into the manifest', async () => {
@@ -129,6 +152,7 @@ test('compression session route forwards optional HEIC tool commands into the ma
   assert.equal(captured.statusCode, 201);
 
   const payload = JSON.parse(captured.body) as {
+    session: { id: string };
     manifest: {
       pngToolCommand: string;
       imageMagickCommand: string;
@@ -141,6 +165,7 @@ test('compression session route forwards optional HEIC tool commands into the ma
   assert.equal(payload.manifest.imageMagickCommand, 'D:\\Tools\\ImageMagick\\magick.exe');
   assert.equal(payload.manifest.exifToolCommand, 'D:\\Tools\\ExifTool\\exiftool.exe');
   assert.equal(payload.manifest.videoOutputFormatMode, 'mp4');
+  await waitForCompressionSessionToSettle(payload.session.id);
 });
 
 test('active session route returns the latest resumable compression session with progress', async () => {
@@ -246,6 +271,7 @@ test('resume route accepts a resumable session and returns initial progress', as
   assert.equal(payload.session.id, started.session.id);
   assert.equal(payload.session.status, 'running');
   assert.equal(payload.progress?.sessionId, started.session.id);
+  await waitForCompressionSessionToSettle(started.session.id);
 });
 
 test('pause route pauses a running compression session and returns progress', async () => {

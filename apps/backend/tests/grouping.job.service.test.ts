@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, test } from 'node:test';
+import { after, afterEach, beforeEach, test } from 'node:test';
 import { getDb, resetDbForTests } from '../src/state/db.js';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
 import { runMigrations } from '../src/state/migrations/runMigrations.js';
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-grouping-test-'));
+const tempRoot = createTrackedTestTempDirectory('media-organizer-grouping-test-');
+after(() => {
+  resetDbForTests();
+  cleanupTrackedTestTempDirectories();
+});
 const tempDataDir = path.join(tempRoot, 'data');
 const tempDbPath = path.join(tempDataDir, 'test.sqlite');
 const migrationsDir = path.resolve(process.cwd(), 'src', 'state', 'migrations');
