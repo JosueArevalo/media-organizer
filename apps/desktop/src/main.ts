@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, clipboard, ipcMain, protocol, shell, utilityProcess, type IpcMainInvokeEvent, type UtilityProcess } from 'electron';
 import { createBackendLifecycle, type BackendHandle, type BackendLifecycleSnapshot } from './backendLifecycle.js';
+import { buildDesktopSmokeProbeScript } from './desktopSmoke.js';
 import { readLogTail, redactDiagnostics } from './diagnostics.js';
 import { isTrustedDesktopUrl } from './ipcSecurity.js';
 import { createDesktopLogger } from './logging.js';
@@ -272,21 +273,9 @@ void app.whenReady().then(async () => {
     if (smokeReport) {
       const expectedMarker = process.env.MEDIA_ORGANIZER_SMOKE_EXPECT?.trim() || null;
       const marker = process.env.MEDIA_ORGANIZER_SMOKE_VALUE?.trim() || 'desktop-smoke-marker';
-      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
-        const previous = localStorage.getItem('media-organizer:desktop-smoke');
-        localStorage.setItem('media-organizer:desktop-smoke', ${JSON.stringify(marker)});
-        const response = await fetch('/api/system/runtime');
-        const bridge = window.mediaOrganizerDesktop;
-        const backendState = bridge ? await bridge.getBackendState() : null;
-        return {
-          previous,
-          runtime: await response.json(),
-          status: response.status,
-          rendered: Boolean(document.querySelector('#root')?.childElementCount),
-          bridgeAvailable: Boolean(bridge),
-          backendState
-        };
-      })()`);
+      const result = await mainWindow.webContents.executeJavaScript(
+        buildDesktopSmokeProbeScript({ marker })
+      );
       fs.writeFileSync(smokeReport, JSON.stringify({ ...result, expectedMarker }, null, 2));
       if (expectedMarker && result.previous !== expectedMarker) process.exitCode = 1;
       app.quit();
