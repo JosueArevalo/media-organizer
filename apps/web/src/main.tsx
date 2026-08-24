@@ -8,6 +8,23 @@ initializeDocumentTheme();
 
 let hasRenderedApp = false;
 
+declare global {
+  interface Window {
+    __mediaOrganizerReady?: boolean;
+    __mediaOrganizerBootstrapFailed?: string | boolean;
+  }
+}
+
+const markRendererReady = () => {
+  window.__mediaOrganizerReady = true;
+  window.__mediaOrganizerBootstrapFailed = false;
+};
+
+const markBootstrapFailure = (error: unknown) => {
+  window.__mediaOrganizerReady = false;
+  window.__mediaOrganizerBootstrapFailed = error instanceof Error ? error.message : String(error);
+};
+
 type ErrorBoundaryProps = {
   children: React.ReactNode;
 };
@@ -136,13 +153,18 @@ const renderBootstrapError = (error: unknown) => {
 };
 
 if (typeof window !== 'undefined') {
+  window.__mediaOrganizerReady = false;
+  window.__mediaOrganizerBootstrapFailed = false;
+
   window.addEventListener('error', (event) => {
     console.error('Global runtime error:', event.error ?? event.message);
+    markBootstrapFailure(event.error ?? event.message);
     renderBootstrapError(event.error ?? event.message);
   });
 
   window.addEventListener('unhandledrejection', (event) => {
     console.error('Unhandled promise rejection:', event.reason);
+    markBootstrapFailure(event.reason);
 
     if (!hasRenderedApp) {
       renderBootstrapError(event.reason);
@@ -172,9 +194,11 @@ const bootstrap = async () => {
         </React.StrictMode>
       </AppRuntimeErrorBoundary>
     );
+    window.requestAnimationFrame(() => markRendererReady());
     hasRenderedApp = true;
   } catch (error) {
     console.error('Application bootstrap error:', error);
+    markBootstrapFailure(error);
     renderBootstrapError(error);
   }
 };
