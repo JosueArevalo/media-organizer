@@ -5,6 +5,6 @@ title: "Media Organizer"
 authors:
   - family-names: "Arevalo"
     given-names: "Josue"
-version: 0.1.0
+version: 0.2.0
 repository-code: "https://github.com/JosueArevalo/media-organizer"
 license: MIT
