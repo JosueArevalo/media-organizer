@@ -800,6 +800,7 @@ export const CompressionPage = () => {
         }
 
         const status = session.session.status;
+        setBackendError(null);
 
         if (status === 'completed') {
           completeCompressionSession();
@@ -1129,7 +1130,8 @@ export const CompressionPage = () => {
         try {
           // First, try to get progress
           const progress = await getCompressionProgressRequest(started.session.id);
-          
+
+          setBackendError(null);
           syncProgressData(progress);
 
           const status = progress.status;
@@ -1234,6 +1236,7 @@ export const CompressionPage = () => {
           }
 
           const progress = await getCompressionProgressRequest(sessionId);
+          setBackendError(null);
           syncProgressData(progress);
 
           const status = progress.status;
@@ -1698,11 +1701,11 @@ export const CompressionPage = () => {
                     <input
                       type="radio"
                       name="video-output-format"
-                      checked={videoOutputFormatMode === 'preserve'}
-                      onChange={() => setVideoOutputFormatMode('preserve')}
+                      checked={videoOutputFormatMode === 'mp4'}
+                      onChange={() => setVideoOutputFormatMode('mp4')}
                     />
                     <span className="page-option-label">
-                      <strong>{t('compression.videoOutputPreserve')}</strong> {t('compression.videoOutputPreserveHelp')}
+                      <strong>{t('compression.videoOutputMp4')}</strong> {t('compression.videoOutputMp4Help')}
                     </span>
                   </label>
 
@@ -1710,11 +1713,11 @@ export const CompressionPage = () => {
                     <input
                       type="radio"
                       name="video-output-format"
-                      checked={videoOutputFormatMode === 'mp4'}
-                      onChange={() => setVideoOutputFormatMode('mp4')}
+                      checked={videoOutputFormatMode === 'preserve'}
+                      onChange={() => setVideoOutputFormatMode('preserve')}
                     />
                     <span className="page-option-label">
-                      <strong>{t('compression.videoOutputMp4')}</strong> {t('compression.videoOutputMp4Help')}
+                      <strong>{t('compression.videoOutputPreserve')}</strong> {t('compression.videoOutputPreserveHelp')}
                     </span>
                   </label>
                 </div>

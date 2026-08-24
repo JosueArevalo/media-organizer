@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import sharp from 'sharp';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
+
+after(() => cleanupTrackedTestTempDirectories());
 
 type ScriptItem = {
   error?: string | null;
@@ -15,7 +17,7 @@ const repoRoot = path.resolve(process.cwd(), '..', '..');
 const scriptPath = path.join(repoRoot, 'scripts', 'media_tools', 'compress_images.py');
 
 test('compress_images reports missing oriented JPEG helper script without blaming mozjpeg', async () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-images-helper-missing-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-images-helper-missing-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   fs.mkdirSync(sourceDir, { recursive: true });

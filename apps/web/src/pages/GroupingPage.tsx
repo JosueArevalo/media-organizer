@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { InfoTooltip } from '../components/InfoTooltip';
+import { GroupingMoveMenu, type GroupingMoveDestination } from '../components/GroupingMoveMenu';
 import { useCompressionSessionState } from '../hooks/useCompressionJobState';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useFolderSelections } from '../hooks/useFolderSelections';
@@ -28,15 +29,18 @@ import {
   createGroupingTemplateRequest,
   createGroupingWorkspaceRequest,
   deleteGroupingFolderRequest,
-  deleteGroupingItemsRequest,
   deleteGroupingTemplateRequest,
+  getGroupingBaselineMigrationStatusRequest,
   getGroupingWorkspaceRequest,
   reorganizeGroupingWorkspaceRequest,
   renameGroupingFolderRequest,
   renamePreservedGroupingFolderScopeRequest,
   resetGroupingWorkspaceRequest,
+  startGroupingBaselineMigrationRequest,
+  trashGroupingItemsRequest,
   updateGroupingTemplateRequest,
   type GroupingFolderTemplate,
+  type GroupingBaselineMigrationStatus,
   type GroupingSingleDateHandling,
   type GroupingSourceFolderMode,
   type GroupingStrategy,
@@ -56,6 +60,8 @@ const formatBytes = (value: number) => {
 
   return `${size.toFixed(size >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 };
+
+const TRASH_FOLDER_LABEL = '__trash__';
 
 const sanitizeGroupingFolderLabel = (label: string) => {
   const sanitized = label
@@ -158,7 +164,7 @@ const isItemInPreservedFolderScope = (item: GroupingWorkspaceItem, scopePath: st
 
 const getItemsForFolderScope = (items: GroupingWorkspaceItem[], activeFolderLabel: string, sourceRootPath: string) =>
   items.filter((item) => {
-    if (activeFolderLabel === '__all__') {
+    if (activeFolderLabel === '__all__' || activeFolderLabel === TRASH_FOLDER_LABEL) {
       return true;
     }
 
@@ -351,11 +357,17 @@ const getFileExtensionLabel = (fileName: string, fallback: string) => {
   return extension ? extension.toUpperCase() : fallback;
 };
 
+const releaseVideoElement = (video: HTMLVideoElement | null) => {
+  if (!video) return;
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+};
+
 type GroupingMediaPreviewProps = {
   item: GroupingWorkspaceItem;
   imageThumbnailUrl: string;
   videoPosterSourceUrl: string;
-  videoPosterFallbackUrl: string;
   videoPosterCacheKey: string;
   hasPreviewFailed: boolean;
   previewUnavailableLabel: string;
@@ -367,7 +379,6 @@ const GroupingMediaPreview = ({
   item,
   imageThumbnailUrl,
   videoPosterSourceUrl,
-  videoPosterFallbackUrl,
   videoPosterCacheKey,
   hasPreviewFailed,
   previewUnavailableLabel,
@@ -395,7 +406,7 @@ const GroupingMediaPreview = ({
     let cancelled = false;
     const controller = new AbortController();
     const loadPoster = () => {
-      void generateVideoPoster(videoPosterCacheKey, videoPosterSourceUrl, videoPosterFallbackUrl, controller.signal)
+      void generateVideoPoster(videoPosterCacheKey, videoPosterSourceUrl, controller.signal)
         .then((posterUrl) => {
           if (!cancelled) setVideoPosterUrl(posterUrl);
         })
@@ -429,7 +440,7 @@ const GroupingMediaPreview = ({
       controller.abort();
       observer.disconnect();
     };
-  }, [hasPreviewFailed, item.id, item.mediaType, onPreviewFailed, videoPosterCacheKey, videoPosterFallbackUrl, videoPosterSourceUrl]);
+  }, [hasPreviewFailed, item.id, item.mediaType, onPreviewFailed, videoPosterCacheKey, videoPosterSourceUrl]);
 
   return (
     <button ref={previewRef} className="grouping-media-preview" type="button" onDoubleClick={onOpenPreview}>
@@ -600,6 +611,7 @@ export const GroupingPage = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [baselineMigration, setBaselineMigration] = useState<GroupingBaselineMigrationStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
@@ -614,7 +626,6 @@ export const GroupingPage = () => {
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(new Set());
   const [failedThumbnailIds, setFailedThumbnailIds] = useState<Set<string>>(new Set());
-  const [modalVideoObjectUrl, setModalVideoObjectUrl] = useState<string | null>(null);
   const [isLoadingModalVideo, setIsLoadingModalVideo] = useState(false);
   const [formDialog, setFormDialog] = useState<GroupingFormDialogState | null>(null);
   const [isSubmittingFormDialog, setIsSubmittingFormDialog] = useState(false);
@@ -640,7 +651,8 @@ export const GroupingPage = () => {
   const networkExportJobState = useExportJobState('network-folder', exportContext);
   const googlePhotosExportJobState = useExportJobState('google-photos', exportContext);
   const isExportActive = isGroupingReadOnlyForExport([networkExportJobState, googlePhotosExportJobState]);
-  const canMutateGrouping = !isExportActive;
+  const isBaselineMigrationRunning = baselineMigration?.status === 'running';
+  const canMutateGrouping = !isExportActive && !isBaselineMigrationRunning;
 
   const refreshWorkspace = useCallback(
     async (sessionId: string) => {
@@ -752,6 +764,45 @@ export const GroupingPage = () => {
   ]);
 
   useEffect(() => {
+    if (!workspace?.sessionId) return;
+
+    let isActive = true;
+    let timeoutId: number | null = null;
+
+    const poll = async () => {
+      try {
+        const status = await getGroupingBaselineMigrationStatusRequest(workspace.sessionId);
+        if (!isActive) return;
+        setBaselineMigration(status);
+        if (status.status === 'running') {
+          timeoutId = window.setTimeout(() => void poll(), 750);
+        } else if (status.status !== 'not_needed') {
+          await refreshWorkspace(workspace.sessionId);
+        }
+      } catch (error) {
+        if (isActive) setBackendError(error instanceof Error ? error.message : t('grouping.baselineMigrationError'));
+      }
+    };
+
+    const start = async () => {
+      try {
+        const status = await startGroupingBaselineMigrationRequest(workspace.sessionId);
+        if (!isActive) return;
+        setBaselineMigration(status);
+        if (status.status === 'running') timeoutId = window.setTimeout(() => void poll(), 750);
+      } catch (error) {
+        if (isActive) setBackendError(error instanceof Error ? error.message : t('grouping.baselineMigrationError'));
+      }
+    };
+
+    void start();
+    return () => {
+      isActive = false;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [refreshWorkspace, t, workspace?.sessionId]);
+
+  useEffect(() => {
     if (!isGroupingCompleted) {
       return;
     }
@@ -810,8 +861,17 @@ export const GroupingPage = () => {
     ].sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: 'base' }));
   }, [preservedFolderScopes, workspace]);
 
+  const moveDestinationEntries = useMemo<GroupingMoveDestination[]>(
+    () => sidebarEntries.map((entry) => ({
+      key: `${entry.kind}:${entry.key}`,
+      label: entry.label,
+      preservedScopePath: entry.kind === 'preserved' ? entry.scope.path : undefined
+    })),
+    [sidebarEntries]
+  );
+
   const activeFolder = useMemo(() => {
-    if (!workspace || activeFolderLabel === '__all__' || activePreservedFolder) {
+    if (!workspace || activeFolderLabel === '__all__' || activeFolderLabel === TRASH_FOLDER_LABEL || activePreservedFolder) {
       return null;
     }
 
@@ -829,6 +889,10 @@ export const GroupingPage = () => {
         : '__all__';
     }
 
+    if (preferredLabel === TRASH_FOLDER_LABEL) {
+      return TRASH_FOLDER_LABEL;
+    }
+
     if (getActivePreservedFolderPath(preferredLabel)) {
       return getItemsForFolderScope(nextWorkspace.items, preferredLabel, nextWorkspace.sourceDir).length > 0
         ? preferredLabel
@@ -843,7 +907,8 @@ export const GroupingPage = () => {
       return [];
     }
 
-    return getItemsForFolderScope(workspace.items, activeFolderLabel, sourceRootPath);
+    const scopedItems = activeFolderLabel === TRASH_FOLDER_LABEL ? workspace.trashItems : workspace.items;
+    return getItemsForFolderScope(scopedItems, activeFolderLabel, sourceRootPath);
   }, [activeFolderLabel, sourceRootPath, workspace]);
 
   const visibleItems = useMemo(() => {
@@ -871,7 +936,7 @@ export const GroupingPage = () => {
       return null;
     }
 
-    return workspace.items.find((item) => item.id === previewItemId) ?? null;
+    return [...workspace.items, ...workspace.trashItems].find((item) => item.id === previewItemId) ?? null;
   }, [previewItemId, workspace]);
 
   const previewIndex = previewItem ? folderScopeItems.findIndex((item) => item.id === previewItem.id) : -1;
@@ -884,7 +949,7 @@ export const GroupingPage = () => {
       return [];
     }
 
-    return workspace.items.filter((item) => selectedIds.has(item.id));
+    return [...workspace.items, ...workspace.trashItems].filter((item) => selectedIds.has(item.id));
   }, [selectedIds, workspace]);
 
   const directoryTree = useMemo(() => (workspace ? buildGroupingDirectoryTree(workspace) : null), [workspace]);
@@ -931,6 +996,10 @@ export const GroupingPage = () => {
 
     if (activeFolderLabel === '__unassigned__') {
       return t('grouping.noProposedFolder');
+    }
+
+    if (activeFolderLabel === TRASH_FOLDER_LABEL) {
+      return t('grouping.trash');
     }
 
     return activeFolder?.label ?? t('grouping.allMedia');
@@ -1078,13 +1147,18 @@ export const GroupingPage = () => {
     }
   };
 
-  const moveItemsToFolder = async (itemIds: string[], targetGroupLabel: string) => {
+  const moveItemsToDestination = async (itemIds: string[], destination: GroupingMoveDestination) => {
     if (!workspace || itemIds.length === 0 || !canMutateGrouping) return;
 
     const uniqueItemIds = Array.from(new Set(itemIds));
 
     try {
-      const nextWorkspace = await assignGroupingItemsRequest(workspace.sessionId, uniqueItemIds, targetGroupLabel);
+      const nextWorkspace = await assignGroupingItemsRequest(
+        workspace.sessionId,
+        uniqueItemIds,
+        destination.label,
+        destination.preservedScopePath
+      );
       setWorkspace(nextWorkspace);
       setSelectedIds(new Set());
       setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, activeFolderLabel));
@@ -1095,8 +1169,9 @@ export const GroupingPage = () => {
     }
   };
 
-  const handleMoveSelected = async (targetGroupLabel: string) => {
-    await moveItemsToFolder(Array.from(selectedIds), targetGroupLabel);
+  const handleMoveSelected = async (destinationKey: string) => {
+    const destination = moveDestinationEntries.find((entry) => entry.key === destinationKey);
+    if (destination) await moveItemsToDestination(Array.from(selectedIds), destination);
   };
 
   const showPreviousPreview = useCallback(() => {
@@ -1115,7 +1190,18 @@ export const GroupingPage = () => {
     setPreviewItemId(folderScopeItems[previewIndex + 1].id);
   }, [canShowNextPreview, folderScopeItems, previewIndex]);
 
-  const handleDeleteSelected = async () => {
+  const moveItemsToTrash = async (itemIds: string[]) => {
+    if (!workspace || itemIds.length === 0 || !canMutateGrouping) return;
+
+    const nextWorkspace = await trashGroupingItemsRequest(workspace.sessionId, Array.from(new Set(itemIds)));
+    setWorkspace(nextWorkspace);
+    setSelectedIds(new Set());
+    setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, activeFolderLabel));
+    setBackendError(null);
+    markGroupingDraftChanged();
+  };
+
+  const handleTrashSelected = async () => {
     if (!workspace || selectedItems.length === 0 || !canMutateGrouping) return;
 
     const confirmed = window.confirm(t('grouping.deleteSelectedConfirm'));
@@ -1125,21 +1211,13 @@ export const GroupingPage = () => {
     }
 
     try {
-      const nextWorkspace = await deleteGroupingItemsRequest(
-        workspace.sessionId,
-        selectedItems.map((item) => item.id)
-      );
-      setWorkspace(nextWorkspace);
-      setSelectedIds(new Set());
-      setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, activeFolderLabel));
-      setBackendError(null);
-      markGroupingDraftChanged();
+      await moveItemsToTrash(selectedItems.map((item) => item.id));
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('grouping.deleteSelectedError'));
     }
   };
 
-  const handleDeletePreviewItem = async () => {
+  const handleTrashPreviewItem = async () => {
     if (!workspace || !previewItem || previewIndex < 0 || !canMutateGrouping) return;
 
     const confirmed = window.confirm(t('grouping.deletePreviewConfirm', { name: previewItem.fileName }));
@@ -1149,13 +1227,9 @@ export const GroupingPage = () => {
     }
 
     try {
-      const nextWorkspace = await deleteGroupingItemsRequest(workspace.sessionId, [previewItem.id]);
+      const nextWorkspace = await trashGroupingItemsRequest(workspace.sessionId, [previewItem.id]);
       setWorkspace(nextWorkspace);
-      setSelectedIds((current) => {
-        const next = new Set(current);
-        next.delete(previewItem.id);
-        return next;
-      });
+      setSelectedIds(new Set());
       setPreviewItemId(getNextPreviewItemId(nextWorkspace.items, activeFolderLabel, sourceRootPath, previewIndex));
       setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, activeFolderLabel));
       setBackendError(null);
@@ -1165,14 +1239,21 @@ export const GroupingPage = () => {
     }
   };
 
-  const handleMovePreviewItem = async (targetGroupLabel: string) => {
-    if (!workspace || !previewItem || previewIndex < 0 || !targetGroupLabel || !canMutateGrouping) return;
+  const handleMovePreviewItem = async (destinationKey: string) => {
+    const destination = moveDestinationEntries.find((entry) => entry.key === destinationKey);
+    if (!workspace || !previewItem || previewIndex < 0 || !destination || !canMutateGrouping) return;
 
     try {
-      const nextWorkspace = await assignGroupingItemsRequest(workspace.sessionId, [previewItem.id], targetGroupLabel);
+      const nextWorkspace = await assignGroupingItemsRequest(
+        workspace.sessionId,
+        [previewItem.id],
+        destination.label,
+        destination.preservedScopePath
+      );
       setWorkspace(nextWorkspace);
       setSelectedIds(new Set());
-      setPreviewItemId(getNextPreviewItemId(nextWorkspace.items, activeFolderLabel, sourceRootPath, previewIndex, previewItem.id));
+      const nextScopeItems = activeFolderLabel === TRASH_FOLDER_LABEL ? nextWorkspace.trashItems : nextWorkspace.items;
+      setPreviewItemId(getNextPreviewItemId(nextScopeItems, activeFolderLabel, sourceRootPath, previewIndex, previewItem.id));
       setActiveFolderLabel(resolveNextActiveFolderLabel(nextWorkspace, activeFolderLabel));
       setBackendError(null);
       markGroupingDraftChanged();
@@ -1182,20 +1263,14 @@ export const GroupingPage = () => {
   };
 
   const cleanupModalVideo = useCallback(() => {
-    const video = modalVideoRef.current;
-    if (video) {
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
-    }
-    setModalVideoObjectUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return null;
-    });
+    releaseVideoElement(modalVideoRef.current);
     setIsLoadingModalVideo(false);
   }, []);
 
-  useEffect(() => cleanupModalVideo, [cleanupModalVideo, previewItemId]);
+  useEffect(() => {
+    const video = modalVideoRef.current;
+    return () => releaseVideoElement(video);
+  }, [previewItemId]);
 
   const closePreviewModal = useCallback(() => {
     cleanupModalVideo();
@@ -1584,43 +1659,12 @@ export const GroupingPage = () => {
     );
 
   useEffect(() => {
-    if (!previewItem || previewItem.mediaType !== 'video' || !mediaUrl || failedPreviewIds.has(previewItem.id)) {
-      return;
-    }
-
-    const controller = new AbortController();
-    let objectUrl: string | null = null;
-    setIsLoadingModalVideo(true);
-    setModalVideoObjectUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return null;
-    });
-
-    void fetch(mediaUrl, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Video request failed with ${response.status}.`);
-        return await response.blob();
-      })
-      .then((blob) => {
-        if (controller.signal.aborted) return;
-        objectUrl = URL.createObjectURL(blob);
-        setModalVideoObjectUrl(objectUrl);
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted) {
-          console.warn('Could not load grouping video preview.', error);
-          markPreviewFailed(previewItem.id);
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setIsLoadingModalVideo(false);
-      });
-
-    return () => {
-      controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [failedPreviewIds, markPreviewFailed, mediaUrl, previewItem]);
+    setIsLoadingModalVideo(Boolean(
+      previewItem?.mediaType === 'video'
+      && mediaUrl
+      && !failedPreviewIds.has(previewItem.id)
+    ));
+  }, [failedPreviewIds, mediaUrl, previewItem]);
 
   const hasCopiedHeic = Boolean(workspace?.items.some((item) => /\.(heic|heif)$/i.test(item.fileName)));
 
@@ -1696,6 +1740,25 @@ export const GroupingPage = () => {
         <p className="empty-note">{t('grouping.unavailable')}</p>
       )}
       {backendError && <p className="error">{backendError}</p>}
+      {baselineMigration?.status === 'running' && (
+        <div className="grouping-migration-notice" role="status">
+          <strong>{t('grouping.baselineMigrationTitle')}</strong>
+          <span>{t('grouping.baselineMigrationProgress', {
+            processed: baselineMigration.processedFiles,
+            total: baselineMigration.totalFiles,
+            reclaimed: formatBytes(baselineMigration.reclaimedBytes)
+          })}</span>
+        </div>
+      )}
+      {(baselineMigration?.status === 'completed_with_warnings' || baselineMigration?.status === 'failed') && (
+        <div className="grouping-migration-notice is-warning" role="alert">
+          <strong>{t('grouping.baselineMigrationWarning')}</strong>
+          <span>{t('grouping.baselineMigrationWarningDetail', {
+            count: baselineMigration.warnings.length,
+            reclaimed: formatBytes(baselineMigration.reclaimedBytes)
+          })}</span>
+        </div>
+      )}
 
       {verification && (
         <section className={`verification-panel verification-panel-${verification.status}`}>
@@ -1974,14 +2037,20 @@ export const GroupingPage = () => {
               <div
                 key={entry.key}
                 className={`grouping-folder-drop ${activeFolderLabel === entry.activeLabel ? 'is-active' : ''}`}
-                onDragOver={canMutateGrouping && entry.kind === 'folder' ? (event) => event.preventDefault() : undefined}
+                onDragOver={canMutateGrouping ? (event) => event.preventDefault() : undefined}
                 onDrop={canMutateGrouping
-                  && entry.kind === 'folder'
                   ? (event) => {
                       event.preventDefault();
                       const ids = event.dataTransfer.getData('application/json');
                       if (ids) {
-                        void moveItemsToFolder(JSON.parse(ids) as string[], entry.folder.label);
+                        void moveItemsToDestination(
+                          JSON.parse(ids) as string[],
+                          {
+                            key: `${entry.kind}:${entry.key}`,
+                            label: entry.label,
+                            preservedScopePath: entry.kind === 'preserved' ? entry.scope.path : undefined
+                          }
+                        );
                       }
                     }
                   : undefined}
@@ -2019,6 +2088,30 @@ export const GroupingPage = () => {
                 <p className="grouping-folder-note">{t('grouping.noProposedFolderNote')}</p>
               </div>
             )}
+          </div>
+
+          <div
+            className={`grouping-trash-drop ${activeFolderLabel === TRASH_FOLDER_LABEL ? 'is-active' : ''}`}
+            onDragOver={canMutateGrouping ? (event) => event.preventDefault() : undefined}
+            onDrop={canMutateGrouping
+              ? (event) => {
+                  event.preventDefault();
+                  const ids = event.dataTransfer.getData('application/json');
+                  if (ids) void moveItemsToTrash(JSON.parse(ids) as string[]).catch((error) => {
+                    setBackendError(error instanceof Error ? error.message : t('grouping.deleteSelectedError'));
+                  });
+                }
+              : undefined}
+          >
+            <button className="grouping-folder-button grouping-trash-button" type="button" onClick={() => handleSelectReviewFolder(TRASH_FOLDER_LABEL)}>
+              <span className="grouping-trash-label">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5" />
+                </svg>
+                {t('grouping.trash')}
+              </span>
+              <strong>{workspace.trashItems.length}</strong>
+            </button>
           </div>
 
           <div className="grouping-templates">
@@ -2076,26 +2169,17 @@ export const GroupingPage = () => {
           {selectedItems.length > 0 && (
             <div className="grouping-selection-bar">
               <strong>{t('grouping.selected', { count: selectedItems.length })}</strong>
-              <select
-                className="grouping-select"
-                value=""
-                onChange={(event) => {
-                  if (event.target.value) {
-                    void handleMoveSelected(event.target.value);
-                  }
-                }}
+              <GroupingMoveMenu
+                destinations={moveDestinationEntries}
+                label={t('grouping.moveSelected')}
                 disabled={!workspace || !canMutateGrouping}
-              >
-                <option value="">{t('grouping.moveSelected')}</option>
-                {workspace?.folders.map((folder) => (
-                  <option key={folder.id} value={folder.label}>
-                    {folder.label}
-                  </option>
-                ))}
-              </select>
-              <button className="btn btn-danger-secondary" type="button" onClick={() => void handleDeleteSelected()} disabled={!canMutateGrouping}>
-                {t('grouping.delete')}
-              </button>
+                onSelect={(destination) => handleMoveSelected(destination.key)}
+              />
+              {activeFolderLabel !== TRASH_FOLDER_LABEL && (
+                <button className="btn btn-danger-secondary" type="button" onClick={() => void handleTrashSelected()} disabled={!canMutateGrouping}>
+                  {t('grouping.moveToTrash')}
+                </button>
+              )}
               <span className="grouping-selection-divider" aria-hidden="true" />
               <button className="btn btn-secondary" type="button" onClick={() => setSelectedIds(new Set())}>
                 {t('grouping.clearSelection')}
@@ -2137,7 +2221,6 @@ export const GroupingPage = () => {
                 const isSelected = selectedIds.has(item.id);
                 const canEditItem = canMutateGrouping;
                 const itemThumbnailUrl = workspace ? buildGroupingThumbnailUrl(workspace.sessionId, item.id) : '';
-                const itemMediaUrl = workspace ? buildGroupingMediaUrl(workspace.sessionId, item.id) : '';
                 const itemVideoPosterUrl = workspace ? buildGroupingVideoPosterUrl(workspace.sessionId, item.id) : '';
                 const itemVideoPosterCacheKey = workspace ? `${workspace.sessionId}:${item.id}` : item.id;
                 const hasThumbnailFailed = failedThumbnailIds.has(item.id);
@@ -2160,7 +2243,6 @@ export const GroupingPage = () => {
                       item={item}
                       imageThumbnailUrl={itemThumbnailUrl}
                       videoPosterSourceUrl={itemVideoPosterUrl}
-                      videoPosterFallbackUrl={itemMediaUrl}
                       videoPosterCacheKey={itemVideoPosterCacheKey}
                       hasPreviewFailed={hasThumbnailFailed}
                       previewUnavailableLabel={t('grouping.previewUnavailable')}
@@ -2213,32 +2295,22 @@ export const GroupingPage = () => {
               <button className="btn btn-secondary" type="button" onClick={showNextPreview} disabled={!canShowNextPreview}>
                 {t('grouping.previewNext')}
               </button>
-              <select
-                className="grouping-select"
-                value=""
-                onChange={(event) => {
-                  if (event.target.value) {
-                    void handleMovePreviewItem(event.target.value);
-                  }
-                }}
-                disabled={!canMutateGrouping || workspace.folders.length === 0}
-                aria-label={t('grouping.movePreview')}
-              >
-                <option value="">{t('grouping.movePreview')}</option>
-                {workspace.folders.map((folder) => (
-                  <option key={folder.id} value={folder.label}>
-                    {folder.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="btn btn-danger-secondary"
-                type="button"
-                onClick={() => void handleDeletePreviewItem()}
+              <GroupingMoveMenu
+                destinations={moveDestinationEntries}
+                label={t('grouping.movePreview')}
                 disabled={!canMutateGrouping}
-              >
-                {t('grouping.delete')}
-              </button>
+                onSelect={(destination) => handleMovePreviewItem(destination.key)}
+              />
+              {activeFolderLabel !== TRASH_FOLDER_LABEL && (
+                <button
+                  className="btn btn-danger-secondary"
+                  type="button"
+                  onClick={() => void handleTrashPreviewItem()}
+                  disabled={!canMutateGrouping}
+                >
+                  {t('grouping.moveToTrash')}
+                </button>
+              )}
             </div>
             <div className="grouping-modal-stage">
               {previewItem.mediaType === 'image' && !failedPreviewIds.has(previewItem.id) ? (
@@ -2252,20 +2324,30 @@ export const GroupingPage = () => {
                 <div className="grouping-modal-unsupported">
                   {t('grouping.previewUnavailable')}
                 </div>
-              ) : previewItem.mediaType === 'video' && isLoadingModalVideo ? (
-                <div className="grouping-modal-unsupported">
-                  {t('grouping.loadingVideo')}
-                </div>
-              ) : previewItem.mediaType === 'video' && modalVideoObjectUrl && !failedPreviewIds.has(previewItem.id) ? (
-                <video
-                  key={previewItem.id}
-                  ref={modalVideoRef}
-                  className="grouping-modal-media"
-                  src={modalVideoObjectUrl}
-                  controls
-                  autoPlay
-                  onError={() => markPreviewFailed(previewItem.id)}
-                />
+              ) : previewItem.mediaType === 'video' && !failedPreviewIds.has(previewItem.id) ? (
+                <>
+                  <video
+                    key={previewItem.id}
+                    ref={modalVideoRef}
+                    className={`grouping-modal-media ${isLoadingModalVideo ? 'is-loading' : ''}`}
+                    src={mediaUrl}
+                    controls
+                    autoPlay
+                    preload="metadata"
+                    onLoadStart={() => setIsLoadingModalVideo(true)}
+                    onLoadedData={() => setIsLoadingModalVideo(false)}
+                    onCanPlay={() => setIsLoadingModalVideo(false)}
+                    onError={() => {
+                      setIsLoadingModalVideo(false);
+                      markPreviewFailed(previewItem.id);
+                    }}
+                  />
+                  {isLoadingModalVideo && (
+                    <div className="grouping-modal-unsupported grouping-modal-loading">
+                      {t('grouping.loadingVideo')}
+                    </div>
+                  )}
+                </>
               ) : previewItem.mediaType === 'video' ? (
                 <div className="grouping-modal-unsupported">
                   {t('grouping.previewUnavailable')}

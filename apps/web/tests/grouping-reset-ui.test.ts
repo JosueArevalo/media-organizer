@@ -39,7 +39,7 @@ test('grouping reset copy is localized', () => {
   const spanish = fs.readFileSync(path.join(i18nRoot, 'es.ts'), 'utf8');
 
   assert.match(english, /grouping\.resetConfirm/);
-  assert.match(english, /internal grouping backup/);
+  assert.match(english, /Items in Trash will be moved back/);
   assert.match(spanish, /grouping\.resetConfirm/);
-  assert.match(spanish, /backup interno de grouping/);
+  assert.match(spanish, /elementos de Papelera volverán/);
 });

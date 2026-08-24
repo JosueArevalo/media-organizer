@@ -1,5 +1,8 @@
 import path from 'node:path';
 import {
+  invalidateCachedGooglePhotosAlbumById,
+  invalidateCachedGooglePhotosAlbumByTitle,
+  isGooglePhotosAlbumMissingError,
   createGooglePhotosMediaItems,
   ensureGooglePhotosItemMetadata,
   getOrCreateGooglePhotosAlbum,
@@ -11,6 +14,7 @@ import {
   uploadGooglePhotosMedia
 } from './googlePhotosApi.service.js';
 import {
+  appendExportJobNotice,
   getExportJob,
   getExportJobStatus,
   listRunnableExportItems,
@@ -119,7 +123,7 @@ const formatGooglePhotosBatchCreateError = (
 const createUploadedBatch = async (
   accountId: string,
   albumId: string,
-  items: Array<{ item: ExportItemRecord; uploadToken: string }>
+  items: Array<{ item: ExportItemRecord; uploadToken: string; uploadCreatedAt: string }>
 ) => {
   const results = await createGooglePhotosMediaItems(
     accountId,
@@ -168,10 +172,12 @@ export const executeGooglePhotosExportJob = async (jobId: string) => {
     return refreshExportJobCounters(jobId, 'completed');
   }
 
-  const pendingByAlbum = new Map<string, Array<{ item: ExportItemRecord; uploadToken: string }>>();
+  const pendingByAlbum = new Map<string, Array<{ item: ExportItemRecord; uploadToken: string; uploadCreatedAt: string }>>();
 
   const flushAlbum = async (albumId: string) => {
     const queued = pendingByAlbum.get(albumId) ?? [];
+    let currentAlbumId = albumId;
+    let hasRetriedMissingAlbum = false;
 
     while (queued.length > 0) {
       const currentStatus = getExportJobStatus(jobId);
@@ -180,7 +186,48 @@ export const executeGooglePhotosExportJob = async (jobId: string) => {
         return false;
       }
 
-      await createUploadedBatch(accountId, albumId, queued.splice(0, batchSize));
+      const batchItems = queued.splice(0, batchSize);
+
+      try {
+        await createUploadedBatch(accountId, currentAlbumId, batchItems);
+      } catch (error) {
+        if (!hasRetriedMissingAlbum && isGooglePhotosAlbumMissingError(error)) {
+          const albumTitle = batchItems[0]?.item.destinationPath ?? queued[0]?.item.destinationPath;
+
+          if (!albumTitle) {
+            throw error;
+          }
+
+          hasRetriedMissingAlbum = true;
+          invalidateCachedGooglePhotosAlbumById(accountId, currentAlbumId);
+          invalidateCachedGooglePhotosAlbumByTitle(accountId, albumTitle);
+          const recreatedAlbum = await getOrCreateGooglePhotosAlbum(accountId, albumTitle);
+          currentAlbumId = recreatedAlbum.googleAlbumId;
+
+          for (const queuedItem of [...batchItems, ...queued]) {
+            updateGooglePhotosItemUploaded(
+              queuedItem.item.id,
+              recreatedAlbum.googleAlbumId,
+              queuedItem.uploadToken,
+              queuedItem.uploadCreatedAt
+            );
+          }
+
+          pendingByAlbum.delete(albumId);
+          pendingByAlbum.set(recreatedAlbum.googleAlbumId, queued);
+          queued.unshift(...batchItems);
+
+          const notice = `google-photos-album-recreated:${albumTitle}`;
+          appendExportJobNotice(jobId, notice);
+          console.warn(
+            `${GOOGLE_PHOTOS_LOG_PREFIX} Google Photos album "${albumTitle}" no longer existed remotely. Media Organizer recreated it automatically and continued the upload.`
+          );
+          continue;
+        }
+
+        throw error;
+      }
+
       refreshExportJobCounters(jobId);
       await yieldToEventLoop();
 
@@ -190,7 +237,7 @@ export const executeGooglePhotosExportJob = async (jobId: string) => {
       }
     }
 
-    pendingByAlbum.delete(albumId);
+    pendingByAlbum.delete(currentAlbumId);
     return true;
   };
 
@@ -233,7 +280,7 @@ export const executeGooglePhotosExportJob = async (jobId: string) => {
       }
 
       const queued = pendingByAlbum.get(album.googleAlbumId) ?? [];
-      queued.push({ item, uploadToken: upload.uploadToken });
+      queued.push({ item, uploadToken: upload.uploadToken, uploadCreatedAt: upload.createdAt });
       pendingByAlbum.set(album.googleAlbumId, queued);
 
       if (queued.length >= batchSize && !(await flushAlbum(album.googleAlbumId))) {

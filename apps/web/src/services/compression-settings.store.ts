@@ -27,7 +27,7 @@ const createDefaultSnapshot = (): CompressionSettingsSnapshot => ({
   imagePreset: 'balanced',
   customQuality: 72,
   videoPreset: DEFAULT_VIDEO_PRESET,
-  videoOutputFormatMode: 'preserve',
+  videoOutputFormatMode: 'mp4',
   updatedAt: 0
 });
 

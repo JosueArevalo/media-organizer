@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, test } from 'node:test';
+import { after, afterEach, beforeEach, test } from 'node:test';
 import { getDb, resetDbForTests } from '../src/state/db.js';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-export-summary-test-'));
+const tempRoot = createTrackedTestTempDirectory('media-organizer-export-summary-test-');
+after(() => {
+  resetDbForTests();
+  cleanupTrackedTestTempDirectories();
+});
 const tempDataDir = path.join(tempRoot, 'data');
 const tempDbPath = path.join(tempDataDir, 'test.sqlite');
 const migrationsDir = path.resolve(process.cwd(), 'src', 'state', 'migrations');
@@ -117,6 +121,7 @@ test('provider summaries union repeated files and preserve completed coverage af
 
   const network = listExportProviderSummaries({ executionId: execution.id }).find((summary) => summary.provider === 'network-folder');
   assert.equal(network?.coverageStatus, 'completed');
+  assert.equal(network?.displayStatus, 'attention');
   assert.equal(network?.coveredItems, 2);
   assert.equal(network?.completedJobs, 1);
   assert.equal(network?.lastAttempt?.status, 'failed');
@@ -154,6 +159,7 @@ test('separate Google Photos album jobs combine into complete provider coverage'
 
   const google = listExportProviderSummaries({ groupingSessionId: 'grouping-1' }).find((summary) => summary.provider === 'google-photos');
   assert.equal(google?.coverageStatus, 'completed');
+  assert.equal(google?.displayStatus, 'completed');
   assert.equal(google?.coveredItems, 3);
   assert.equal(google?.coveredAlbums, 2);
   assert.equal(google?.completedJobs, 2);
@@ -192,11 +198,50 @@ test('Google Photos completed selected album job is complete even when other alb
 
   const google = listExportProviderSummaries({ executionId: execution.id }).find((summary) => summary.provider === 'google-photos');
   assert.equal(google?.coverageStatus, 'completed');
+  assert.equal(google?.displayStatus, 'completed');
   assert.equal(google?.eligibleItems, 2);
   assert.equal(google?.coveredItems, 2);
   assert.equal(google?.eligibleAlbums, 2);
   assert.equal(google?.coveredAlbums, 2);
   assert.equal(google?.lastAttempt?.status, 'completed');
+});
+
+test('Google Photos summary stays in attention when the latest item state is still failed', async () => {
+  const execution = await createExecution();
+  const { listExportProviderSummaries } = await import('../src/pipeline/export/exportSummary.service.js?google-unresolved-summary=1');
+
+  insertJob({
+    id: 'google-completed-first',
+    executionId: execution.id,
+    provider: 'google-photos',
+    status: 'completed',
+    eligibleItems: 1,
+    eligibleAlbums: 1,
+    destination: 'user@example.com',
+    updatedAt: '2026-06-01T10:10:00.000Z'
+  });
+  insertItem('google-completed-first', 'retry.mp4', 'Album A', 'completed');
+
+  insertJob({
+    id: 'google-failed-later',
+    executionId: execution.id,
+    provider: 'google-photos',
+    status: 'failed',
+    eligibleItems: 1,
+    eligibleAlbums: 1,
+    destination: 'user@example.com',
+    updatedAt: '2026-06-01T10:20:00.000Z',
+    error: 'Later retry failed'
+  });
+  getDb().prepare(
+    `INSERT INTO export_items (
+      id, job_id, source_path, relative_path, destination_path, size_bytes, status, attempt_count, last_error, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 1, 'failed', 1, 'Later retry failed', '2026-06-01T10:20:00.000Z')`
+  ).run('google-failed-later:retry.mp4', 'google-failed-later', 'retry.mp4', 'retry.mp4', 'Album A');
+
+  const google = listExportProviderSummaries({ executionId: execution.id }).find((summary) => summary.provider === 'google-photos');
+  assert.equal(google?.coverageStatus, 'completed');
+  assert.equal(google?.displayStatus, 'attention');
 });
 
 test('Google Photos selected album summaries expand when another selected album is uploaded later', async () => {

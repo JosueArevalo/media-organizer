@@ -52,7 +52,17 @@ export type GroupingWorkspace = {
   reorganizedDirectories: string[];
   folders: GroupingWorkspaceFolder[];
   items: GroupingWorkspaceItem[];
+  trashItems: GroupingWorkspaceItem[];
   templates: GroupingFolderTemplate[];
+};
+
+export type GroupingBaselineMigrationStatus = {
+  status: 'not_needed' | 'not_started' | 'running' | 'completed' | 'completed_with_warnings' | 'failed';
+  totalFiles: number;
+  processedFiles: number;
+  reclaimedBytes: number;
+  migratedToTrash: number;
+  warnings: string[];
 };
 
 export type VerificationCounts = {
@@ -74,7 +84,7 @@ export type GroupingApplyResponse = {
   sessionId: string;
   status: 'completed' | 'failed';
   movedItems: number;
-  deletedItems?: number;
+  trashedItems: number;
   failedItems: number;
   verification: ExecutionVerification;
 };
@@ -169,11 +179,16 @@ export const deleteGroupingFolderRequest = async (sessionId: string, folderId: s
   }
 };
 
-export const assignGroupingItemsRequest = async (sessionId: string, itemIds: string[], targetGroupLabel: string) =>
+export const assignGroupingItemsRequest = async (
+  sessionId: string,
+  itemIds: string[],
+  targetGroupLabel: string,
+  targetPreservedScopePath?: string
+) =>
   requestJson<GroupingWorkspace>(`/api/grouping/${sessionId}/items/assign`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ itemIds, targetGroupLabel })
+    body: JSON.stringify({ itemIds, targetGroupLabel, targetPreservedScopePath })
   });
 
 export const renamePreservedGroupingFolderScopeRequest = async (sessionId: string, scopePath: string, label: string) =>
@@ -183,12 +198,18 @@ export const renamePreservedGroupingFolderScopeRequest = async (sessionId: strin
     body: JSON.stringify({ scopePath, label })
   });
 
-export const deleteGroupingItemsRequest = async (sessionId: string, itemIds: string[]) =>
-  requestJson<GroupingWorkspace>(`/api/grouping/${sessionId}/items/delete`, {
+export const trashGroupingItemsRequest = async (sessionId: string, itemIds: string[]) =>
+  requestJson<GroupingWorkspace>(`/api/grouping/${sessionId}/items/trash`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ itemIds })
   });
+
+export const startGroupingBaselineMigrationRequest = async (sessionId: string) =>
+  requestJson<GroupingBaselineMigrationStatus>(`/api/grouping/${sessionId}/legacy-baselines/migrate`, { method: 'POST' });
+
+export const getGroupingBaselineMigrationStatusRequest = async (sessionId: string) =>
+  requestJson<GroupingBaselineMigrationStatus>(`/api/grouping/${sessionId}/legacy-baselines/migration`);
 
 export const applyGroupingWorkspaceRequest = async (sessionId: string) =>
   requestJson<GroupingApplyResponse>(`/api/grouping/${sessionId}/apply`, { method: 'POST' });

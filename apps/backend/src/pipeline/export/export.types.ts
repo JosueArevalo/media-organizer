@@ -4,6 +4,7 @@ export type ExportJobStatus = 'draft' | 'running' | 'paused' | 'completed' | 'fa
 
 export type ExportItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type ExportCoverageStatus = 'not_started' | 'partial' | 'completed';
+export type ExportDisplayStatus = ExportCoverageStatus | 'attention';
 
 export type ExportDestinationSummary = {
   label: string;
@@ -14,6 +15,7 @@ export type ExportDestinationSummary = {
 export type ExportProviderSummary = {
   provider: ExportTargetType;
   coverageStatus: ExportCoverageStatus;
+  displayStatus: ExportDisplayStatus;
   eligibleItems: number;
   coveredItems: number;
   eligibleAlbums: number | null;
@@ -111,6 +113,7 @@ export type ExportProgressData = {
   pending: number;
   recentItems: ExportItemRecord[];
   albumProgress?: GooglePhotosAlbumProgress[];
+  notices?: string[];
 };
 
 export type ExportTargetTestRequest = {
@@ -173,6 +176,10 @@ export type GooglePhotosAlbumPreviewItem = {
   relativePath: string;
   sizeBytes: number;
   supported: boolean;
+  id?: string | null;
+  jobId?: string | null;
+  status?: ExportItemRecord['status'];
+  lastError?: string | null;
 };
 
 export type GooglePhotosAlbumProgress = {

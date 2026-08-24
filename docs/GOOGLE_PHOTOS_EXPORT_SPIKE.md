@@ -1,17 +1,17 @@
-# Google Photos Export Spike
+# Google Photos Export Notes
 
 ## Purpose
 
-Google Photos is intentionally not exposed as a production export target in the MVP.
+Google Photos export is part of the implemented Media Organizer workflow.
 
-This spike exists to validate the risky parts first:
+This document captures the design constraints and product boundaries that still matter for maintaining or extending that integration:
 
 - OAuth desktop/local flow for a single user.
-- Creating an app-created album named after a grouped folder.
-- Uploading supported image/video files into that album.
+- Creating or reusing app-created albums named after grouped folders.
+- Uploading supported image/video files into those albums.
 - Handling batch limits, retries, partial failures, and storage warnings.
 
-## API Shape To Validate
+## API Shape
 
 Use the Google Photos Library API with the `photoslibrary.appendonly` scope.
 
@@ -29,17 +29,18 @@ Important constraints:
 - App-created album/media access is the reliable scope after the 2025 Google Photos API changes.
 - Uploads are stored at original quality and may count against the user's Google Account storage.
 
-## Acceptance Criteria For Enabling UI
+## Current Behavior Expectations
 
 - A local OAuth setup can be completed without storing raw Google credentials.
 - One grouped folder can become one Google Photos album with the same folder name.
 - Partial failures are persisted per file and can be retried.
 - The implementation reports unsupported file types before upload.
-- The user sees a storage/quota warning before starting.
+- The user sees a storage or quota warning before starting.
 
-## Non-Goals For MVP
+## Product Boundaries
 
-- Reading or reorganizing the user's existing Google Photos library.
-- Managing shared albums.
-- Syncing deleted or renamed files after export.
-- Exposing Google Photos as a production target before the spike proves reliable.
+- The integration is upload-focused, not a full Google Photos sync client.
+- Reading or reorganizing the user's existing Google Photos library remains out of scope.
+- Managing shared albums remains out of scope.
+- Syncing deleted or renamed local files back to Google Photos remains out of scope.
+- Public documentation should describe the feature as a built-in export target with `append-only` constraints, not as two-way cloud synchronization.

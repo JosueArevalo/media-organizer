@@ -1,13 +1,19 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { readLogTail, redactDiagnostics } from '../src/diagnostics.js';
 import { createDesktopLogger } from '../src/logging.js';
+import {
+  cleanupTrackedTestTempDirectory,
+  cleanupTrackedTestTempDirectories,
+  createTrackedTestTempDirectory
+} from '../../../test-utils/tempDirectory.js';
+
+after(() => cleanupTrackedTestTempDirectories());
 
 test('diagnostics keep the log path, tail recent lines and redact local values', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-log-'));
+  const directory = createTrackedTestTempDirectory('media-organizer-log-');
   const logger = createDesktopLogger(directory);
   logger.write('test', 'first');
   logger.write('test', 'C:\\Users\\josue secret-token');
@@ -22,20 +28,20 @@ test('diagnostics keep the log path, tail recent lines and redact local values',
   assert.match(tail, /secret-token/);
   assert.equal(redactDiagnostics(tail, 'C:\\Users\\josue', 'secret-token').includes('secret-token'), false);
   assert.match(redactDiagnostics(tail, 'C:\\Users\\josue'), /%USERPROFILE%/);
-  fs.rmSync(directory, { recursive: true, force: true });
+  cleanupTrackedTestTempDirectory(directory);
 });
 
 test('desktop logger writes each line to disk immediately', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-log-immediate-'));
+  const directory = createTrackedTestTempDirectory('media-organizer-log-immediate-');
   const logger = createDesktopLogger(directory);
   logger.write('test', 'visible before close');
   assert.match(fs.readFileSync(logger.filePath, 'utf8'), /visible before close/);
   logger.close();
-  fs.rmSync(directory, { recursive: true, force: true });
+  cleanupTrackedTestTempDirectory(directory);
 });
 
 test('desktop logger retains at most five launch logs', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-rotation-'));
+  const directory = createTrackedTestTempDirectory('media-organizer-rotation-');
   for (let index = 0; index < 7; index += 1) {
     fs.writeFileSync(path.join(directory, `desktop-2026-01-0${index + 1}T00-00-00.000Z.log`), String(index));
   }
@@ -44,5 +50,5 @@ test('desktop logger retains at most five launch logs', async () => {
   logger.close();
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(fs.readdirSync(directory).filter((name) => name.startsWith('desktop-')).length, 5);
-  fs.rmSync(directory, { recursive: true, force: true });
+  cleanupTrackedTestTempDirectory(directory);
 });

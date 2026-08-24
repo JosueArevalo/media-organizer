@@ -16,6 +16,7 @@ Keep this file small and focused. Detailed rules are defined in the docs folder.
 - Do not introduce unnecessary abstractions
 - Keep functions small and focused
 - Write readable and maintainable code
+- Tests that create files or directories in the operating system temporary folder must remove only their own resources after closing database, server, process, and file handles
 
 ---
 

@@ -25,6 +25,19 @@ class ToolConfigurationError(Exception):
     pass
 
 
+def configure_utf8_stdio() -> None:
+    for handle_name, errors in (('stdout', 'strict'), ('stderr', 'replace')):
+        handle = getattr(sys, handle_name, None)
+
+        if handle is None or not hasattr(handle, 'reconfigure'):
+            continue
+
+        try:
+            handle.reconfigure(encoding='utf-8', errors=errors)
+        except (ValueError, OSError):
+            continue
+
+
 def normalize_path(value: str) -> str:
     return str(Path(value).resolve()).replace('\\', '/').lower()
 
@@ -646,6 +659,7 @@ def copy_metadata(source_file: Path, output_file: Path, exiftool_command: str):
 
 
 def main() -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description='Compress images into a destination folder.')
     parser.add_argument('--source-dir', required=True)
     parser.add_argument('--output-dir', required=True)

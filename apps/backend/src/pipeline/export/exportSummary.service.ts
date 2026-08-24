@@ -3,6 +3,7 @@ import { runMigrations } from '../../state/migrations/runMigrations.js';
 import type {
   ExportCoverageStatus,
   ExportDestinationSummary,
+  ExportDisplayStatus,
   ExportJobStatus,
   ExportProviderSummary,
   ExportTargetType
@@ -26,9 +27,21 @@ const toCoverageStatus = (covered: number, eligible: number): ExportCoverageStat
   return eligible > 0 && covered >= eligible ? 'completed' : 'partial';
 };
 
+const toDisplayStatus = (
+  coverageStatus: ExportCoverageStatus,
+  hasFailedJob: boolean
+): ExportDisplayStatus => {
+  if (coverageStatus === 'completed' && hasFailedJob) {
+    return 'attention';
+  }
+
+  return coverageStatus;
+};
+
 const emptySummary = (provider: ExportTargetType): ExportProviderSummary => ({
   provider,
   coverageStatus: 'not_started',
+  displayStatus: 'not_started',
   eligibleItems: 0,
   coveredItems: 0,
   eligibleAlbums: provider === 'google-photos' ? 0 : null,
@@ -130,6 +143,32 @@ const getCoveredAlbums = (jobIds: string[]) => {
   return row.covered;
 };
 
+const hasUnresolvedGooglePhotosFailures = (jobIds: string[]) => {
+  if (jobIds.length === 0) return false;
+  const placeholders = jobIds.map(() => '?').join(', ');
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) AS unresolved
+       FROM (
+         SELECT source_path, status
+         FROM (
+           SELECT source_path,
+                  status,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY source_path
+                    ORDER BY datetime(updated_at) DESC, rowid DESC
+                  ) AS rn
+           FROM export_items
+           WHERE job_id IN (${placeholders})
+         ) AS ranked
+         WHERE rn = 1
+           AND status = 'failed'
+       ) AS unresolved_items`
+    )
+    .get(...jobIds) as { unresolved: number };
+  return row.unresolved > 0;
+};
+
 const getCompletedDestinations = (jobs: ExportSummaryJobRow[]): ExportDestinationSummary[] => {
   const destinations = new Map<string, ExportDestinationSummary>();
 
@@ -185,21 +224,27 @@ export const listExportProviderSummaries = (input: {
     const eligibleAlbums = provider === 'google-photos'
       ? Math.max(...eligibleReferenceJobs.map((job) => job.eligible_albums), coveredAlbums ?? 0, 0)
       : null;
+    const hasFailedJob = provider === 'google-photos'
+      ? hasUnresolvedGooglePhotosFailures(jobIds)
+      : providerJobs.some((job) => job.status === 'failed');
     const lastJob = providerJobs[0];
+    const lastAttempt = {
+      status: lastJob.status,
+      updatedAt: lastJob.updated_at,
+      error: lastJob.last_error
+    } satisfies ExportProviderSummary['lastAttempt'];
+    const coverageStatus = toCoverageStatus(coveredItems, eligibleItems);
 
     return {
       provider,
-      coverageStatus: toCoverageStatus(coveredItems, eligibleItems),
+      coverageStatus,
+      displayStatus: toDisplayStatus(coverageStatus, hasFailedJob),
       eligibleItems,
       coveredItems,
       eligibleAlbums,
       coveredAlbums,
       completedJobs: providerJobs.filter((job) => job.status === 'completed').length,
-      lastAttempt: {
-        status: lastJob.status,
-        updatedAt: lastJob.updated_at,
-        error: lastJob.last_error
-      },
+      lastAttempt,
       completedDestinations: getCompletedDestinations(providerJobs)
     };
   });

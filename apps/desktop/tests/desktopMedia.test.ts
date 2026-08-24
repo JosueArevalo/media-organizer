@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { createDesktopMediaResponse, resolveDesktopMediaDescriptorTarget } from '../src/desktopMedia.js';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-desktop-media-'));
+const tempRoot = createTrackedTestTempDirectory('media-organizer-desktop-media-');
 const content = Buffer.from('0123456789abcdef');
 const mediaPaths = {
   mp4: path.join(tempRoot, 'video.mp4'),
@@ -14,7 +14,7 @@ const mediaPaths = {
 fs.writeFileSync(mediaPaths.mp4, content);
 fs.writeFileSync(mediaPaths.mov, content);
 
-after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+after(() => cleanupTrackedTestTempDirectories());
 
 test('resolves only grouping media requests to the private descriptor endpoint', () => {
   assert.equal(
@@ -37,7 +37,17 @@ for (const extension of ['mp4', 'mov'] as const) {
     assert.equal(complete.headers.get('content-length'), String(content.length));
     assert.equal(complete.headers.get('content-type'), descriptor.contentType);
     assert.equal(complete.headers.get('content-range'), null);
+    assert.equal(complete.headers.get('cache-control'), 'no-store');
     assert.deepEqual(Buffer.from(await complete.arrayBuffer()), content);
+
+    const poster = createDesktopMediaResponse(
+      new Request('media-organizer://app/video?usage=poster'),
+      descriptor
+    );
+    assert.equal(poster.status, 206);
+    assert.equal(poster.headers.get('content-range'), `bytes 0-15/${content.length}`);
+    assert.equal(poster.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(Buffer.from(await poster.arrayBuffer()), content);
 
     const initial = createDesktopMediaResponse(new Request('media-organizer://app/video', {
       headers: { Range: 'bytes=0-3' }
@@ -105,4 +115,27 @@ test('cancelling the protocol response destroys the local file stream', async ()
   await reader.cancel();
   await closed;
   assert.equal(openedStream.destroyed, true);
+});
+
+test('limits poster responses without ranges while preserving explicit ranges', async () => {
+  const largePath = path.join(tempRoot, 'poster-limit.mp4');
+  const posterLimit = 12 * 1024 * 1024;
+  fs.writeFileSync(largePath, Buffer.alloc(posterLimit + 1024, 'p'));
+  const descriptor = { path: largePath, contentType: 'video/mp4' };
+
+  const limited = createDesktopMediaResponse(
+    new Request('media-organizer://app/video?usage=poster'),
+    descriptor
+  );
+  assert.equal(limited.status, 206);
+  assert.equal(limited.headers.get('content-length'), String(posterLimit));
+  assert.equal(limited.headers.get('content-range'), `bytes 0-${posterLimit - 1}/${posterLimit + 1024}`);
+  await limited.body?.cancel();
+
+  const explicit = createDesktopMediaResponse(new Request('media-organizer://app/video?usage=poster', {
+    headers: { Range: `bytes=${posterLimit}-${posterLimit + 15}` }
+  }), descriptor);
+  assert.equal(explicit.status, 206);
+  assert.equal(explicit.headers.get('content-range'), `bytes ${posterLimit}-${posterLimit + 15}/${posterLimit + 1024}`);
+  await explicit.body?.cancel();
 });

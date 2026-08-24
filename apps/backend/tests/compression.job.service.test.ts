@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, test } from 'node:test';
+import { after, afterEach, beforeEach, test } from 'node:test';
 import { getDb, resetDbForTests } from '../src/state/db.js';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-compression-test-'));
+const tempRoot = createTrackedTestTempDirectory('media-organizer-compression-test-');
+after(() => {
+  resetDbForTests();
+  cleanupTrackedTestTempDirectories();
+});
 const tempDataDir = path.join(tempRoot, 'data');
 const tempDbPath = path.join(tempDataDir, 'test.sqlite');
 const migrationsDir = path.resolve(process.cwd(), 'src', 'state', 'migrations');
@@ -563,6 +567,74 @@ test('explicit copy processing policy persists copy operations and progress coun
   assert.equal(progress?.totalCopy, 2);
   assert.equal(progress?.completedCopy, 2);
   assert.ok(progress?.processedItems.every((item) => item.operation === 'copy'));
+});
+
+test('executeCompressionSession preserves accented file names in persisted state and progress payloads', async () => {
+  const { startCompressionSession, getCompressionProgress } = await import('../src/pipeline/compression/compressionJob.service.js');
+  const { executeCompressionSession } = await import('../src/pipeline/compression/compressionJob.runner.js');
+  const scopedSourceDir = path.join(tempRoot, 'accented-source');
+  const scopedOutputDir = path.join(tempRoot, 'accented-output');
+  const imageName = '20251129_203031_pruebíta.jpg';
+  const videoName = '20251129_184550_pruebéta.mp4';
+
+  fs.rmSync(scopedSourceDir, { recursive: true, force: true });
+  fs.rmSync(scopedOutputDir, { recursive: true, force: true });
+  fs.mkdirSync(scopedSourceDir, { recursive: true });
+  fs.mkdirSync(scopedOutputDir, { recursive: true });
+  fs.writeFileSync(path.join(scopedSourceDir, imageName), 'fake-jpg', 'utf8');
+  fs.writeFileSync(path.join(scopedSourceDir, videoName), 'fake-video', 'utf8');
+
+  const started = startCompressionSession({
+    sourceDir: scopedSourceDir,
+    outputDir: scopedOutputDir,
+    imageQuality: 80,
+    imageProfileLabel: 'Balanced',
+    videoPresetLabel: 'Fast 1080p30',
+    processingPolicy: { jpeg: 'copy', png: 'copy', heic: 'copy', video: 'copy' }
+  });
+
+  await executeCompressionSession(started.session.id);
+
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `
+        SELECT source_path, relative_path
+        FROM media_items
+        WHERE session_id = ?
+        ORDER BY relative_path ASC
+      `
+    )
+    .all(started.session.id) as Array<{ source_path: string; relative_path: string }>;
+
+  assert.deepEqual(
+    rows
+      .map((row) => ({
+        sourcePath: path.basename(row.source_path),
+        relativePath: row.relative_path
+      }))
+      .sort((left, right) => left.relativePath.localeCompare(right.relativePath, undefined, { sensitivity: 'base' })),
+    [
+      { sourcePath: videoName, relativePath: videoName },
+      { sourcePath: imageName, relativePath: imageName }
+    ].sort((left, right) => left.relativePath.localeCompare(right.relativePath, undefined, { sensitivity: 'base' }))
+  );
+
+  const progress = getCompressionProgress(started.session.id);
+  assert.equal(progress?.status, 'completed');
+  assert.deepEqual(
+    progress?.processedItems
+      .map((item) => ({
+        sourcePath: path.basename(item.sourcePath),
+        displayPath: item.displayPath
+      }))
+      .sort((left, right) => left.sourcePath.localeCompare(right.sourcePath, undefined, { sensitivity: 'base' })),
+    [
+      { sourcePath: imageName, displayPath: imageName },
+      { sourcePath: videoName, displayPath: videoName }
+    ].sort((left, right) => left.sourcePath.localeCompare(right.sourcePath, undefined, { sensitivity: 'base' }))
+  );
+  assert.equal(progress?.processedItems.some((item) => item.sourcePath.includes('�') || (item.displayPath?.includes('�') ?? false)), false);
 });
 
 test('compression progress reports the actively processing video and clears it after completion', async () => {
