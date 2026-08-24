@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { resolveToolCommand } from '../src/pipeline/compression/toolCommandResolver.js';
 import { getToolsStatus } from '../src/system/toolStatus.service.js';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
+
+after(() => cleanupTrackedTestTempDirectories());
 
 test('resolveToolCommand resolves absolute files and commands from PATH', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-tool-resolve-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-tool-resolve-');
   const toolPath = path.join(tempRoot, process.platform === 'win32' ? 'tool.cmd' : 'tool');
   fs.writeFileSync(toolPath, process.platform === 'win32' ? '@echo off\r\n' : '#!/usr/bin/env sh\n', 'utf8');
 
@@ -20,7 +22,7 @@ test('resolveToolCommand resolves absolute files and commands from PATH', () => 
 });
 
 test('resolveToolCommand discovers known tools under a Linuxbrew prefix outside PATH', () => {
-  const prefix = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-linuxbrew-'));
+  const prefix = createTrackedTestTempDirectory('media-organizer-linuxbrew-');
   const commands = [
     path.join(prefix, 'opt', 'mozjpeg', 'bin', 'cjpeg'),
     path.join(prefix, 'bin', 'pngquant'),
@@ -49,7 +51,7 @@ test('resolveToolCommand discovers known tools under a Linuxbrew prefix outside 
 
 test('resolveToolCommand supports Apple Silicon and Intel Homebrew prefixes', () => {
   for (const architecture of ['apple-silicon', 'intel']) {
-    const prefix = fs.mkdtempSync(path.join(os.tmpdir(), `media-organizer-${architecture}-brew-`));
+    const prefix = createTrackedTestTempDirectory(`media-organizer-${architecture}-brew-`);
     const command = path.join(prefix, 'opt', 'mozjpeg', 'bin', 'cjpeg');
     fs.mkdirSync(path.dirname(command), { recursive: true });
     fs.writeFileSync(command, 'fake tool', 'utf8');
@@ -63,7 +65,7 @@ test('resolveToolCommand supports Apple Silicon and Intel Homebrew prefixes', ()
 });
 
 test('resolveToolCommand does not replace an invalid explicit path with an automatic match', () => {
-  const prefix = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-explicit-tool-'));
+  const prefix = createTrackedTestTempDirectory('media-organizer-explicit-tool-');
   const command = path.join(prefix, 'bin', 'magick');
   fs.mkdirSync(path.dirname(command), { recursive: true });
   fs.writeFileSync(command, 'fake tool', 'utf8');
@@ -76,7 +78,7 @@ test('resolveToolCommand does not replace an invalid explicit path with an autom
 });
 
 test('resolveToolCommand keeps Homebrew fallback disabled on Windows', () => {
-  const prefix = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-windows-tool-'));
+  const prefix = createTrackedTestTempDirectory('media-organizer-windows-tool-');
   const command = path.join(prefix, 'bin', 'magick');
   fs.mkdirSync(path.dirname(command), { recursive: true });
   fs.writeFileSync(command, 'fake tool', 'utf8');

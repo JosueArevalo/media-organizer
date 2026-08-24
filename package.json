@@ -31,11 +31,13 @@
     "desktop:package:win": "node scripts/clean-desktop-release.mjs && npm run desktop:build && npm run desktop:worker:win && electron-builder --win portable --x64 --config electron-builder.yml && npm run desktop:verify:package",
     "desktop:verify:package": "node scripts/verify-desktop-package.mjs",
     "desktop:smoke": "node scripts/desktop-smoke.mjs",
+    "test:interaction": "playwright test",
     "pretest": "node scripts/check-node-version.mjs",
     "test": "npm run test --workspace apps/backend",
     "verify:hello": "node scripts/verify-hello.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "electron": "42.4.1",
     "electron-builder": "26.15.3",
     "png-to-ico": "3.0.1"

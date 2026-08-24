@@ -3,6 +3,8 @@ import { Readable } from 'node:stream';
 
 export type DesktopMediaDescriptor = { path: string; contentType: string };
 
+const VIDEO_POSTER_RANGE_BYTES = 12 * 1024 * 1024;
+
 type DesktopMediaResponseOptions = {
   createReadStream?: (filePath: string, range: { start: number; end: number }) => fs.ReadStream;
 };
@@ -43,7 +45,7 @@ export const createDesktopMediaResponse = (
   options: DesktopMediaResponseOptions = {}
 ) => {
   const stats = fs.statSync(descriptor.path);
-  const range = parseRange(request.method === 'HEAD' ? null : request.headers.get('range'), stats.size);
+  let range = parseRange(request.method === 'HEAD' ? null : request.headers.get('range'), stats.size);
   if (!range) {
     return new Response(null, {
       status: 416,
@@ -56,9 +58,23 @@ export const createDesktopMediaResponse = (
     });
   }
 
+  if (
+    !range.partial
+    && request.method !== 'HEAD'
+    && descriptor.contentType.startsWith('video/')
+    && new URL(request.url).searchParams.get('usage') === 'poster'
+    && stats.size > 0
+  ) {
+    range = {
+      start: 0,
+      end: Math.min(stats.size - 1, VIDEO_POSTER_RANGE_BYTES - 1),
+      partial: true
+    };
+  }
+
   const headers = new Headers({
     'Accept-Ranges': 'bytes',
-    'Cache-Control': 'private, max-age=3600',
+    'Cache-Control': 'no-store',
     'Content-Length': String(range.end - range.start + 1),
     'Content-Type': descriptor.contentType,
     'Last-Modified': stats.mtime.toUTCString()

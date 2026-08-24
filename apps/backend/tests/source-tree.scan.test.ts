@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
+
+after(() => cleanupTrackedTestTempDirectories());
 
 test('scanSourceTreeByPath preserves each directory name', async () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-scan-test-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-scan-test-');
   const sourceDir = path.join(tempRoot, 'Input');
   const childDir = path.join(sourceDir, 'Citroen C4');
   const nestedDir = path.join(sourceDir, 'Musica');

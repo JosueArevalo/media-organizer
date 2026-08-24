@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
+
+after(() => cleanupTrackedTestTempDirectories());
 
 type ScriptItem = {
   source: string;
@@ -68,7 +70,7 @@ cp "$2" "$4"
 };
 
 test('compress_videos copy policy preserves the original container without invoking HandBrake', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-copy-policy-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-videos-copy-policy-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   fs.mkdirSync(sourceDir, { recursive: true });
@@ -175,7 +177,7 @@ ${outputCommand}
 };
 
 test('compress_videos emits start before completed item for selected videos', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-script-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-videos-script-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -233,7 +235,7 @@ test('compress_videos emits start before completed item for selected videos', ()
 });
 
 test('compress_videos keeps a compressed video when it is smaller than the source', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-smaller-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-videos-smaller-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -271,7 +273,7 @@ test('compress_videos keeps a compressed video when it is smaller than the sourc
 });
 
 test('compress_videos retains the original when compression would make an MP4 larger', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-larger-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-videos-larger-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -312,7 +314,7 @@ test('compress_videos retains the original when compression would make an MP4 la
 });
 
 test('compress_videos preserves MOV extension by default', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-preserve-mov-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-videos-preserve-mov-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -358,7 +360,7 @@ test('compress_videos preserves MOV extension by default', () => {
 });
 
 test('compress_videos converts selected MOV outputs to MP4 when requested', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-mov-to-mp4-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-videos-mov-to-mp4-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -408,7 +410,7 @@ test('compress_videos converts selected MOV outputs to MP4 when requested', () =
 });
 
 test('compress_videos keeps an explicitly requested MOV to MP4 conversion even when it is larger', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-larger-mp4-conversion-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-videos-larger-mp4-conversion-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -447,7 +449,7 @@ test('compress_videos keeps an explicitly requested MOV to MP4 conversion even w
 });
 
 test('compress_videos keeps excluded MOV copies in their original container', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-copy-mov-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-videos-copy-mov-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -503,7 +505,7 @@ test('compress_videos keeps excluded MOV copies in their original container', ()
 });
 
 test('compress_videos does not create HandBrake debug logs', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-no-debug-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-videos-no-debug-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');
@@ -547,7 +549,7 @@ test('compress_videos does not create HandBrake debug logs', () => {
 });
 
 test('compress_videos retries without QSV hardware decoding when it fails', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-videos-fallback-'));
+  const tempRoot = createTrackedTestTempDirectory('media-organizer-videos-fallback-');
   const sourceDir = path.join(tempRoot, 'source');
   const outputDir = path.join(tempRoot, 'output');
   const toolsDir = path.join(tempRoot, 'tools');

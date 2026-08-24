@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { buildImageCompressionCommand, buildVideoCompressionCommand } from '../src/pipeline/compression/compressionCommandBuilder.js';
+import { cleanupTrackedTestTempDirectories, createTrackedTestTempDirectory } from '../../../test-utils/tempDirectory.js';
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-organizer-worker-test-'));
+const tempRoot = createTrackedTestTempDirectory('media-organizer-worker-test-');
 const worker = path.join(tempRoot, process.platform === 'win32' ? 'worker.exe' : 'worker');
 fs.writeFileSync(worker, 'placeholder');
 const previousWorker = process.env.MEDIA_ORGANIZER_WORKER_PATH;
@@ -13,7 +13,7 @@ const previousWorker = process.env.MEDIA_ORGANIZER_WORKER_PATH;
 after(() => {
   if (previousWorker === undefined) delete process.env.MEDIA_ORGANIZER_WORKER_PATH;
   else process.env.MEDIA_ORGANIZER_WORKER_PATH = previousWorker;
-  fs.rmSync(tempRoot, { recursive: true, force: true });
+  cleanupTrackedTestTempDirectories();
 });
 
 const manifest = {

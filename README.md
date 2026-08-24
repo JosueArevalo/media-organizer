@@ -300,6 +300,25 @@ Do not run `npm audit fix --force` as part of normal setup. It can introduce maj
 
 </details>
 
+<details>
+<summary><strong>Inspect detailed Grouping media traces</strong></summary>
+<br>
+
+Routine video range requests are quiet by default. To troubleshoot poster or playback streaming, set `MEDIA_ORGANIZER_MEDIA_TRACE=1` before starting the application:
+
+```bash
+MEDIA_ORGANIZER_MEDIA_TRACE=1 npm run dev
+```
+
+In PowerShell:
+
+```powershell
+$env:MEDIA_ORGANIZER_MEDIA_TRACE = '1'
+npm.cmd run dev
+```
+
+</details>
+
 ## 🏗️ Architecture
 
 Media Organizer is a TypeScript modular monolith with a deliberately simple flow:
@@ -356,6 +375,20 @@ npm run test --workspace apps/web
 ```
 
 On Windows PowerShell, replace `npm` with `npm.cmd` if script execution is restricted.
+
+</details>
+
+<details>
+<summary><strong>Build the Windows executable</strong></summary>
+<br>
+
+From the repository root on Windows, build the portable x64 executable with:
+
+```powershell
+npm.cmd run desktop:package:win
+```
+
+The command builds the backend, frontend, desktop application, and packaged media worker, then verifies the result. The generated executable is written to `release/` as `Media-Organizer-<version>-windows-x64-portable.exe`. The existing contents of `release/` are removed before packaging.
 
 </details>
 
