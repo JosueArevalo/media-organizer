@@ -11,7 +11,7 @@ export const getRuntimeMode = (): RuntimeMode =>
   process.env.MEDIA_ORGANIZER_DESKTOP === '1' ? 'desktop' : 'development';
 
 export const getRuntimeInfo = (): RuntimeInfo => ({
-  version: process.env.MEDIA_ORGANIZER_VERSION?.trim() || '0.1.0',
+  version: process.env.MEDIA_ORGANIZER_VERSION?.trim() || '0.2.0',
   platform: process.platform,
   architecture: process.arch,
   mode: getRuntimeMode()
