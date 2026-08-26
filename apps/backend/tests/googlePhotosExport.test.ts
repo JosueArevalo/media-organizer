@@ -816,6 +816,71 @@ test('Google Photos export progress groups items by album', async () => {
   );
 });
 
+test('Google Photos preview reconciles completed sources across retry jobs', async () => {
+  await insertGooglePhotosAccount();
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
+  fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-b.jpg'), 'image-b');
+
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/albums') && init?.method !== 'POST') {
+      return new Response(JSON.stringify({ albums: [] }), { status: 200 });
+    }
+    throw new Error(`Unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  const { createExportJob, previewGooglePhotosExport } = await import(
+    '../src/pipeline/export/exportJob.service.js?google-preview-retry-jobs=1'
+  );
+  const firstJob = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1' }
+  });
+  const db = getDb();
+  const firstRows = db
+    .prepare('SELECT id, relative_path FROM export_items WHERE job_id = ? ORDER BY relative_path ASC')
+    .all(firstJob.job.id) as Array<{ id: string; relative_path: string }>;
+
+  db.prepare("UPDATE export_items SET status = 'completed', last_error = NULL, updated_at = '2026-08-26T10:00:00.000Z' WHERE id = ?")
+    .run(firstRows[0].id);
+  db.prepare("UPDATE export_items SET status = 'failed', last_error = 'Temporary failure', updated_at = '2026-08-26T10:00:01.000Z' WHERE id = ?")
+    .run(firstRows[1].id);
+  db.prepare(
+    "UPDATE export_google_photos_items SET phase = 'created', media_item_id = 'media-a', google_album_id = 'album-1', updated_at = '2026-08-26T10:00:00.000Z' WHERE item_id = ?"
+  ).run(firstRows[0].id);
+
+  const retryJob = createExportJob({
+    sourceRoot,
+    target: { type: 'google-photos', accountId: 'account-1' }
+  });
+  assert.equal(retryJob.job.totalItems, 1);
+  const retryRow = db
+    .prepare('SELECT id, relative_path FROM export_items WHERE job_id = ?')
+    .get(retryJob.job.id) as { id: string; relative_path: string };
+  assert.equal(retryRow.relative_path, firstRows[1].relative_path);
+
+  db.prepare("UPDATE export_items SET status = 'completed', last_error = NULL, updated_at = '2026-08-26T10:01:00.000Z' WHERE id = ?")
+    .run(retryRow.id);
+  db.prepare(
+    "UPDATE export_google_photos_items SET phase = 'created', media_item_id = 'media-b', google_album_id = 'album-1', updated_at = '2026-08-26T10:01:00.000Z' WHERE item_id = ?"
+  ).run(retryRow.id);
+
+  const reconciled = await previewGooglePhotosExport('account-1', sourceRoot);
+  const reconciledAlbum = reconciled.albums.find((candidate) => candidate.albumTitle === '2026.04 - Trip');
+  assert.equal(reconciledAlbum?.uploadStatus, 'completed');
+  assert.deepEqual(
+    reconciledAlbum?.items.map((item) => ({
+      relativePath: item.relativePath,
+      status: item.status,
+      jobId: item.jobId
+    })),
+    [
+      { relativePath: firstRows[0].relative_path, status: 'completed', jobId: firstJob.job.id },
+      { relativePath: firstRows[1].relative_path, status: 'completed', jobId: retryJob.job.id }
+    ]
+  );
+});
+
 test('Google Photos export persists partial failures and does not retry completed media items', async () => {
   await insertGooglePhotosAccount();
   fs.writeFileSync(path.join(sourceRoot, '2026.04 - Trip', 'photo-a.jpg'), 'image-a');
