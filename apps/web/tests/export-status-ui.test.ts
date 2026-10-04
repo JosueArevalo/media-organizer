@@ -91,16 +91,15 @@ test('provider pages consume only their own active export snapshot', () => {
   assert.match(googleSource, /useExportJobState\('google-photos'/);
 });
 
-test('network export renders session job history with destination-specific controls', () => {
+test('network export uses shared preview and retains destination-specific history', () => {
   const source = fs.readFileSync(path.join(pagesRoot, 'NetworkFolderExportPage.tsx'), 'utf8');
-
+  const history = fs.readFileSync(path.resolve('src/components/ExportJobHistoryCard.tsx'), 'utf8');
   assert.match(source, /listExportJobsRequest/);
-  assert.match(source, /jobs\.map\(\(snapshot\)/);
+  assert.match(source, /ExportWorkflowPanel workflow=\{workflow\} provider="network-folder"/);
+  assert.match(source, /ExportJobHistoryCard/);
   assert.match(source, /normalizeNetworkPathForComparison/);
-  assert.match(source, /handlePause\(job\.id\)/);
-  assert.match(source, /handleResume\(job\.id\)/);
-  assert.match(source, /handleRetryFailed\(job\.id\)/);
-  assert.match(source, /t\('export\.progressTitle'\)\} \(\{job\.targetPath\}\)/);
+  assert.match(history, /fixedJobId: snapshot\.job\.id/);
+  assert.match(history, /job\.targetPath \?\? job\.destinationLabel/);
 });
 
 test('network export keeps Windows authentication and adds mounted-folder flow for Unix', () => {

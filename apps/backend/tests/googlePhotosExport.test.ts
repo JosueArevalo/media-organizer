@@ -17,6 +17,30 @@ const sourceRoot = path.join(tempRoot, 'source');
 
 const originalFetch = globalThis.fetch;
 
+test('generic Google Photos preview and scope retain legacy album behavior and protect attempted items', async () => {
+  await insertGooglePhotosAccount();
+  fs.mkdirSync(path.join(sourceRoot, 'Album A'), { recursive: true });
+  fs.mkdirSync(path.join(sourceRoot, 'Album B'), { recursive: true });
+  fs.writeFileSync(path.join(sourceRoot, 'Album A', 'a.jpg'), 'a');
+  fs.writeFileSync(path.join(sourceRoot, 'Album B', 'b.jpg'), 'b');
+  globalThis.fetch = (async () => new Response(JSON.stringify({ albums: [] }), { status: 200 })) as typeof fetch;
+  const { previewExport, updateExportJobScope } = await import('../src/pipeline/export/exportGroups.service.js');
+  const { createExportJob, pauseExportJob, previewGooglePhotosExport } = await import('../src/pipeline/export/exportJob.service.js');
+  const target = { type: 'google-photos' as const, accountId: 'account-1', albumTitles: ['Album A'] };
+  const job = createExportJob({ sourceRoot, target });
+  const legacy = await previewGooglePhotosExport(target.accountId, sourceRoot);
+  const generic = await previewExport({ sourceRoot, target, jobId: job.job.id });
+  assert.deepEqual(generic.groups.map((group) => group.label), legacy.albums.map((album) => album.albumTitle));
+  assert.equal(generic.supportedItems, legacy.supportedItems);
+  getDb().prepare('UPDATE export_items SET attempt_count = 1 WHERE job_id = ?').run(job.job.id);
+  pauseExportJob(job.job.id);
+  const restored = await previewExport({ sourceRoot, target, jobId: job.job.id });
+  assert.equal(restored.groups.find((group) => group.label === 'Album A')?.selectionLocked, true);
+  const updated = updateExportJobScope(job.job.id, ['album:Album B']);
+  assert.deepEqual(JSON.parse(updated!.checkpoint!.payloadJson!).target.albumTitles, ['Album A', 'Album B']);
+  assert.throws(() => updateExportJobScope(job.job.id, ['album:Missing']), /Unknown/);
+});
+
 const resetFolders = () => {
   fs.rmSync(sourceRoot, { recursive: true, force: true });
   fs.mkdirSync(path.join(sourceRoot, '2026.04 - Trip'), { recursive: true });
@@ -434,6 +458,7 @@ test('Google Photos paused export can keep an empty editable album scope', async
     pauseExportJob,
     updateGooglePhotosExportJobScope
   } = await import('../src/pipeline/export/exportJob.service.js?google-empty-scope=1');
+  const { assertExportJobCanStart } = await import('../src/pipeline/export/exportJob.service.js');
   const job = createExportJob({
     sourceRoot,
     target: { type: 'google-photos', accountId: 'account-1', albumTitles: ['2026.04 - Trip'] }
@@ -444,6 +469,7 @@ test('Google Photos paused export can keep an empty editable album scope', async
   assert.equal(emptyScopeJob?.job.status, 'paused');
   assert.equal(emptyScopeJob?.job.totalItems, 0);
   assert.equal(getExportProgress(job.job.id)?.status, 'paused');
+  assert.throws(() => assertExportJobCanStart(job.job.id), /at least one export group/);
   assert.deepEqual(
     JSON.parse(emptyScopeJob?.checkpoint?.payloadJson ?? '{}').target.albumTitles,
     []
@@ -1135,7 +1161,8 @@ test('Google Photos pause during media creation stops before the next item and r
   const { createExportJob, getExportProgress, pauseExportJob } = await import(
     '../src/pipeline/export/exportJob.service.js?google-pause-race=1'
   );
-  const { executeExportJob } = await import('../src/pipeline/export/exportJob.runner.js?google-pause-race=1');
+  const { executeExportJob, isGooglePhotosExportRunnerActive } = await import('../src/pipeline/export/exportJob.runner.js');
+  const { updateExportJobScope } = await import('../src/pipeline/export/exportGroups.service.js');
   const job = createExportJob({
     sourceRoot,
     target: { type: 'google-photos', accountId: 'account-1' }
@@ -1144,8 +1171,14 @@ test('Google Photos pause during media creation stops before the next item and r
   const execution = executeExportJob(job.job.id);
   await firstBatchStarted;
   pauseExportJob(job.job.id);
-  releaseFirstBatch?.();
-  await execution;
+  try {
+    assert.equal(isGooglePhotosExportRunnerActive(job.job.id), true);
+    assert.throws(() => updateExportJobScope(job.job.id, []), /finishing its current item/);
+  } finally {
+    releaseFirstBatch?.();
+    await execution;
+  }
+  assert.equal(isGooglePhotosExportRunnerActive(job.job.id), false);
 
   const pausedProgress = getExportProgress(job.job.id);
   assert.equal(pausedProgress?.status, 'paused');

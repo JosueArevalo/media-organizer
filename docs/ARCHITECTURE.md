@@ -224,6 +224,19 @@ Structure:
 
 The dashboard should provide bulk actions such as select all, select none, select only large files and exclude likely WhatsApp/screenshot files.
 
+### Shared export workflow
+
+Google Photos and Network Folder keep their own connection setup and use the same
+`ExportWorkflowPanel` and `useExportWorkflow` for preview, group selection, progress,
+pause/resume and retries. The UI uses stable group IDs and optional destination
+badges; provider credentials and transport details stay outside the shared flow.
+
+The backend shares source enumeration, network planning/history verification and
+group progress readers. `exportGroups.service.ts` orchestrates the neutral preview
+and scope endpoints; existing job services and provider runners retain persistence
+and transfer behavior. See [EXPORT_WORKFLOW.md](EXPORT_WORKFLOW.md) for API and
+compatibility details.
+
 The UI should be a single local dashboard with sections, not multiple independent web apps.
 
 ---

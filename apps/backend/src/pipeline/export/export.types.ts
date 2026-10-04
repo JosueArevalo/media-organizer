@@ -32,6 +32,7 @@ export type ExportProviderSummary = {
 export type NetworkFolderTarget = {
   type: 'network-folder';
   destinationPath: string;
+  groupIds?: string[];
 };
 
 export type NetworkCredentials = {
@@ -113,7 +114,9 @@ export type ExportProgressData = {
   pending: number;
   recentItems: ExportItemRecord[];
   albumProgress?: GooglePhotosAlbumProgress[];
+  groupProgress?: ExportGroupProgress[];
   notices?: string[];
+  runnerActive?: boolean;
 };
 
 export type ExportTargetTestRequest = {
@@ -244,4 +247,51 @@ export type NetworkCreateFolderRequest = {
   folderName: string;
   rootPath?: string;
   credentials?: NetworkCredentials;
+};
+
+export type ExportGroupItem = {
+  relativePath: string;
+  sizeBytes: number;
+  supported: boolean;
+  id?: string | null;
+  jobId?: string | null;
+  status?: ExportItemStatus;
+  lastError?: string | null;
+  updatedAt?: string | null;
+  attemptCount?: number;
+};
+
+export type ExportGroupPreview = {
+  id: string;
+  label: string;
+  isRoot?: boolean;
+  selectionLocked?: boolean;
+  destinationStatus?: 'existing' | 'new';
+  exportStatus: 'pending' | 'completed';
+  itemCount: number;
+  items: ExportGroupItem[];
+};
+
+export type ExportGroupProgress = {
+  groupId: string;
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  pending: number;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+};
+
+export type ExportPreviewRequest = {
+  sourceRoot: string;
+  groupingSessionId?: string | null;
+  target: ExportTarget;
+  jobId?: string | null;
+  jobOnly?: boolean;
+};
+
+export type ExportPreview = {
+  groups: ExportGroupPreview[];
+  supportedItems: number;
+  unsupportedItems: number;
 };

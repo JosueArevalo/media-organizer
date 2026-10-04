@@ -1,6 +1,23 @@
 import type { TranslationDictionary } from '../types';
 
 export const es: TranslationDictionary = {
+  "export.workflow.preview": "Vista previa",
+  "export.workflow.previewing": "Cargando vista previa…",
+  "export.workflow.previewLoadingTitle": "Preparando la vista previa",
+  "export.workflow.previewLoadingBody": "Leyendo carpetas y restaurando el estado de los archivos.",
+  "export.workflow.exportSelectedGroups": "Exportar carpetas seleccionadas",
+  "export.workflow.selectionSummary": "{selected} carpetas seleccionadas · {excluded} excluidas",
+  "export.workflow.rootFiles": "Archivos en la raíz del origen",
+  "export.workflow.groupCompleted": "Exportado",
+  "export.workflow.groupFailed": "Fallido",
+  "export.workflow.groupExporting": "Exportando",
+  "export.workflow.groupSelected": "Seleccionado",
+  "export.workflow.groupExcluded": "Excluido",
+  "export.workflow.groupItemCount": "{count} archivos",
+  "export.workflow.exportGroup": "Exportar carpeta",
+  "export.workflow.empty": "No hay archivos para exportar.",
+  "export.workflow.title": "Vista previa y exportación",
+  "export.workflow.history": "Historial de exportaciones",
   'app.brand': 'Media Organizer',
   'app.version.openReleases': 'Abrir versiones disponibles',
   'app.error.runtimeTitle': 'Error de ejecución de la interfaz',

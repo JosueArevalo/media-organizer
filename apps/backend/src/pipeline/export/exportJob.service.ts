@@ -1,4 +1,14 @@
 import fs from 'node:fs';
+import {
+  filterNetworkExportPlan, getVerifiedNetworkHistory, normalizeExistingPath, isPathInside, assertExistingSourceRoot,
+  collectExportFilePlan, collectGooglePhotosFilePlan, normalizeNetworkDestinationPath, normalizeNetworkDestinationPathForComparison
+} from './exportPlan.service.js';
+import { getExportGroupProgress } from './exportProgress.service.js';
+import { ExportScopeError } from './exportGroupIds.js';
+export {
+  collectExportFilePlan, collectGooglePhotosFilePlan, getGooglePhotosAlbumTitleForRelativePath, isGooglePhotosSupportedFile,
+  normalizeNetworkDestinationPath, normalizeNetworkDestinationPathForComparison
+} from './exportPlan.service.js';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../../state/db.js';
@@ -32,8 +42,6 @@ import {
 import { getGooglePhotosAccount } from './googlePhotosAuth.service.js';
 
 const nowIso = () => new Date().toISOString();
-
-const INTERNAL_DIRECTORY_NAME = '.media-organizer';
 
 const toJobRecord = (row: {
   id: string;
@@ -112,157 +120,6 @@ const toCheckpointRecord = (row: {
   payloadJson: row.payload_json,
   updatedAt: row.updated_at
 });
-
-const normalizeExistingPath = (value: string) => path.resolve(value);
-
-export const normalizeNetworkDestinationPath = (
-  value: string,
-  platform: NodeJS.Platform = process.platform
-) => {
-  if (platform !== 'win32') {
-    return parseMountedPath(value);
-  }
-
-  try {
-    return parseUncPath(value).normalized;
-  } catch {
-    return value.trim().replace(/[\\/]+$/, '');
-  }
-};
-
-export const normalizeNetworkDestinationPathForComparison = (
-  value: string,
-  platform: NodeJS.Platform = process.platform
-) => {
-  const normalized = normalizeNetworkDestinationPath(value, platform);
-  return platform === 'win32' ? normalized.replaceAll('/', '\\').toLocaleLowerCase() : normalized;
-};
-
-const supportedGooglePhotosExtensions = new Set([
-  '.3gp',
-  '.3g2',
-  '.avi',
-  '.bmp',
-  '.gif',
-  '.heic',
-  '.heif',
-  '.jpg',
-  '.jpeg',
-  '.m2ts',
-  '.mkv',
-  '.mov',
-  '.mp4',
-  '.mpg',
-  '.mts',
-  '.png',
-  '.tif',
-  '.tiff',
-  '.webp'
-]);
-
-const isPathInside = (parent: string, child: string) => {
-  const relative = path.relative(parent, child);
-  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
-};
-
-export const collectExportFilePlan = (sourceRoot: string, destinationRoot: string) => {
-  const resolvedSourceRoot = normalizeExistingPath(sourceRoot);
-  const resolvedDestinationRoot = normalizeExistingPath(destinationRoot);
-  const items: Array<{ sourcePath: string; relativePath: string; destinationPath: string; sizeBytes: number }> = [];
-
-  const walk = (directoryPath: string) => {
-    const entries = fs.readdirSync(directoryPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (entry.name === INTERNAL_DIRECTORY_NAME) {
-        continue;
-      }
-
-      const sourcePath = path.join(directoryPath, entry.name);
-
-      if (entry.isDirectory()) {
-        walk(sourcePath);
-        continue;
-      }
-
-      if (!entry.isFile()) {
-        continue;
-      }
-
-      const relativePath = path.relative(resolvedSourceRoot, sourcePath);
-      items.push({
-        sourcePath,
-        relativePath,
-        destinationPath: path.join(resolvedDestinationRoot, relativePath),
-        sizeBytes: fs.statSync(sourcePath).size
-      });
-    }
-  };
-
-  walk(resolvedSourceRoot);
-  return items;
-};
-
-const assertExistingSourceRoot = (sourceRoot: string) => {
-  if (!fs.existsSync(sourceRoot) || !fs.statSync(sourceRoot).isDirectory()) {
-    throw new Error('Export sourceRoot must be an existing directory.');
-  }
-};
-
-export const getGooglePhotosAlbumTitleForRelativePath = (relativePath: string) => {
-  const segments = relativePath.split(path.sep).filter(Boolean);
-  return segments.length > 1 ? segments[0] : path.basename(path.dirname(relativePath)) || 'Media Organizer';
-};
-
-export const isGooglePhotosSupportedFile = (filePath: string) =>
-  supportedGooglePhotosExtensions.has(path.extname(filePath).toLocaleLowerCase());
-
-export const collectGooglePhotosFilePlan = (sourceRoot: string) => {
-  const resolvedSourceRoot = normalizeExistingPath(sourceRoot);
-  const items: Array<{
-    sourcePath: string;
-    relativePath: string;
-    destinationPath: string;
-    sizeBytes: number;
-    albumTitle: string;
-    supported: boolean;
-  }> = [];
-
-  const walk = (directoryPath: string) => {
-    const entries = fs.readdirSync(directoryPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (entry.name === INTERNAL_DIRECTORY_NAME) {
-        continue;
-      }
-
-      const sourcePath = path.join(directoryPath, entry.name);
-
-      if (entry.isDirectory()) {
-        walk(sourcePath);
-        continue;
-      }
-
-      if (!entry.isFile()) {
-        continue;
-      }
-
-      const relativePath = path.relative(resolvedSourceRoot, sourcePath);
-      const albumTitle = getGooglePhotosAlbumTitleForRelativePath(relativePath);
-      items.push({
-        sourcePath,
-        relativePath,
-        destinationPath: albumTitle,
-        sizeBytes: fs.statSync(sourcePath).size,
-        albumTitle,
-        supported: isGooglePhotosSupportedFile(sourcePath)
-      });
-    }
-  };
-
-  walk(resolvedSourceRoot);
-  return items;
-};
 
 const filterGooglePhotosFilePlan = (
   plannedItems: ReturnType<typeof collectGooglePhotosFilePlan>,
@@ -447,7 +304,7 @@ const getGooglePhotosItemStateBySourcePath = (input: {
   return entries;
 };
 
-const assertExportJobRequest = (request: ExportJobRequest) => {
+export const assertExportJobRequest = (request: ExportJobRequest) => {
   assertExistingSourceRoot(request.sourceRoot);
 
   if (request.target.type === 'google-photos') {
@@ -470,7 +327,7 @@ const assertExportJobRequest = (request: ExportJobRequest) => {
   }
 };
 
-const resolveExecutionId = (groupingSessionId: string | undefined, sourceRoot: string) => {
+export const resolveExecutionId = (groupingSessionId: string | undefined, sourceRoot: string) => {
   const db = getDb();
   const groupingRow = groupingSessionId
     ? db.prepare('SELECT id FROM execution_history WHERE grouping_session_id = ?').get(groupingSessionId) as { id: string } | undefined
@@ -506,7 +363,8 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
          FROM export_jobs
          WHERE execution_id = ?
            AND target_type = 'network-folder'
-           AND target_path IS NOT NULL`
+           AND target_path IS NOT NULL
+           AND status IN ('draft', 'running', 'paused')`
       )
       .all(executionId) as Array<{ target_path: string }>;
     const normalizedTargetPath = normalizeNetworkDestinationPathForComparison(targetPath as string);
@@ -516,6 +374,17 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
     }
   }
 
+  const fullNetworkPlan = request.target.type === 'network-folder' ? collectExportFilePlan(request.sourceRoot, targetPath as string) : null;
+  const networkHistory = request.target.type === 'network-folder'
+    ? getVerifiedNetworkHistory(request.sourceRoot, targetPath as string, executionId) : null;
+  const selectedNetworkPlan = request.target.type === 'network-folder'
+    ? filterNetworkExportPlan(fullNetworkPlan ?? [], request.target.groupIds) : null;
+  if (request.target.type === 'network-folder' && request.target.groupIds?.length === 0) {
+    throw new ExportScopeError('Select at least one export group.');
+  }
+  if (request.target.type === 'google-photos' && request.target.albumTitles?.length === 0) {
+    throw new ExportScopeError('Select at least one album.');
+  }
   const destinationLabel = request.target.type === 'network-folder'
     ? targetPath
     : getGooglePhotosAccount(request.target.accountId)?.email ?? null;
@@ -524,7 +393,7 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
     ? filterGooglePhotosFilePlan(fullGooglePhotosPlan ?? [], request.target)
     : null;
   const eligibleItems = request.target.type === 'network-folder'
-    ? collectExportFilePlan(request.sourceRoot, request.target.destinationPath).length
+    ? fullNetworkPlan?.length ?? 0
     : selectedGooglePhotosPlan?.filter((item) => item.supported).length ?? 0;
   const eligibleAlbums = request.target.type === 'google-photos'
     ? new Set(selectedGooglePhotosPlan?.filter((item) => item.supported).map((item) => item.albumTitle)).size
@@ -537,7 +406,10 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
       })
     : null;
   const plannedItems = request.target.type === 'network-folder'
-    ? collectExportFilePlan(request.sourceRoot, targetPath as string).map((item) => ({
+    ? (selectedNetworkPlan ?? []).filter((item) => {
+        const status = networkHistory?.get(item.sourcePath)?.status;
+        return status !== 'completed' && status !== 'skipped';
+      }).map((item) => ({
         ...item,
         albumTitle: null,
         supported: true
@@ -647,6 +519,7 @@ export const createExportJob = (request: ExportJobRequest): ExportJobSnapshot =>
         : request.target
     }), timestamp);
 
+    if (plannedItems.length === 0) db.prepare("UPDATE export_jobs SET status = 'completed' WHERE id = ?").run(jobId);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -694,6 +567,7 @@ export const updateGooglePhotosExportJobScope = (
         WHERE export_items.job_id = ?
           AND (
             export_items.status IN ('completed', 'failed', 'skipped', 'running')
+            OR export_items.attempt_count > 0
             OR export_google_photos_items.phase IN ('uploaded', 'created')
             OR export_google_photos_items.upload_token IS NOT NULL
             OR export_google_photos_items.media_item_id IS NOT NULL
@@ -803,7 +677,7 @@ export const updateGooglePhotosExportJobScope = (
         SET payload_json = ?, updated_at = ?
         WHERE job_id = ?
       `
-    ).run(JSON.stringify({ target: nextTarget }), timestamp, jobId);
+    ).run(JSON.stringify({ ...parseCheckpointPayload(snapshot.checkpoint?.payloadJson ?? null), target: nextTarget }), timestamp, jobId);
 
     db.exec('COMMIT');
   } catch (error) {
@@ -902,6 +776,13 @@ export const assertExportJobCanStart = (jobId: string) => {
     throw new Error('Export job not found.');
   }
 
+  const target = parseCheckpointPayload(snapshot.checkpoint?.payloadJson ?? null).target;
+  const selection = target?.type === 'network-folder' ? target.groupIds
+    : target?.type === 'google-photos' ? target.albumTitles : undefined;
+  if (Array.isArray(selection) && selection.length === 0) {
+    throw new ExportScopeError('Select at least one export group.');
+  }
+
   if (snapshot.job.targetType !== 'network-folder') {
     return snapshot;
   }
@@ -949,6 +830,7 @@ export const getExportProgress = (jobId: string): ExportProgressData | null => {
     pending: Math.max(0, snapshot.job.totalItems - snapshot.job.completedItems - snapshot.job.failedItems - snapshot.job.skippedItems),
     recentItems: snapshot.recentItems,
     albumProgress,
+    groupProgress: getExportGroupProgress(jobId),
     notices: getCheckpointNotices(snapshot.checkpoint?.payloadJson ?? null)
   };
 };

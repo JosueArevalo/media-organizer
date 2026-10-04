@@ -1,11 +1,14 @@
 import { readRequestJson, sendCaughtError, sendJson } from '../../http/httpResponses.js';
 import type { RouteHandler } from '../../http/routeTypes.js';
+import { previewExport, updateExportJobScope, ExportScopeError, validateGroupIds } from './exportGroups.service.js';
+import type { ExportPreviewRequest } from './export.types.js';
 import {
   assertGooglePhotosExportRunnerAvailable,
   assertNetworkExportRunnerAvailable,
   executeExportJob,
   ExportRunnerBusyError,
-  isGooglePhotosExportRunnerActive
+  isGooglePhotosExportRunnerActive,
+  isNetworkExportRunnerActive
 } from './exportJob.runner.js';
 import {
   assertExportJobCanStart,
@@ -53,6 +56,10 @@ import type {
 import { listExportProviderSummaries } from './exportSummary.service.js';
 
 const sendExportRouteError = (res: Parameters<RouteHandler>[0]['res'], error: unknown, fallbackMessage: string) => {
+  if (error instanceof ExportScopeError) {
+    sendJson(res, 400, { status: 'invalid_export_scope', message: error.message });
+    return;
+  }
   if (error instanceof ExportRunnerBusyError) {
     sendJson(res, 409, { status: 'export_runner_busy', message: error.message });
     return;
@@ -75,6 +82,22 @@ const escapeHtml = (value: string) =>
     .replaceAll("'", '&#39;');
 
 export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
+  if (requestUrl.pathname === '/api/export/preview' && req.method === 'POST') {
+    void (async () => {
+      try {
+        const body = (await readRequestJson(req)) as ExportPreviewRequest | null;
+        if (typeof body?.sourceRoot !== 'string' || !body.sourceRoot || !body.target
+          || !['network-folder', 'google-photos'].includes(body.target.type)
+          || (body.target.type === 'network-folder' && typeof body.target.destinationPath !== 'string')
+          || (body.target.type === 'google-photos' && typeof body.target.accountId !== 'string')) {
+          sendJson(res, 400, { status: 'invalid_request', message: 'sourceRoot and a valid target are required.' });
+          return;
+        }
+        sendJson(res, 200, await previewExport(body));
+      } catch (error) { sendExportRouteError(res, error, 'Failed to preview export.'); }
+    })();
+    return true;
+  }
   if (requestUrl.pathname === '/api/export/summaries' && req.method === 'GET') {
     sendJson(res, 200, {
       summaries: listExportProviderSummaries({
@@ -213,7 +236,7 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
 
         sendJson(res, 201, createExportJob(body));
       } catch (error) {
-        sendCaughtError(res, error, 'Failed to create export job.');
+        sendExportRouteError(res, error, 'Failed to create export job.');
       }
     })();
 
@@ -374,7 +397,9 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
         return true;
       }
 
-      sendJson(res, 200, progress);
+      sendJson(res, 200, { ...progress,
+        runnerActive: isGooglePhotosExportRunnerActive(jobId) || isNetworkExportRunnerActive(jobId)
+      });
       return true;
     }
 
@@ -421,6 +446,18 @@ export const handleExportRoutes: RouteHandler = ({ req, res, requestUrl }) => {
       }
 
       sendJson(res, 200, job);
+      return true;
+    }
+
+    if (req.method === 'PATCH' && subPath === 'scope') {
+      void (async () => {
+        try {
+          const body = (await readRequestJson(req)) as { groupIds?: unknown } | null;
+          validateGroupIds(body?.groupIds);
+          const job = updateExportJobScope(jobId, body!.groupIds);
+          sendJson(res, job ? 200 : 404, job ?? { status: 'not_found' });
+        } catch (error) { sendExportRouteError(res, error, 'Failed to update export scope.'); }
+      })();
       return true;
     }
 

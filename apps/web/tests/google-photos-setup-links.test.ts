@@ -4,7 +4,9 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 const pagePath = path.resolve(process.cwd(), 'src', 'pages', 'GooglePhotosExportPage.tsx');
-const progressViewPath = path.resolve(process.cwd(), 'src', 'pages', 'googlePhotosProgressView.ts');
+const hookPath = path.resolve(process.cwd(), 'src', 'hooks', 'useExportWorkflow.ts');
+const panelPath = path.resolve(process.cwd(), 'src', 'components', 'ExportWorkflowPanel.tsx');
+const progressViewPath = path.resolve(process.cwd(), 'src', 'services', 'export-progress-view.ts');
 
 test('Google Photos setup guide keeps direct Google Cloud links', () => {
   const pageSource = fs.readFileSync(pagePath, 'utf8');
@@ -64,226 +66,55 @@ test('Google Photos setup guide stays collapsed after reset', () => {
   assert.doesNotMatch(pageSource, /setIsSetupGuideExpanded\(true\)/);
 });
 
-test('Google Photos albums section owns upload progress', () => {
-  const pageSource = fs.readFileSync(pagePath, 'utf8');
-  const progressViewSource = fs.readFileSync(progressViewPath, 'utf8');
-  const previewDisabledStart = pageSource.indexOf('const isPreviewDisabled = Boolean(');
-  const previewDisabledEnd = pageSource.indexOf('return (', previewDisabledStart);
-  const previewDisabledSource = pageSource.slice(previewDisabledStart, previewDisabledEnd);
 
-  assert.match(pageSource, /uploadSelectedAlbums/);
-  assert.match(pageSource, /uploadAlbum/);
-  assert.match(pageSource, /selectedAlbumTitles/);
-  assert.match(pageSource, /getPendingAlbumTitleSet/);
-  assert.match(pageSource, /selectedPendingAlbumTitles\.length > 0/);
-  assert.match(pageSource, /albumSelectionSummary/);
-  assert.match(pageSource, /hasPreview/);
-  assert.match(pageSource, /visibleFailedItemCount/);
-  assert.match(pageSource, /activeBackendJobIdOverride/);
-  assert.match(pageSource, /const backendJobId = activeBackendJobIdOverride \?\? exportJobState\.backendJobId/);
-  assert.match(pageSource, /const currentProgress = progress\?\.jobId === backendJobId \? progress : null/);
-  assert.ok(previewDisabledStart >= 0);
-  assert.ok(previewDisabledEnd > previewDisabledStart);
-  assert.match(pageSource, /disabled=\{isPreviewDisabled\}/);
-  assert.doesNotMatch(previewDisabledSource, /isAllVisibleExportCompletedSuccessfully/);
-  assert.match(pageSource, /setPreview\(null\)/);
-  assert.match(pageSource, /isAllVisibleExportCompletedSuccessfully/);
-  assert.match(pageSource, /derivedVisibleAlbums/);
-  assert.match(pageSource, /deriveGooglePhotosAlbumView/);
-  assert.match(pageSource, /googlePhotosItemState/);
-  assert.match(pageSource, /mergeGooglePhotosProgressItems/);
-  assert.match(pageSource, /const shouldHideAlbumsWhilePreviewing = isPreviewing && !preview/);
-  assert.match(pageSource, /aria-busy=\{shouldHideAlbumsWhilePreviewing\}/);
-  assert.match(pageSource, /previewLoadingTitle/);
-  assert.match(pageSource, /previewLoadingBody/);
-  assert.match(pageSource, /const albumTitles = albumTitle \? \[albumTitle\] : selectedPendingAlbumTitles/);
-  assert.match(pageSource, /\.\.\.\(albumTitles\.length > 0 \? \{ albumTitles \} : \{\}\)/);
-  assert.match(pageSource, /const isAlbumComplete = album\.isComplete/);
-  assert.match(pageSource, /checked=\{isAlbumChecked\}/);
-  assert.match(pageSource, /disabled=\{!isAlbumSelectable\}/);
-  assert.match(progressViewSource, /const fallbackComplete = album\.uploadStatus === 'completed'/);
-  assert.match(progressViewSource, /itemState\[item\.relativePath\]/);
-  assert.match(progressViewSource, /isResolvedStatus\(current\.status\)/);
-  assert.match(progressViewSource, /getFailureSummary/);
-  assert.match(pageSource, /item\.lastError/);
-  assert.match(pageSource, /progressByAlbum/);
-  assert.match(pageSource, /handleRetryItem/);
-  assert.match(pageSource, /retryExportItemRequest/);
-  assert.match(pageSource, /disabled=\{!backendJobId \|\| visibleFailedItemCount === 0 \|\| isAllVisibleExportCompletedSuccessfully\}/);
-  assert.match(pageSource, /const effectiveJobId = itemJobId \?\? backendJobId/);
-  assert.match(pageSource, /retryExportItemRequest\(effectiveJobId, itemId\)/);
-  assert.match(pageSource, /setActiveBackendJobIdOverride\(effectiveJobId\)/);
-  assert.match(pageSource, /startExportJobRequest\(effectiveJobId\)/);
-  assert.match(pageSource, /export\.retryItem/);
-  assert.match(pageSource, /updateGooglePhotosExportJobScopeRequest/);
-  assert.match(pageSource, /isUpdatingAlbumScope/);
-  assert.match(pageSource, /confirmedSelectedAlbumTitlesRef/);
-  assert.match(pageSource, /const updateSelectedAlbumTitles = useCallback/);
-  assert.match(pageSource, /const hasAlbumProcessingStarted = Boolean/);
-  assert.match(pageSource, /const isAlbumSelectable = isAlbumPending && !isRunning && \(!isPaused \|\| !hasAlbumProcessingStarted\)/);
-  assert.match(pageSource, /const getNextAlbumTitleSelection = \(current: Set<string>, albumTitle: string\)/);
-  assert.match(pageSource, /const nextSelection = getNextAlbumTitleSelection\(selectedAlbumTitlesRef\.current, albumTitle\)/);
-  assert.match(pageSource, /const nextAlbumTitles = \[\.\.\.nextSelection\]/);
-  assert.match(pageSource, /updateSelectedAlbumTitles\(nextSelection\)/);
-  assert.match(pageSource, /await updateGooglePhotosExportJobScopeRequest\(backendJobId, nextAlbumTitles\)/);
-  assert.match(pageSource, /const nextProgress = await requestProgress\(job\.job\.id\)/);
-  assert.match(pageSource, /getCheckpointAlbumTitleSet\(job\) \?\? new Set\(nextAlbumTitles\)/);
-  assert.match(pageSource, /getCheckpointAlbumTitleSet\(job\) \?\? new Set\(confirmedSelectedAlbumTitlesRef\.current\)/);
-  assert.doesNotMatch(pageSource, /let nextAlbumTitles/);
-  assert.doesNotMatch(pageSource, /nextAlbumTitles = \[\.\.\.next\]/);
-  assert.match(pageSource, /requestId !== albumScopeUpdateRequestIdRef\.current/);
-  const toggleSelectionStart = pageSource.indexOf('const toggleAlbumSelection = useCallback(async');
-  const toggleSelectionEnd = pageSource.indexOf('useEffect(() => {', toggleSelectionStart);
-  const toggleSelectionSource = pageSource.slice(toggleSelectionStart, toggleSelectionEnd);
-  assert.doesNotMatch(toggleSelectionSource, /previewGooglePhotosExportRequest\(/);
-  assert.doesNotMatch(toggleSelectionSource, /Promise\.all\(/);
-  assert.match(progressViewSource, /const hasActivity = completedCount > 0 \|\| skippedCount > 0 \|\| failedCount > 0 \|\| pendingCount < totalCount/);
-  assert.doesNotMatch(pageSource, /google-photos-progress-panel/);
-  assert.doesNotMatch(pageSource, /albumNoProgress/);
-  assert.doesNotMatch(pageSource, /renderAccordionHeader\('progress'/);
+test('Google Photos delegates its album flow to the shared hook and panel', () => {
+  const page = fs.readFileSync(pagePath, 'utf8');
+  assert.match(page, /useExportWorkflow/);
+  assert.match(page, /ExportWorkflowPanel workflow=\{workflow\} provider="google-photos"/);
+  assert.doesNotMatch(page, /const handle(Start|Pause|RetryItem|Preview) =/);
+  assert.match(page, /renderAccordionHeader\('albums'/);
 });
 
-test('Google Photos restores full album preview after resumable or terminal jobs', () => {
-  const pageSource = fs.readFileSync(pagePath, 'utf8');
-
-  assert.match(pageSource, /useExportJobState\('google-photos'/);
-  assert.match(pageSource, /exportJobState\.googlePhotosAccountId/);
-  assert.match(pageSource, /getExportJobRequest/);
-  assert.match(pageSource, /getCheckpointAlbumTitleSet/);
-  assert.match(pageSource, /job\.checkpoint\.payloadJson/);
-  assert.match(pageSource, /payload\.target\?\.type === 'google-photos'/);
-  assert.match(pageSource, /return albumTitles \? new Set\(albumTitles\) : null/);
-  assert.match(pageSource, /getCheckpointAlbumTitleSet\(job\) \?\? getPendingAlbumTitleSet\(nextPreview\)/);
-  assert.match(pageSource, /const currentProgress = progress\?\.jobId === backendJobId \? progress : null/);
-  assert.match(pageSource, /const isTerminal = \['completed', 'failed', 'cancelled'\]\.includes\(currentProgress\?\.status \?\? exportStatus\)/);
-  assert.match(pageSource, /\(!isPaused && !isRunning\)/);
-  assert.match(pageSource, /terminalReconciliationKeysRef/);
-  assert.match(pageSource, /if \(!backendJobId \|\| !isTerminal/);
-  assert.match(pageSource, /previewGooglePhotosExportRequest\(\{\s*accountId: selectedAccountId,\s*sourceRoot,\s*groupingSessionId: groupingSessionState\.backendSessionId\s*\}\)/);
-  assert.match(pageSource, /getExportJobRequest\(backendJobId\)/);
-  assert.match(pageSource, /updateSelectedAlbumTitles\(getAlbumTitleSetForJob\(nextPreview, job\), true\)/);
-  assert.match(pageSource, /currentProgress\?\.albumProgress \?\? \[\]/);
-  assert.match(pageSource, /shouldHideAlbumsWhilePreviewing\s*\?\s*\[\]/);
-  assert.match(pageSource, /visibleAlbums\.map/);
-  assert.match(pageSource, /activeAlbum = currentProgress\.albumProgress\.find/);
-  assert.match(pageSource, /openOnlySection\('albums'\)/);
+test('shared polling remains sequential and terminal reconciliation is deduplicated', () => {
+  const hook = fs.readFileSync(hookPath, 'utf8');
+  assert.match(hook, /progressRequestRef/);
+  assert.match(hook, /window\.setTimeout/);
+  assert.doesNotMatch(hook, /window\.setInterval/);
+  assert.match(hook, /reconciliationKeysRef\.current\.has\(reconciliationKey\)/);
+  assert.match(hook, /isCurrent\(token\)/);
 });
 
-test('Google Photos starts new uploads from a clean current job snapshot', () => {
-  const pageSource = fs.readFileSync(pagePath, 'utf8');
-  const startHandler = pageSource.indexOf('const handleStart = async');
-  const pauseHandler = pageSource.indexOf('const handlePause = async', startHandler);
-  const startSource = pageSource.slice(startHandler, pauseHandler);
-  const overrideIndex = startSource.indexOf('setActiveBackendJobIdOverride(job.job.id);');
-  const draftSnapshotIndex = startSource.indexOf('saveGooglePhotosJobSnapshot(job);');
-  const initialProgressIndex = startSource.indexOf('const initialProgress = await requestProgress(job.job.id);');
-  const startJobIndex = startSource.indexOf('job = await startExportJobRequest(job.job.id);');
-  const saveSnapshotIndex = startSource.indexOf('saveExportJobSnapshot({');
-
-  assert.ok(startHandler >= 0);
-  assert.ok(pauseHandler > startHandler);
-  assert.match(startSource, /let job = resumeJobId/);
-  assert.doesNotMatch(startSource, /setProgress\(null\);\s*job = await startExportJobRequest/);
-  assert.ok(overrideIndex >= 0);
-  assert.ok(draftSnapshotIndex > overrideIndex);
-  assert.ok(initialProgressIndex > draftSnapshotIndex);
-  assert.ok(startJobIndex > initialProgressIndex);
-  assert.ok(startSource.indexOf('saveGooglePhotosJobSnapshot(job);', startJobIndex) > startJobIndex);
-  assert.equal(saveSnapshotIndex, -1);
+test('shared restoration reads persisted jobs and preview without starting exports', () => {
+  const hook = fs.readFileSync(hookPath, 'utf8');
+  const restore = hook.slice(hook.indexOf('const restore = async'), hook.indexOf('const backendJobId ='));
+  assert.match(restore, /listExportJobsRequest/);
+  assert.match(restore, /loadPreview/);
+  assert.doesNotMatch(restore, /startExportJobRequest|createExportJobRequest|retryFailedExportItemsRequest/);
 });
 
-test('Google Photos treats empty pending upload jobs as a preview refresh', () => {
-  const pageSource = fs.readFileSync(pagePath, 'utf8');
-  const startHandler = pageSource.indexOf('const handleStart = async');
-  const pauseHandler = pageSource.indexOf('const handlePause = async', startHandler);
-  const startSource = pageSource.slice(startHandler, pauseHandler);
-  const noWorkIndex = startSource.indexOf('job.job.totalItems === 0');
-  const noWorkSource = startSource.slice(noWorkIndex, startSource.indexOf('if (!shouldResume)', noWorkIndex + 1));
-
-  assert.ok(noWorkIndex >= 0);
-  assert.match(noWorkSource, /previewGooglePhotosExportRequest/);
-  assert.match(noWorkSource, /const noPendingJob = job/);
-  assert.match(noWorkSource, /updateSelectedAlbumTitles\(getAlbumTitleSetForJob\(nextPreview, noPendingJob\), true\)/);
-  assert.match(noWorkSource, /setProgress\(null\)/);
-  assert.match(noWorkSource, /setStatusMessage\(t\('export\.googlePhotos\.noPendingItems'\)\)/);
-  assert.match(noWorkSource, /return;/);
-  assert.doesNotMatch(noWorkSource, /startExportJobRequest/);
-  assert.doesNotMatch(noWorkSource, /saveExportJobSnapshot/);
+test('completion timestamps and scope writes remain stable across refreshes', () => {
+  const hook = fs.readFileSync(hookPath, 'utf8');
+  assert.match(hook, /previous\.completedAt \?\? Date\.now\(\)/);
+  assert.match(hook, /scopeQueueRef\.current = scopeQueueRef\.current\.then/);
+  assert.match(hook, /await scopeQueueRef\.current/);
+  assert.match(hook, /getExportJobGroupSelection\(preview, job\)/);
 });
 
-test('Google Photos restoration never starts or resumes an export automatically', () => {
-  const pageSource = fs.readFileSync(pagePath, 'utf8');
-  const componentStart = pageSource.indexOf('export const GooglePhotosExportPage');
-  const startHandler = pageSource.indexOf('const handleStart', componentStart);
-  const restorationSource = pageSource.slice(componentStart, startHandler);
-
-  assert.ok(componentStart >= 0);
-  assert.ok(startHandler > componentStart);
-  assert.doesNotMatch(restorationSource, /startExportJobRequest\(/);
+test('shared item states preserve partial results, retries and paused styling', () => {
+  const view = fs.readFileSync(progressViewPath, 'utf8');
+  const panel = fs.readFileSync(panelPath, 'utf8');
+  const styles = fs.readFileSync(path.resolve('src', 'styles.css'), 'utf8');
+  assert.match(view, /isResolvedStatus\(current\.status\) && !isResolvedStatus\(incoming\.status\)/);
+  assert.match(view, /isPaused && tracked\.status === 'running'/);
+  assert.match(panel, /handleRetryItem\(item\.id!, item\.jobId\)/);
+  assert.match(panel, /item\.status === 'failed' && item\.lastError/);
+  assert.match(styles, /\.status-paused\s*\{/);
+  assert.match(styles, /\.export-group-export-action\.btn-compact\s*\{/);
 });
 
-test('Google Photos preserves terminal completion timestamps across progress refreshes', () => {
-  const pageSource = fs.readFileSync(pagePath, 'utf8');
-  const syncStart = pageSource.indexOf('const syncSnapshot = useCallback');
-  const resetStart = pageSource.indexOf('const resetGooglePhotosExportState', syncStart);
-  const syncSource = pageSource.slice(syncStart, resetStart);
-
-  assert.ok(syncStart >= 0);
-  assert.ok(resetStart > syncStart);
-  assert.match(syncSource, /const completedAt = \['completed', 'failed', 'cancelled'\]\.includes\(nextProgress\.status\)/);
-  assert.match(syncSource, /exportJobState\.backendJobId === nextProgress\.jobId && exportJobState\.completedAt/);
-  assert.match(syncSource, /completedAt,/);
-});
-
-test('Google Photos item states keep distinct visual styles', () => {
-  const stylesPath = path.resolve(process.cwd(), 'src', 'styles.css');
-  const pageSource = fs.readFileSync(pagePath, 'utf8');
-  const progressViewSource = fs.readFileSync(progressViewPath, 'utf8');
-  const stylesSource = fs.readFileSync(stylesPath, 'utf8');
-
-  assert.match(stylesSource, /\.status-pending\s*\{/);
-  assert.match(stylesSource, /\.status-running\s*\{/);
-  assert.match(stylesSource, /\.status-paused\s*\{/);
-  assert.match(stylesSource, /\.google-photos-upload-action\.btn-compact\s*\{/);
-  assert.match(stylesSource, /rgba\(20, 184, 166, 0\.14\)/);
-  assert.match(stylesSource, /#2dd4bf/);
-  assert.match(progressViewSource, /isPaused && tracked\.status === 'running'/);
-  assert.match(pageSource, /export\.itemStatus\.paused/);
-  assert.doesNotMatch(stylesSource, /\.status-running,\s*\.status-pending/);
-  assert.doesNotMatch(stylesSource, /#2563eb/);
-  assert.doesNotMatch(stylesSource, /rgba\(59, 130, 246, 0\.16\)/);
-});
-
-test('Google Photos preview-backed item state can drive partial album results', () => {
-  const pageSource = fs.readFileSync(pagePath, 'utf8');
-  const progressViewSource = fs.readFileSync(progressViewPath, 'utf8');
-
-  assert.match(progressViewSource, /createGooglePhotosItemState/);
-  assert.match(progressViewSource, /mergeGooglePhotosProgressItems/);
-  assert.match(progressViewSource, /if \(isResolvedStatus\(current\.status\) && !isResolvedStatus\(incoming\.status\)\)/);
-  assert.match(progressViewSource, /const failedCount = items\.filter\(\(item\) => item\.status === 'failed'\)\.length/);
-  assert.match(progressViewSource, /lastError: item\.lastError \?\? null/);
-  assert.match(pageSource, /onClick=\{\(\) => void handleRetryItem\(item\.id as string, item\.jobId\)\}/);
-  assert.match(pageSource, /item\.status === 'failed' && item\.lastError && \(/);
-});
-
-test('Google Photos progress polling is sequential and terminal jobs reconcile once', () => {
-  const pageSource = fs.readFileSync(pagePath, 'utf8');
-
-  assert.match(pageSource, /progressRequestRef/);
-  assert.match(pageSource, /while \(true\)/);
-  assert.match(pageSource, /window\.setTimeout/);
-  assert.doesNotMatch(pageSource, /window\.setInterval/);
-  assert.match(pageSource, /terminalReconciliationKeysRef/);
-  assert.match(pageSource, /terminalReconciliationKeysRef\.current\.has\(reconciliationKey\)/);
-  assert.match(pageSource, /applyPreview\(nextPreview\)/);
-});
-
-test('Google Photos progress notices surface automatic album recreation warnings', () => {
-  const pageSource = fs.readFileSync(pagePath, 'utf8');
-
-  assert.match(pageSource, /const googlePhotosNotices = \(currentProgress\?\.notices \?\? \[\]\)\.map/);
-  assert.match(pageSource, /notice\.startsWith\('google-photos-album-recreated:'\)/);
-  assert.match(pageSource, /export\.googlePhotos\.albumRecoveredNotice/);
-  assert.match(pageSource, /googlePhotosNotices\.map\(\(notice\) => \(/);
+test('Google Photos still translates album recovery notices', () => {
+  const page = fs.readFileSync(pagePath, 'utf8');
+  assert.match(page, /workflow\.progress\?\.notices/);
+  assert.match(page, /google-photos-album-recreated:/);
+  assert.match(page, /export\.googlePhotos\.albumRecoveredNotice/);
 });

@@ -4491,18 +4491,18 @@ body {
   min-height: 28px;
 }
 
-.google-photos-album-list {
+.export-group-list {
   display: grid;
   gap: 10px;
 }
 
-.google-photos-album-panel {
+.export-group-panel {
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
 }
 
-.google-photos-album-header {
+.export-group-header {
   align-items: center;
   display: grid;
   gap: 12px;
@@ -4510,17 +4510,17 @@ body {
   padding: 12px;
 }
 
-.google-photos-selection-summary {
+.export-group-selection-summary {
   color: var(--text-muted);
   font-size: 13px;
   margin: -2px 0 0;
 }
 
-.google-photos-selection-summary.is-empty {
+.export-group-selection-summary.is-empty {
   color: var(--danger);
 }
 
-.google-photos-preview-loading {
+.export-preview-loading {
   background: rgba(59, 130, 246, 0.08);
   border: 1px solid rgba(59, 130, 246, 0.24);
   border-radius: 8px;
@@ -4531,15 +4531,15 @@ body {
   padding: 14px 16px;
 }
 
-.google-photos-preview-loading strong {
+.export-preview-loading strong {
   color: var(--text);
 }
 
-.google-photos-preview-loading p {
+.export-preview-loading p {
   margin: 0;
 }
 
-.google-photos-album-select {
+.export-group-select {
   align-items: center;
   color: var(--text-muted);
   display: inline-flex;
@@ -4548,15 +4548,15 @@ body {
   min-width: 104px;
 }
 
-.google-photos-album-select input {
+.export-group-select input {
   accent-color: var(--accent);
 }
 
-.google-photos-album-select.is-excluded {
+.export-group-select.is-excluded {
   color: var(--danger);
 }
 
-.google-photos-album-toggle {
+.export-group-toggle {
   align-items: center;
   background: transparent;
   border: 0;
@@ -4569,21 +4569,21 @@ body {
   text-align: left;
 }
 
-.google-photos-album-toggle strong,
-.google-photos-album-toggle small {
+.export-group-toggle strong,
+.export-group-toggle small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.google-photos-album-toggle small {
+.export-group-toggle small {
   color: var(--text-muted);
   font-size: 12px;
   margin-top: 3px;
 }
 
-.google-photos-album-actions {
+.export-group-actions {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
@@ -4591,19 +4591,19 @@ body {
   justify-content: flex-end;
 }
 
-.google-photos-upload-action.btn-compact {
+.export-group-export-action.btn-compact {
   min-height: 32px;
   padding: 6px 12px;
 }
 
-.google-photos-album-body {
+.export-group-body {
   border-top: 1px solid var(--line);
   display: grid;
   gap: 12px;
   padding: 12px;
 }
 
-.google-photos-album-error-summary {
+.export-group-error-summary {
   background: rgba(248, 113, 113, 0.1);
   border: 1px solid rgba(248, 113, 113, 0.28);
   border-radius: 8px;
@@ -5204,11 +5204,11 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .google-photos-album-header {
+  .export-group-header {
     grid-template-columns: 1fr;
   }
 
-  .google-photos-album-actions {
+  .export-group-actions {
     justify-content: flex-start;
   }
 

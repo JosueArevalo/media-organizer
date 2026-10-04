@@ -4,6 +4,12 @@
 
 This document defines the minimal persistent state contract for V1.
 
+Export jobs use SQLite item rows and checkpoint payloads as their source of truth.
+An optional explicit group selection is stored in the existing target checkpoint;
+its absence means the legacy full scope, while an empty array means no editable
+groups are selected. Draft/paused scope changes preserve groups with processing
+attempts or results, and never start work. See [EXPORT_WORKFLOW.md](EXPORT_WORKFLOW.md).
+
 Goals:
 - Resume long-running processing sessions safely
 - Keep user decisions across sessions

@@ -1,5 +1,9 @@
 const { app, BrowserWindow } = require('electron');
 
+if (process.env.MEDIA_ORGANIZER_TEST_USER_DATA_DIR) {
+  app.setPath('userData', process.env.MEDIA_ORGANIZER_TEST_USER_DATA_DIR);
+}
+
 app.commandLine.appendSwitch('disable-gpu');
 
 app.whenReady().then(async () => {

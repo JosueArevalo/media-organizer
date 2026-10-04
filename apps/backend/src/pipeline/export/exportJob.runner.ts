@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { isAlreadyCopied } from './networkExportFiles.js';
 import path from 'node:path';
 import {
   assertExportJobCanStart,
@@ -17,6 +18,8 @@ import { executeGooglePhotosExportJob } from './googlePhotosExport.runner.js';
 
 const activeNetworkExportJobs = new Set<string>();
 const activeGooglePhotosExportJobs = new Set<string>();
+
+export const isNetworkExportRunnerActive = (jobId: string) => activeNetworkExportJobs.has(jobId);
 
 export class ExportRunnerBusyError extends Error {
   constructor(message: string) {
@@ -41,21 +44,6 @@ export const assertGooglePhotosExportRunnerAvailable = (jobId: string) => {
   if (activeGooglePhotosExportJobs.size > 0) {
     throw new ExportRunnerBusyError('Another Google Photos export is already running.');
   }
-};
-
-const isAlreadyCopied = (item: ExportItemRecord) => {
-  if (!fs.existsSync(item.destinationPath)) {
-    return false;
-  }
-
-  const sourceStats = fs.statSync(item.sourcePath);
-  const destinationStats = fs.statSync(item.destinationPath);
-
-  if (sourceStats.size !== destinationStats.size) {
-    return false;
-  }
-
-  return fs.readFileSync(item.sourcePath).equals(fs.readFileSync(item.destinationPath));
 };
 
 const copyExportItem = (item: ExportItemRecord) => {
@@ -113,6 +101,11 @@ export const executeExportJob = async (jobId: string) => {
   try {
     markExportJobRunning(jobId);
     await yieldToEventLoop();
+
+    const statusBeforePreparation = getExportJobStatus(jobId);
+    if (statusBeforePreparation === 'paused' || statusBeforePreparation === 'cancelled') {
+      return refreshExportJobCounters(jobId, statusBeforePreparation);
+    }
 
     resetRunningExportItems(jobId);
     resetInvalidCompletedExportItems(jobId, isAlreadyCopied);

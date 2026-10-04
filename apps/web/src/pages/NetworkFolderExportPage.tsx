@@ -1,23 +1,21 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useExportJobState } from '../hooks/useExportJobState';
 import { useGroupingSessionState } from '../hooks/useGroupingJobState';
 import { useTranslation } from '../i18n';
-import { saveExportJobSnapshot } from '../services/export-job.store';
+import { useExportWorkflow } from '../hooks/useExportWorkflow';
+import { ExportWorkflowPanel } from '../components/ExportWorkflowPanel';
+import { ExportJobHistoryCard } from '../components/ExportJobHistoryCard';
 import {
   authenticateNetworkPathRequest,
   browseNetworkPathRequest,
   createNetworkFolderRequest,
-  createExportJobRequest,
   deleteNetworkDestinationRequest,
   isValidNetworkPath,
   listExportJobsRequest,
   listNetworkDestinationsRequest,
   normalizeNetworkPathForComparison,
-  pauseExportJobRequest,
-  retryFailedExportItemsRequest,
   saveNetworkDestinationRequest,
-  startExportJobRequest,
   testExportTargetRequest,
   type NetworkBrowseResult,
   type NetworkCredentials,
@@ -27,24 +25,6 @@ import {
 } from '../services/export.service';
 import { pickDirectoryRequest } from '../services/system-picker.service';
 import { getRuntimePlatform, isWindowsPlatform } from '../services/tool-status.service';
-
-const itemStatusLabels = {
-  pending: 'export.itemStatus.pending',
-  running: 'export.itemStatus.running',
-  completed: 'export.itemStatus.completed',
-  failed: 'export.itemStatus.failed',
-  skipped: 'export.itemStatus.skipped'
-} as const;
-
-const formatBytes = (value: number) => {
-  if (value <= 0) return '0 B';
-
-  const units = ['B', 'KB', 'MB', 'GB'];
-  const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
-  const size = value / 1024 ** exponent;
-
-  return `${size.toFixed(size >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
-};
 
 export const NetworkFolderExportPage = () => {
   const { t } = useTranslation();
@@ -61,7 +41,6 @@ export const NetworkFolderExportPage = () => {
   const [jobs, setJobs] = useState<ExportJobSnapshot[]>([]);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
-  const [isStarting, setIsStarting] = useState(false);
   const [destinations, setDestinations] = useState<NetworkDestination[]>([]);
   const [selectedDestinationId, setSelectedDestinationId] = useState('');
   const [saveName, setSaveName] = useState('');
@@ -83,101 +62,37 @@ export const NetworkFolderExportPage = () => {
   const [newFolderName, setNewFolderName] = useState('');
 
   const sourceRoot = groupingSessionState.outputRootLabel ?? '';
-  const normalizedDestinationPath = normalizeNetworkPathForComparison(destinationPath, runtimePlatform);
-  const matchingJob = jobs.find((snapshot) =>
-    snapshot.job.targetPath
-    && normalizeNetworkPathForComparison(snapshot.job.targetPath, runtimePlatform) === normalizedDestinationPath
-  ) ?? null;
+  const historyContext = JSON.stringify([sourceRoot, groupingSessionState.backendSessionId]);
+  const historyContextRef = useRef(historyContext);
+  historyContextRef.current = historyContext;
   const runningJob = jobs.find((snapshot) => snapshot.job.status === 'running') ?? null;
-  const canResumeMatchingJob = matchingJob?.job.status === 'paused' || matchingJob?.job.status === 'draft';
-  const canStart = Boolean(
-    sourceRoot
-    && destinationPath.trim()
-    && !isStarting
-    && !runningJob
-    && (canResumeMatchingJob || (!matchingJob && targetTest?.ok))
-  );
-
-  const syncSnapshot = useCallback(
-    (snapshot: ExportJobSnapshot) => {
-      const completedAt = ['completed', 'failed', 'cancelled'].includes(snapshot.job.status)
-        ? exportJobState.backendJobId === snapshot.job.id && exportJobState.completedAt
-          ? exportJobState.completedAt
-          : Date.now()
-        : null;
-
-      saveExportJobSnapshot({
-        backendJobId: snapshot.job.id,
-        status: snapshot.job.status,
-        sourceRoot,
-        groupingSessionId: groupingSessionState.backendSessionId,
-        destinationPath: snapshot.job.targetPath,
-        googlePhotosAccountId: null,
-        targetType: 'network-folder',
-        totalItems: snapshot.job.totalItems,
-        startedAt: exportJobState.backendJobId === snapshot.job.id ? exportJobState.startedAt ?? Date.now() : Date.now(),
-        completedAt,
-        errorMessage: snapshot.job.failedItems > 0 ? t('export.completedWithErrors', { count: snapshot.job.failedItems }) : null,
-        updatedAt: Date.now()
-      });
-    },
-    [exportJobState.backendJobId, exportJobState.completedAt, exportJobState.startedAt, groupingSessionState.backendSessionId, sourceRoot, t]
-  );
-
   const refreshJobs = useCallback(async () => {
-    if (!sourceRoot) {
-      setJobs([]);
-      return [];
-    }
-
-    const nextJobs = await listExportJobsRequest({
-      targetType: 'network-folder',
-      groupingSessionId: groupingSessionState.backendSessionId,
-      sourceRoot
-    });
-    setJobs(nextJobs);
-    const newestJob = nextJobs[0];
-    const currentJob = nextJobs.find((snapshot) => snapshot.job.id === exportJobState.backendJobId);
-    const snapshotCandidate = nextJobs.find((snapshot) => snapshot.job.status === 'running') ?? currentJob ?? newestJob;
-    if (
-      snapshotCandidate
-      && (
-        exportJobState.backendJobId !== snapshotCandidate.job.id
-        || exportJobState.status !== snapshotCandidate.job.status
-        || exportJobState.destinationPath !== snapshotCandidate.job.targetPath
-      )
-    ) {
-      syncSnapshot(snapshotCandidate);
-    }
+    if (!sourceRoot) { setJobs([]); return []; }
+    const nextJobs = await listExportJobsRequest({ targetType: 'network-folder',
+      groupingSessionId: groupingSessionState.backendSessionId, sourceRoot });
+    if (historyContextRef.current === historyContext) setJobs(nextJobs);
     return nextJobs;
-  }, [
-    exportJobState.backendJobId,
-    exportJobState.destinationPath,
-    exportJobState.status,
-    groupingSessionState.backendSessionId,
-    sourceRoot,
-    syncSnapshot
-  ]);
+  }, [sourceRoot, groupingSessionState.backendSessionId, historyContext]);
 
   useEffect(() => {
-    void refreshJobs().catch((error) => {
-      setBackendError(error instanceof Error ? error.message : t('export.progressError'));
-    });
-  }, [refreshJobs, t]);
+    let cancelled = false;
+    let timeoutId: number | undefined;
+    const poll = async () => {
+      try {
+        const nextJobs = await refreshJobs();
+        if (!cancelled && nextJobs.some((snapshot) => snapshot.job.status === 'running')) {
+          timeoutId = window.setTimeout(() => void poll(), 1000);
+        }
+      } catch (error) {
+        if (!cancelled) setBackendError(error instanceof Error ? error.message : t('export.progressError'));
+      }
+    };
+    void poll();
+    return () => { cancelled = true; window.clearTimeout(timeoutId); };
+  }, [refreshJobs, Boolean(runningJob), t]);
 
-  useEffect(() => {
-    if (!runningJob) {
-      return;
-    }
+  useEffect(() => { setJobs([]); }, [historyContext]);
 
-    const intervalId = window.setInterval(() => {
-      void refreshJobs().catch((error) => {
-        setBackendError(error instanceof Error ? error.message : t('export.progressError'));
-      });
-    }, 1000);
-
-    return () => window.clearInterval(intervalId);
-  }, [refreshJobs, runningJob, t]);
   const selectedDestination = useMemo(
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
     [destinations, selectedDestinationId]
@@ -198,6 +113,23 @@ export const NetworkFolderExportPage = () => {
       rememberInWindows
     };
   }, [isWindows, password, rememberInWindows, username]);
+
+  const prepareNetworkExport = async (path: string) => {
+    if (credentials) await authenticateNetworkPathRequest({ path, credentials });
+    const result = await testExportTargetRequest({ type: 'network-folder', destinationPath: path });
+    if (!result.ok) throw new Error(result.message);
+  };
+  const onJobChange = () => { void refreshJobs().catch((error) => setBackendError(String(error))); };
+  const workflow = useExportWorkflow({
+    sourceRoot, groupingSessionId: groupingSessionState.backendSessionId,
+    enabled: Boolean(destinationPath.trim() && targetTest?.ok), onJobChange,
+    adapter: {
+      target: { type: 'network-folder', destinationPath }, destinationLabel: destinationPath,
+      defaultJobName: t('export.defaultJobName'), allowPreviewRefresh: true,
+      prepare: () => prepareNetworkExport(destinationPath)
+    }
+  });
+  const anotherJobIsRunning = Boolean(runningJob && runningJob.job.id !== workflow.backendJobId);
 
   const resetNetworkDestinationDraft = useCallback(() => {
     setSelectedDestinationId('');
@@ -228,6 +160,19 @@ export const NetworkFolderExportPage = () => {
       }
 
       setIsAddLocationOpen(false);
+      const restoredPath = exportJobState.destinationPath;
+      if (restoredPath) {
+        const normalized = normalizeNetworkPathForComparison(restoredPath, runtimePlatform);
+        const restored = result.destinations.find((destination) => {
+          const root = normalizeNetworkPathForComparison(destination.rootPath, runtimePlatform);
+          return normalized === root || normalized.startsWith(`${root}${isWindows ? '\\' : '/'}`);
+        });
+        if (restored) {
+          setSelectedDestinationId((current) => current || restored.id);
+          setSaveName(restored.name); setSaveRootPath(restored.rootPath);
+          setUsername((current) => current || restored.username || '');
+        }
+      }
     } catch (error) {
       setBackendError(error instanceof Error ? error.message : t('export.network.destinationsLoadError'));
     }
@@ -462,79 +407,6 @@ export const NetworkFolderExportPage = () => {
     }
   };
 
-  const handleStart = async () => {
-    if (!canStart) {
-      return;
-    }
-
-    setIsStarting(true);
-
-    try {
-      if (credentials) {
-        await authenticateNetworkPathRequest({ path: destinationPath, credentials });
-      }
-
-      const job = canResumeMatchingJob && matchingJob
-        ? await startExportJobRequest(matchingJob.job.id)
-        : await createExportJobRequest({
-            name: t('export.defaultJobName'),
-            sourceRoot,
-            groupingSessionId: groupingSessionState.backendSessionId ?? undefined,
-            target: { type: 'network-folder', destinationPath }
-          });
-
-      syncSnapshot(job);
-
-      if (!canResumeMatchingJob) {
-        await startExportJobRequest(job.job.id);
-      }
-
-      await refreshJobs();
-      setBackendError(null);
-    } catch (error) {
-      setBackendError(error instanceof Error ? error.message : t('export.startError'));
-    } finally {
-      setIsStarting(false);
-    }
-  };
-
-  const handlePause = async (jobId: string) => {
-    const snapshot = jobs.find((job) => job.job.id === jobId);
-    if (!snapshot) return;
-
-    try {
-      const job = await pauseExportJobRequest(jobId);
-      syncSnapshot(job);
-      await refreshJobs();
-    } catch (error) {
-      setBackendError(error instanceof Error ? error.message : t('export.pauseError'));
-    }
-  };
-
-  const handleResume = async (jobId: string) => {
-    try {
-      const job = await startExportJobRequest(jobId);
-      syncSnapshot(job);
-      await refreshJobs();
-      setBackendError(null);
-    } catch (error) {
-      setBackendError(error instanceof Error ? error.message : t('export.startError'));
-    }
-  };
-
-  const handleRetryFailed = async (jobId: string) => {
-    const snapshot = jobs.find((job) => job.job.id === jobId);
-    if (!snapshot) return;
-
-    try {
-      const job = await retryFailedExportItemsRequest(jobId);
-      syncSnapshot(job);
-      await refreshJobs();
-    } catch (error) {
-      setBackendError(error instanceof Error ? error.message : t('export.retryError'));
-    }
-  };
-
   return (
     <div className="page-stack export-page">
       <div className="page-header export-page-header">
@@ -572,7 +444,7 @@ export const NetworkFolderExportPage = () => {
                 className="btn btn-secondary"
                 type="button"
                 onClick={() => void handleDeleteDestination()}
-                disabled={!selectedDestination || isDeletingDestination}
+                disabled={workflow.isRunning || !selectedDestination || isDeletingDestination}
               >
                 {isDeletingDestination ? t('export.network.deletingDestination') : t('export.network.deleteDestination')}
               </button>
@@ -589,6 +461,7 @@ export const NetworkFolderExportPage = () => {
                   className={`network-location-card${destination.id === selectedDestinationId ? ' is-selected' : ''}`}
                   type="button"
                   onClick={() => handleSelectDestination(destination.id)}
+                    disabled={workflow.isRunning}
                 >
                   <strong>{destination.name}</strong>
                   <span>{destination.rootPath}</span>
@@ -650,7 +523,7 @@ export const NetworkFolderExportPage = () => {
                   {isPickingMountedFolder ? t('export.network.selectingMountedFolder') : t('export.network.selectMountedFolder')}
                 </button>
               )}
-              <button className="btn btn-primary" type="submit" disabled={isSavingDestination}>
+              <button className="btn btn-primary" type="submit" disabled={workflow.isRunning || isSavingDestination}>
                 {isSavingDestination ? t('export.network.savingDestination') : t('export.network.saveDestination')}
               </button>
             </div>
@@ -713,6 +586,7 @@ export const NetworkFolderExportPage = () => {
             <input
               className="folder-path-input"
               value={destinationPath}
+              disabled={workflow.isRunning}
               onChange={(event) => {
                 setDestinationPath(event.target.value);
                 setTargetTest(null);
@@ -727,18 +601,15 @@ export const NetworkFolderExportPage = () => {
           </label>
 
           <div className="network-export-tools">
-            <button className="btn btn-primary" type="button" onClick={() => void openBrowser()} disabled={!canBrowseNetworkFolder}>
+            <button className="btn btn-primary" type="button" onClick={() => void openBrowser()} disabled={workflow.isRunning || !canBrowseNetworkFolder}>
               {t('export.network.chooseFolder')}
             </button>
           </div>
         </div>}
 
         {hasSelectedDestination && <div className="export-actions network-final-actions">
-          <button className="btn btn-secondary" type="button" onClick={() => void handleTestTarget()} disabled={!destinationPath.trim() || isTesting}>
+          <button className="btn btn-secondary" type="button" onClick={() => void handleTestTarget()} disabled={workflow.isRunning || !destinationPath.trim() || isTesting}>
             {isTesting ? t('export.testing') : t('export.testTarget')}
-          </button>
-          <button className="btn btn-primary" type="button" onClick={() => void handleStart()} disabled={!canStart}>
-            {isStarting ? t('export.starting') : canResumeMatchingJob ? t('export.resume') : t('export.start')}
           </button>
         </div>}
 
@@ -750,106 +621,19 @@ export const NetworkFolderExportPage = () => {
         )}
       </section>
 
+      {hasSelectedDestination && <section className="settings-panel export-panel">
+        <p className="page-section-title">{t('export.workflow.title')}</p>
+        <ExportWorkflowPanel workflow={workflow} provider="network-folder" blocked={anotherJobIsRunning} />
+      </section>}
       <div className="network-progress-list">
-        {jobs.length === 0 && (
-          <section className="settings-panel export-panel">
-            <p className="page-section-title">{t('export.progressTitle')}</p>
-            <p className="page-summary-note">{t('export.noJob')}</p>
-          </section>
-        )}
-
-        {jobs.map((snapshot) => {
-          const job = snapshot.job;
-          const completeCount = job.completedItems + job.skippedItems;
-          const progressPercent = job.totalItems ? Math.round((completeCount / job.totalItems) * 100) : 0;
-          const anotherJobIsRunning = Boolean(runningJob && runningJob.job.id !== job.id);
-
-          return (
-            <section className="settings-panel export-panel network-progress-card" key={job.id}>
-              <div className="grouping-main-head">
-                <div>
-                  <p className="page-section-title">
-                    {t('export.progressTitle')} ({job.targetPath})
-                  </p>
-                  <p className="page-summary-note">
-                    {t('export.progressSummary', {
-                      completed: job.completedItems,
-                      skipped: job.skippedItems,
-                      failed: job.failedItems,
-                      total: job.totalItems
-                    })}
-                  </p>
-                </div>
-                <strong>{progressPercent}%</strong>
-              </div>
-
-              <div className="progress-track" aria-label={`${t('export.progressAria')} (${job.targetPath})`}>
-                <div className="export-progress-fill" style={{ width: `${progressPercent}%` }} />
-              </div>
-
-              <div className="export-stats">
-                <div>
-                  <strong>{job.totalItems}</strong>
-                  <span>{t('export.total')}</span>
-                </div>
-                <div>
-                  <strong>{job.completedItems}</strong>
-                  <span>{t('export.completed')}</span>
-                </div>
-                <div>
-                  <strong>{job.skippedItems}</strong>
-                  <span>{t('export.skipped')}</span>
-                </div>
-                <div>
-                  <strong>{job.failedItems}</strong>
-                  <span>{t('export.failed')}</span>
-                </div>
-              </div>
-
-              <div className="export-actions">
-                {job.status === 'running' && (
-                  <button className="btn btn-secondary" type="button" onClick={() => void handlePause(job.id)}>
-                    {t('export.pause')}
-                  </button>
-                )}
-                {(job.status === 'paused' || job.status === 'draft') && (
-                  <button
-                    className="btn btn-primary"
-                    type="button"
-                    onClick={() => void handleResume(job.id)}
-                    disabled={anotherJobIsRunning}
-                  >
-                    {t('export.resume')}
-                  </button>
-                )}
-                {job.status === 'failed' && (
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={() => void handleRetryFailed(job.id)}
-                    disabled={anotherJobIsRunning}
-                  >
-                    {t('export.retryFailed')}
-                  </button>
-                )}
-              </div>
-
-              {snapshot.recentItems.length > 0 && (
-                <div className="export-item-list">
-                  {snapshot.recentItems.map((item) => (
-                    <div key={item.id} className="export-item-row">
-                      <div>
-                        <strong title={item.relativePath}>{item.relativePath}</strong>
-                        <span>{formatBytes(item.sizeBytes)}</span>
-                      </div>
-                      <span className={`status-pill status-${item.status}`}>{t(itemStatusLabels[item.status])}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          );
-        })}
+        <p className="page-section-title">{t('export.workflow.history')}</p>
+        {jobs.length === 0 && <p className="page-summary-note">{t('export.noJob')}</p>}
+        {jobs.map((snapshot) => <ExportJobHistoryCard key={snapshot.job.id} snapshot={snapshot}
+          groupingSessionId={groupingSessionState.backendSessionId}
+          blocked={Boolean(runningJob && runningJob.job.id !== snapshot.job.id)} onJobChange={onJobChange}
+          adapter={{ target: { type: 'network-folder', destinationPath: snapshot.job.targetPath! },
+            destinationLabel: snapshot.job.targetPath!, defaultJobName: t('export.defaultJobName'),
+            prepare: () => prepareNetworkExport(snapshot.job.targetPath!) }} />)}
       </div>
 
       {isBrowserOpen && (
